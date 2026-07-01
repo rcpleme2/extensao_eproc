@@ -41,14 +41,19 @@ demais seguem na ordem em que os documentos foram juntados ao processo.
 1. Faça login no sistema eproc do seu tribunal e abra a página de detalhes
    do processo desejado (a mesma página onde você vê a lista de eventos e
    documentos).
-2. Clique no ícone da extensão.
-3. Clique em **"Detectar documentos"** — a extensão lista quantos documentos
+2. Clique no ícone da extensão — isso abre um **painel lateral (side
+   panel)** fixo ao lado da janela do navegador (como o painel da extensão
+   do Claude), em vez de um popup que fecha sozinho. Ele permanece aberto
+   mesmo trocando de aba ou navegando para outra página, até você fechá-lo
+   manualmente (ícone de "X" no topo do painel ou clicando novamente no
+   ícone da extensão). Requer Chrome/Edge 114 ou mais recente.
+3. Clique em **"Detectar documentos"** — o painel lista quantos documentos
    encontrou na página e destaca (fundo amarelo claro) cada link de
    documento reconhecido diretamente na página, para conferência visual
    rápida contra os documentos exibidos.
 4. Clique em **"Baixar todos"** — os arquivos serão baixados para
    `Downloads/eproc/<numero_do_processo>/`.
-5. Acompanhe a barra de progresso no próprio popup.
+5. Acompanhe a barra de progresso no próprio painel.
 
 ## Observações
 
@@ -74,5 +79,5 @@ demais seguem na ordem em que os documentos foram juntados ao processo.
   demorar um pouco mais (a aba precisa carregar de verdade).
 - A extensão funciona em qualquer domínio que siga o padrão de URL do eproc
   (`.../eproc/controlador.php`), não é restrita a um tribunal específico.
-- Se um download falhar (ex.: link expirado), o erro aparece no popup ao
+- Se um download falhar (ex.: link expirado), o erro aparece no painel ao
   final do processo; os demais downloads continuam normalmente.

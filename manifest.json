@@ -3,10 +3,13 @@
   "name": "eproc - Exportador de Documentos",
   "version": "1.0.0",
   "description": "Identifica e baixa em lote todos os documentos de um processo no sistema eproc (TJPR, TJSC, TJAL, Justiça Federal, etc.).",
-  "permissions": ["downloads", "activeTab", "scripting", "tabs"],
+  "permissions": ["downloads", "activeTab", "scripting", "tabs", "sidePanel"],
   "host_permissions": ["*://*/eproc/*"],
+  "side_panel": {
+    "default_path": "popup.html"
+  },
   "action": {
-    "default_popup": "popup.html",
+    "default_title": "eproc - Exportador de Documentos",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

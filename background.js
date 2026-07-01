@@ -1,5 +1,12 @@
-// Service worker: recebe a lista de documentos do popup e dispara os
+// Service worker: recebe a lista de documentos do painel e dispara os
 // downloads via chrome.downloads, um de cada vez, reportando progresso.
+
+// Abre o painel lateral (side panel) ao clicar no icone da extensao, em
+// vez do popup efemero padrao, para que ele permaneca visivel enquanto o
+// usuario navega entre paginas/abas do eproc.
+if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+}
 
 const EXTENSAO_POR_MIMETYPE = {
   pdf: "pdf",
