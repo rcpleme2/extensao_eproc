@@ -52,17 +52,15 @@ demais seguem na ordem em que os documentos foram juntados ao processo.
    encontrou na página e destaca (fundo amarelo claro) cada link de
    documento reconhecido diretamente na página, para conferência visual
    rápida contra os documentos exibidos.
-4. Escolha o que deseja gerar, marcando uma ou as duas caixas:
+4. Escolha **um** dos dois modos (são alternativos, só um pode estar
+   marcado por vez):
    - **Arquivos individuais** (marcada por padrão): um arquivo por
      documento, como já era feito.
-   - **PDF único combinado**: gera também um único PDF com todos os
-     documentos do processo, na mesma ordem cronológica dos arquivos
-     individuais (petição inicial primeiro).
-5. Clique em **"Baixar"** — o que estiver marcado é gerado na mesma
-   execução, em `Downloads/eproc/<numero_do_processo>/`.
-6. Acompanhe a barra de progresso no próprio painel (ela indica a fase
-   atual — arquivos individuais ou PDF único — quando as duas opções
-   estão marcadas).
+   - **PDF único combinado**: um único PDF com todos os documentos do
+     processo, na mesma ordem cronológica (petição inicial primeiro).
+5. Clique em **"Baixar"** — gera o modo escolhido em
+   `Downloads/eproc/<numero_do_processo>/`.
+6. Acompanhe a barra de progresso no próprio painel.
 
 ## Nomes de usuário na movimentação
 
@@ -76,7 +74,7 @@ continua funcionando normalmente.
 
 ## PDF único combinado
 
-Ao marcar a opção "PDF único combinado", a extensão monta um único arquivo
+Ao escolher o modo "PDF único combinado", a extensão monta um único arquivo
 `<numero_do_processo>_completo.pdf` com todos os documentos do processo, na
 mesma ordem cronológica usada na numeração sequencial. A montagem usa a
 biblioteca [pdf-lib](https://pdf-lib.js.org/) (vendorizada em
@@ -98,14 +96,14 @@ Cada tipo de documento entra no PDF único de um jeito diferente:
   uma página de aviso é inserida no lugar, indicando para consultar o
   arquivo individual.
 
-Documentos "html" são resolvidos de forma independente para cada opção
-marcada (arquivos individuais e PDF único não reaproveitam a mesma URL
-resolvida entre si) — a segunda camada desses documentos parece não
-aceitar bem ser acessada duas vezes com a mesma URL, então cada uso
-resolve a sua própria. Se ainda assim algum documento não puder ser
-incorporado, a página de aviso no PDF único agora inclui o motivo exato
-da falha (ex.: tempo esgotado, elemento não encontrado), para facilitar
-o diagnóstico.
+Os dois modos (arquivos individuais / PDF único) são mutuamente
+exclusivos por esse motivo, entre outros: a segunda camada dos
+documentos "html" (a página com a `div` preenchida via AJAX) parece não
+aceitar bem ser acessada duas vezes seguidas para o mesmo documento, o
+que causava falhas quando as duas opções rodavam juntas na mesma
+execução. Se ainda assim algum documento não puder ser incorporado, a
+página de aviso no PDF único inclui o motivo exato da falha (ex.: tempo
+esgotado, elemento não encontrado), para facilitar o diagnóstico.
 
 ## Relatório Geral (conclusos para despacho/sentença)
 

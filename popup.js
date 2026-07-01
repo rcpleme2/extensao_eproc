@@ -6,8 +6,8 @@ const numeroProcessoEl = document.getElementById("numero-processo");
 const totalDocumentosEl = document.getElementById("total-documentos");
 const listaDocumentosEl = document.getElementById("lista-documentos");
 const areaOpcoes = document.getElementById("area-opcoes");
-const chkIndividuais = document.getElementById("chk-individuais");
-const chkPdfUnico = document.getElementById("chk-pdf-unico");
+const radioIndividuais = document.getElementById("radio-individuais");
+const radioPdfUnico = document.getElementById("radio-pdf-unico");
 const areaProgresso = document.getElementById("area-progresso");
 const barraProgresso = document.getElementById("barra-progresso");
 const textoProgresso = document.getElementById("texto-progresso");
@@ -20,14 +20,11 @@ const ROTULO_FASE = {
 
 let estadoAtual = { numeroProcesso: null, documentos: [] };
 
+// Os dois modos sao mutuamente exclusivos (radio buttons), entao sempre
+// ha' exatamente um marcado; so' falta ter documentos detectados.
 function atualizarEstadoBotaoBaixar() {
-  const temDocumentos = estadoAtual.documentos.length > 0;
-  const algumaOpcaoMarcada = chkIndividuais.checked || chkPdfUnico.checked;
-  btnBaixar.disabled = !(temDocumentos && algumaOpcaoMarcada);
+  btnBaixar.disabled = estadoAtual.documentos.length === 0;
 }
-
-chkIndividuais.addEventListener("change", atualizarEstadoBotaoBaixar);
-chkPdfUnico.addEventListener("change", atualizarEstadoBotaoBaixar);
 
 function setStatus(texto) {
   areaStatus.textContent = texto;
@@ -90,15 +87,14 @@ btnDetectar.addEventListener("click", async () => {
 btnBaixar.addEventListener("click", async () => {
   if (!estadoAtual.documentos.length) return;
   const opcoes = {
-    individuais: chkIndividuais.checked,
-    pdfUnico: chkPdfUnico.checked,
+    individuais: radioIndividuais.checked,
+    pdfUnico: radioPdfUnico.checked,
   };
-  if (!opcoes.individuais && !opcoes.pdfUnico) return;
 
   btnBaixar.disabled = true;
   btnDetectar.disabled = true;
-  chkIndividuais.disabled = true;
-  chkPdfUnico.disabled = true;
+  radioIndividuais.disabled = true;
+  radioPdfUnico.disabled = true;
   areaProgresso.hidden = false;
   barraProgresso.value = 0;
   barraProgresso.max = estadoAtual.documentos.length;
@@ -130,25 +126,26 @@ btnRelatorios.addEventListener("click", async () => {
   btnRelatorios.disabled = true;
   btnAbrirTelaRelatorio.disabled = true;
   areaErros.hidden = true;
+  areaRelatorio.hidden = true;
   areaProgressoRelatorio.hidden = false;
   textoProgressoRelatorio.textContent = "Iniciando...";
   setStatus("Gerando relatório em segundo plano (sua aba atual não é alterada)...");
 
+  // So' confirma que o processamento comecou (resposta imediata do
+  // background); o resultado final chega depois via a mensagem
+  // RELATORIO_FINALIZADO, tratada no listener mais abaixo. Nao dá para
+  // esperar uma unica resposta pelo fim de um fluxo que demora varios
+  // segundos e passa por navegacoes de pagina - isso e' o que deixava o
+  // progresso pendurado em "Finalizando" para sempre.
   try {
     const resposta = await chrome.runtime.sendMessage({ tipo: "GERAR_RELATORIO" });
     if (!resposta || !resposta.ok) {
-      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao gerar o relatório.");
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar o relatório.");
     }
-
-    valorDespachoEl.textContent = formatarContagem(resposta.resultado.conclusosDespacho);
-    valorSentencaEl.textContent = formatarContagem(resposta.resultado.conclusosSentenca);
-    areaRelatorio.hidden = false;
-    setStatus("Relatório gerado com sucesso.");
   } catch (e) {
-    setStatus("Erro ao gerar o relatório.");
+    setStatus("Erro ao iniciar o relatório.");
     areaErros.hidden = false;
     areaErros.textContent = e && e.message ? e.message : String(e);
-  } finally {
     areaProgressoRelatorio.hidden = true;
     btnRelatorios.disabled = false;
     btnAbrirTelaRelatorio.disabled = false;
@@ -189,8 +186,8 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   if (mensagem.tipo === "DOWNLOAD_FINALIZADO") {
     btnBaixar.disabled = false;
     btnDetectar.disabled = false;
-    chkIndividuais.disabled = false;
-    chkPdfUnico.disabled = false;
+    radioIndividuais.disabled = false;
+    radioPdfUnico.disabled = false;
     atualizarEstadoBotaoBaixar();
     setStatus(`Concluido! Arquivos salvos em Downloads/${mensagem.pasta}`);
     if (mensagem.erros && mensagem.erros.length > 0) {
@@ -204,5 +201,22 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   if (mensagem.tipo === "PROGRESSO_RELATORIO") {
     textoProgressoRelatorio.textContent = mensagem.texto || "Processando...";
     setStatus(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "RELATORIO_FINALIZADO") {
+    areaProgressoRelatorio.hidden = true;
+    btnRelatorios.disabled = false;
+    btnAbrirTelaRelatorio.disabled = false;
+
+    if (mensagem.ok) {
+      valorDespachoEl.textContent = formatarContagem(mensagem.resultado.conclusosDespacho);
+      valorSentencaEl.textContent = formatarContagem(mensagem.resultado.conclusosSentenca);
+      areaRelatorio.hidden = false;
+      setStatus("Relatório gerado com sucesso.");
+    } else {
+      setStatus("Erro ao gerar o relatório.");
+      areaErros.hidden = false;
+      areaErros.textContent = mensagem.erro || "Falha desconhecida ao gerar o relatório.";
+    }
   }
 });

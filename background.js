@@ -159,10 +159,10 @@ async function abrirAbaEExtrairHtmlDivDochtml(url) {
     await aguardarCarregamentoAba(tab.id);
 
     let conteudo = "";
-    for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+    for (let tentativa = 0; tentativa < 60; tentativa += 1) {
       conteudo = await lerHtmlDivDochtml(tab.id);
       if (conteudo && conteudo.trim()) break;
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
     if (!conteudo || !conteudo.trim()) {
@@ -693,11 +693,30 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
 
   if (mensagem && mensagem.tipo === "GERAR_RELATORIO") {
+    // Mesmo padrao de BAIXAR_DOCUMENTOS: confirma o recebimento na hora e
+    // avisa o resultado final por uma mensagem separada
+    // (RELATORIO_FINALIZADO), em vez de manter a chamada original
+    // pendurada esperando uma unica resposta. Esse fluxo demora vários
+    // segundos (varias trocas de aba/pagina); manter só um canal de
+    // resposta pendente por tanto tempo é frágil - se o service worker
+    // for suspenso e reativado no meio do caminho, a promessa original
+    // nunca resolve e a UI fica "pendurada".
     gerarRelatorioGeral((texto) => {
       chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO", texto }).catch(() => {});
     })
-      .then((resultado) => sendResponse({ ok: true, resultado }))
-      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+      .then((resultado) => {
+        chrome.runtime.sendMessage({ tipo: "RELATORIO_FINALIZADO", ok: true, resultado }).catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
     return true;
   }
 
