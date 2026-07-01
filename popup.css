@@ -1,0 +1,92 @@
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  width: 340px;
+  padding: 12px;
+  font-size: 13px;
+  color: #222;
+}
+
+h1 {
+  font-size: 14px;
+  margin: 0 0 10px;
+}
+
+.status {
+  background: #f0f4f8;
+  border: 1px solid #d3dce6;
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+
+.botoes {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+button {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #2c6ea6;
+  background: #2c6ea6;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: #b7c4cf;
+  border-color: #b7c4cf;
+  cursor: not-allowed;
+}
+
+.processo {
+  margin-bottom: 8px;
+}
+
+.progresso {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+progress {
+  flex: 1;
+}
+
+.lista-documentos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+}
+
+.lista-documentos li {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: space-between;
+}
+
+.lista-documentos li:last-child {
+  border-bottom: none;
+}
+
+.tipo {
+  color: #888;
+  font-size: 11px;
+}
+
+.erros {
+  margin-top: 8px;
+  background: #fdecea;
+  border: 1px solid #f5c2c0;
+  border-radius: 4px;
+  padding: 8px;
+  color: #a33;
+}

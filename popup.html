@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>eproc - Exportador de Documentos</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <h1>Exportador de Documentos - eproc</h1>
+
+  <div id="area-status" class="status">
+    Abra a pagina de detalhes de um processo no eproc e clique em
+    "Detectar documentos".
+  </div>
+
+  <div class="botoes">
+    <button id="btn-detectar">Detectar documentos</button>
+    <button id="btn-baixar" disabled>Baixar todos</button>
+  </div>
+
+  <div id="area-processo" class="processo" hidden>
+    Processo: <strong id="numero-processo"></strong>
+    (<span id="total-documentos"></span> documento(s))
+  </div>
+
+  <div id="area-progresso" class="progresso" hidden>
+    <progress id="barra-progresso" value="0" max="100"></progress>
+    <span id="texto-progresso"></span>
+  </div>
+
+  <ul id="lista-documentos" class="lista-documentos"></ul>
+
+  <div id="area-erros" class="erros" hidden></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
