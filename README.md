@@ -59,10 +59,11 @@ demais seguem na ordem em que os documentos foram juntados ao processo.
 
 Na tabela de movimentação do processo, o eproc mostra apenas a sigla
 funcional de quem praticou o ato (ex.: `S287431`). A extensão troca
-automaticamente esse texto pelo nome completo do usuário (ex.:
-`CRISLAINY MARCELO`), lido do próprio HTML da página (o nome já existe ali,
-usado hoje só para o tooltip que aparece ao passar o mouse). O tooltip com
-cargo e lotação continua funcionando normalmente.
+automaticamente esse texto pelo nome completo do usuário seguido do cargo em
+fonte menor (ex.: `CRISLAINY MARCELO - DIRETOR DE DISTRIBUIÇÃO`), lido do
+próprio HTML da página (a informação já existe ali, usada hoje só para o
+tooltip que aparece ao passar o mouse). O tooltip com cargo e lotação
+continua funcionando normalmente.
 
 ## Observações
 

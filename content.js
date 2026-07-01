@@ -122,23 +122,53 @@ function listarDocumentos() {
   };
 }
 
+const CLASSE_CARGO_USUARIO = "eproc-exportador-cargo-usuario";
+const ID_ESTILO_CARGO_USUARIO = "eproc-exportador-estilo-cargo-usuario";
+
+function garantirEstiloCargoUsuario() {
+  if (document.getElementById(ID_ESTILO_CARGO_USUARIO)) return;
+  const style = document.createElement("style");
+  style.id = ID_ESTILO_CARGO_USUARIO;
+  style.textContent = `
+    .${CLASSE_CARGO_USUARIO} {
+      font-size: 0.8em;
+      color: #666;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 // Na tabela de movimentacao, o eproc identifica o autor do ato so pela
 // sigla funcional (ex.: "S287431"). O nome completo e o cargo ja existem
 // no atributo aria-label do proprio label, usado hoje so para popular o
 // tooltip nativo ao passar o mouse ("NOME<br>CARGO<br>LOTACAO", com as
-// entidades HTML ja decodificadas pelo navegador). Trocamos apenas o texto
-// visivel pelo nome completo, sem mexer no aria-label/tooltip original.
+// entidades HTML ja decodificadas pelo navegador). Trocamos o texto
+// visivel pelo nome completo + cargo (em fonte menor), sem mexer no
+// aria-label/tooltip original.
 function substituirSiglaPorNomeUsuario() {
   const labels = document.querySelectorAll(
     "label.infraEventoUsuario[aria-label]:not([data-nome-substituido])"
   );
+  if (labels.length > 0) garantirEstiloCargoUsuario();
+
   for (const label of labels) {
     const ariaLabel = label.getAttribute("aria-label") || "";
-    const nomeCompleto = ariaLabel.split("<br>")[0].trim();
-    if (nomeCompleto) {
-      label.textContent = nomeCompleto;
-      label.setAttribute("data-nome-substituido", "1");
+    const partes = ariaLabel.split("<br>").map((parte) => parte.trim());
+    const nomeCompleto = partes[0];
+    const cargo = partes[1] || "";
+    if (!nomeCompleto) continue;
+
+    label.textContent = "";
+    label.appendChild(document.createTextNode(nomeCompleto));
+
+    if (cargo) {
+      const spanCargo = document.createElement("span");
+      spanCargo.className = CLASSE_CARGO_USUARIO;
+      spanCargo.textContent = ` - ${cargo}`;
+      label.appendChild(spanCargo);
     }
+
+    label.setAttribute("data-nome-substituido", "1");
   }
 }
 
