@@ -144,22 +144,36 @@ function lerHtmlDivDochtml(tabId) {
 // (active: false), fazendo innerText voltar vazio silenciosamente mesmo
 // com o conteudo ja preenchido no DOM. innerHTML e' pura serializacao do
 // DOM e nao depende de renderizacao.
+//
+// Retorna sempre { conteudo, erro }, nunca lanca excecao, para o chamador
+// poder relatar o motivo exato de uma falha em vez de so' "nao deu certo".
 async function abrirAbaEExtrairHtmlDivDochtml(url) {
   let tab;
   try {
-    tab = await chrome.tabs.create({ url, active: false });
+    try {
+      tab = await chrome.tabs.create({ url, active: false });
+    } catch (e) {
+      return { conteudo: null, erro: `Falha ao abrir aba oculta: ${String(e)}` };
+    }
+
     await aguardarCarregamentoAba(tab.id);
 
     let conteudo = "";
-    for (let tentativa = 0; tentativa < 25; tentativa += 1) {
+    for (let tentativa = 0; tentativa < 40; tentativa += 1) {
       conteudo = await lerHtmlDivDochtml(tab.id);
       if (conteudo && conteudo.trim()) break;
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
 
-    return conteudo && conteudo.trim() ? conteudo : null;
+    if (!conteudo || !conteudo.trim()) {
+      return {
+        conteudo: null,
+        erro: 'Conteúdo não carregou a tempo (div "#divdochtml" continuou vazia).',
+      };
+    }
+    return { conteudo, erro: null };
   } catch (e) {
-    return null;
+    return { conteudo: null, erro: String(e) };
   } finally {
     if (tab && tab.id) {
       chrome.tabs.remove(tab.id).catch(() => {});
@@ -168,9 +182,12 @@ async function abrirAbaEExtrairHtmlDivDochtml(url) {
 }
 
 async function obterConteudoHtmlReal(url, nomeDocumento) {
-  const conteudo = await abrirAbaEExtrairHtmlDivDochtml(url);
-  if (!conteudo) return null;
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`;
+  const { conteudo, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
+  if (!conteudo) return { html: null, erro };
+  return {
+    html: `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`,
+    erro: null,
+  };
 }
 
 // Converte o HTML do documento para texto simples, preservando quebras de
@@ -192,9 +209,16 @@ function converterHtmlParaTextoSimples(html) {
 }
 
 async function obterTextoHtmlReal(url) {
-  const html = await abrirAbaEExtrairHtmlDivDochtml(url);
-  if (!html) return null;
-  return converterHtmlParaTextoSimples(html);
+  const { conteudo, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
+  if (!conteudo) return { texto: null, erro };
+  const texto = converterHtmlParaTextoSimples(conteudo);
+  if (!texto) {
+    return {
+      texto: null,
+      erro: "O conteúdo carregou, mas ficou vazio após remover as tags HTML.",
+    };
+  }
+  return { texto, erro: null };
 }
 
 function baixarIndice(pastaBase, numeroProcesso, documentos) {
@@ -339,11 +363,20 @@ async function adicionarDocumentoAoPdf(pdfFinal, fonteTexto, doc, urlReal) {
   }
 
   if (doc.mimetype === "html") {
-    const texto = await obterTextoHtmlReal(urlReal);
+    const { texto, erro } = await obterTextoHtmlReal(urlReal);
     if (texto) {
       adicionarTextoComoPaginas(pdfFinal, fonteTexto, doc.nome, texto);
       return;
     }
+    adicionarTextoComoPaginas(
+      pdfFinal,
+      fonteTexto,
+      doc.nome,
+      `Não foi possível extrair o conteúdo do documento "${doc.nome}" para o PDF único. Motivo: ${
+        erro || "desconhecido"
+      }. Consulte o arquivo individual na pasta de exportação.`
+    );
+    return;
   }
 
   adicionarTextoComoPaginas(
@@ -388,9 +421,16 @@ async function processarFila(numeroProcesso, documentos, opcoes) {
 
   // As duas fases (individual e PDF unico) precisam da URL real de cada
   // documento; um cache evita buscar a mesma casca duas vezes quando
-  // ambas as opcoes estao marcadas.
+  // ambas as opcoes estao marcadas. Documentos "html" ficam de fora do
+  // cache de propósito: a segunda camada deles (a div preenchida via
+  // AJAX) parece nao aceitar bem ser acessada duas vezes com a mesma URL
+  // resolvida (a segunda tentativa fica vazia); resolver de novo a cada
+  // uso evita reaproveitar uma URL que a outra fase ja tenha consumido.
   const urlsResolvidas = new Map();
   async function obterUrlResolvida(doc) {
+    if (doc.mimetype === "html") {
+      return resolverUrlReal(doc.href);
+    }
     if (urlsResolvidas.has(doc.idDocumento)) return urlsResolvidas.get(doc.idDocumento);
     const urlReal = await resolverUrlReal(doc.href);
     urlsResolvidas.set(doc.idDocumento, urlReal);
@@ -417,12 +457,19 @@ async function processarFila(numeroProcesso, documentos, opcoes) {
         const urlReal = await obterUrlResolvida(doc);
 
         if (doc.mimetype === "html") {
-          const htmlFinal = await obterConteudoHtmlReal(urlReal, doc.nome);
+          const { html: htmlFinal, erro: erroExtracao } = await obterConteudoHtmlReal(urlReal, doc.nome);
           if (htmlFinal) {
             await baixarUm(filename, construirDataUrl("text/html", htmlFinal));
           } else {
             // Nao foi possivel capturar o conteudo renderizado pela aba;
-            // baixa a pagina bruta como ultimo recurso.
+            // baixa a pagina bruta como ultimo recurso, mas avisa o
+            // usuario de que o arquivo pode nao ter o conteudo real.
+            erros.push({
+              nome: doc.nome,
+              mensagem: `Não foi possível extrair o conteúdo renderizado (${
+                erroExtracao || "motivo desconhecido"
+              }); o arquivo salvo pode não ter o conteúdo real do documento.`,
+            });
             await baixarUm(filename, urlReal);
           }
         } else {
@@ -475,13 +522,14 @@ const VALOR_SITUACAO_AGUARDA_DESPACHO = "M;22;C";
 const VALOR_SITUACAO_AGUARDA_SENTENCA = "M;21;C";
 
 // Roda inteiramente dentro da pagina "Relatorio Geral de Processos" (via
-// chrome.scripting.executeScript): para cada valor de situacao, marca so'
-// aquela opcao no select multiplo, dispara "change" (o bootstrap-select e
-// os handlers do eproc dependem desse evento nativo do <select>), clica
-// em "Consultar" e espera o badge de contagem "(N)" mudar antes de ler o
-// numero. Precisa ser uma funcao autocontida: e' serializada e executada
-// no contexto da pagina, sem acesso ao escopo deste arquivo.
-function coletarContagensRelatorioGeralNaPagina(valoresSituacao) {
+// chrome.scripting.executeScript): marca so' a opcao de situacao pedida no
+// select multiplo, dispara "change" (o bootstrap-select e os handlers do
+// eproc dependem desse evento nativo do <select>), clica em "Consultar" e
+// espera o badge de contagem "(N)" mudar antes de ler o numero. Precisa
+// ser uma funcao autocontida: e' serializada e executada no contexto da
+// pagina, sem acesso ao escopo deste arquivo. Chamada uma vez por
+// situacao, para permitir reportar progresso entre uma consulta e outra.
+function consultarSituacaoNaPagina(valorOpcao) {
   function aguardar(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -491,7 +539,7 @@ function coletarContagensRelatorioGeralNaPagina(valoresSituacao) {
     return m ? Number(m[1]) : null;
   }
 
-  async function selecionarSituacaoEConsultar(valorOpcao) {
+  return (async () => {
     const select = document.getElementById("selStatusProcesso");
     if (!select) throw new Error('Campo "Situação" não encontrado nesta página.');
 
@@ -539,18 +587,25 @@ function coletarContagensRelatorioGeralNaPagina(valoresSituacao) {
     }
 
     throw new Error("Tempo esgotado esperando o resultado da consulta.");
-  }
-
-  return (async () => {
-    const resultado = {};
-    for (const [chave, valorOpcao] of Object.entries(valoresSituacao)) {
-      resultado[chave] = await selecionarSituacaoEConsultar(valorOpcao);
-    }
-    return resultado;
   })();
 }
 
-async function gerarRelatorioGeral() {
+// Encontra e clica no link "Relatório Geral", que ja existe no DOM mesmo
+// com o menu lateral colapsado (o collapse e' so' visual via CSS) -
+// entao nao e' preciso simular o clique no item "Relatórios" do menu
+// antes. Autocontida, executada via chrome.scripting.executeScript.
+function clicarLinkRelatorioGeralNaPagina() {
+  const link = document.querySelector('a[href*="acao=relatorio_geral_listar"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+async function gerarRelatorioGeral(aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
   const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!abaAtual || !abaAtual.url) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
@@ -562,21 +617,15 @@ async function gerarRelatorioGeral() {
   // nessa aba oculta, que e' fechada ao final.
   let abaOculta;
   try {
+    notificar("Abrindo aba oculta com a mesma sessão...");
     abaOculta = await chrome.tabs.create({ url: abaAtual.url, active: false });
     await aguardarCarregamentoAba(abaOculta.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // O link "Relatório Geral" ja existe no DOM mesmo com o menu lateral
-    // colapsado (o collapse e' so' visual via CSS), entao nao e' preciso
-    // simular o clique no item "Relatórios" do menu antes.
+    notificar('Localizando o link "Relatório Geral" no menu...');
     const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
       target: { tabId: abaOculta.id },
-      func: () => {
-        const link = document.querySelector('a[href*="acao=relatorio_geral_listar"]');
-        if (!link) return false;
-        link.click();
-        return true;
-      },
+      func: clicarLinkRelatorioGeralNaPagina,
     });
 
     if (!linkEncontrado) {
@@ -585,31 +634,53 @@ async function gerarRelatorioGeral() {
       );
     }
 
+    notificar("Carregando a página do Relatório Geral...");
     await aguardarCarregamentoAba(abaOculta.id);
     // Pequena espera extra para os scripts da pagina (bootstrap-select
     // etc.) terminarem de inicializar apos o carregamento.
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const [{ result: contagens } = {}] = await chrome.scripting.executeScript({
+    notificar('Consultando situação "MOVIMENTO-AGUARDA DESPACHO"...');
+    const [{ result: conclusosDespacho } = {}] = await chrome.scripting.executeScript({
       target: { tabId: abaOculta.id },
-      func: coletarContagensRelatorioGeralNaPagina,
-      args: [
-        {
-          conclusosDespacho: VALOR_SITUACAO_AGUARDA_DESPACHO,
-          conclusosSentenca: VALOR_SITUACAO_AGUARDA_SENTENCA,
-        },
-      ],
+      func: consultarSituacaoNaPagina,
+      args: [VALOR_SITUACAO_AGUARDA_DESPACHO],
     });
 
-    if (!contagens) {
-      throw new Error("Não foi possível coletar os dados do Relatório Geral.");
-    }
+    notificar('Consultando situação "MOVIMENTO-AGUARDA SENTENÇA"...');
+    const [{ result: conclusosSentenca } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: abaOculta.id },
+      func: consultarSituacaoNaPagina,
+      args: [VALOR_SITUACAO_AGUARDA_SENTENCA],
+    });
 
-    return contagens;
+    notificar("Finalizando...");
+    return { conclusosDespacho, conclusosSentenca };
   } finally {
     if (abaOculta && abaOculta.id) {
       chrome.tabs.remove(abaOculta.id).catch(() => {});
     }
+  }
+}
+
+// Atalho: navega a aba ATUAL (visivel) direto para a tela do Relatório
+// Geral, sem consultar nada - so' um jeito rapido de chegar la'
+// manualmente.
+async function abrirTelaRelatorioGeral() {
+  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!aba || !aba.id) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: clicarLinkRelatorioGeralNaPagina,
+  });
+
+  if (!linkEncontrado) {
+    throw new Error(
+      'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
+    );
   }
 }
 
@@ -622,8 +693,17 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
 
   if (mensagem && mensagem.tipo === "GERAR_RELATORIO") {
-    gerarRelatorioGeral()
+    gerarRelatorioGeral((texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO", texto }).catch(() => {});
+    })
       .then((resultado) => sendResponse({ ok: true, resultado }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "ABRIR_TELA_RELATORIO") {
+    abrirTelaRelatorioGeral()
+      .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
     return true;
   }

@@ -131,3 +131,38 @@ progress {
 .relatorio div {
   padding: 2px 0;
 }
+
+.btn-icone {
+  flex: 0 0 auto;
+  width: 34px;
+  padding: 6px 0;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.progresso-relatorio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px;
+  background: #f0f4f8;
+  border: 1px solid #d3dce6;
+  border-radius: 4px;
+}
+
+.spinner {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #c7d6e3;
+  border-top-color: #2c6ea6;
+  border-radius: 50%;
+  animation: girar 0.8s linear infinite;
+}
+
+@keyframes girar {
+  to {
+    transform: rotate(360deg);
+  }
+}

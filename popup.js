@@ -115,9 +115,12 @@ btnBaixar.addEventListener("click", async () => {
 });
 
 const btnRelatorios = document.getElementById("btn-relatorios");
+const btnAbrirTelaRelatorio = document.getElementById("btn-abrir-tela-relatorio");
 const areaRelatorio = document.getElementById("area-relatorio");
 const valorDespachoEl = document.getElementById("valor-despacho");
 const valorSentencaEl = document.getElementById("valor-sentenca");
+const areaProgressoRelatorio = document.getElementById("area-progresso-relatorio");
+const textoProgressoRelatorio = document.getElementById("texto-progresso-relatorio");
 
 function formatarContagem(valor) {
   return valor === null || valor === undefined ? "?" : String(valor);
@@ -125,10 +128,11 @@ function formatarContagem(valor) {
 
 btnRelatorios.addEventListener("click", async () => {
   btnRelatorios.disabled = true;
+  btnAbrirTelaRelatorio.disabled = true;
   areaErros.hidden = true;
-  setStatus(
-    'Abrindo Relatório Geral e consultando "MOVIMENTO-AGUARDA DESPACHO" / "MOVIMENTO-AGUARDA SENTENÇA"...'
-  );
+  areaProgressoRelatorio.hidden = false;
+  textoProgressoRelatorio.textContent = "Iniciando...";
+  setStatus("Gerando relatório em segundo plano (sua aba atual não é alterada)...");
 
   try {
     const resposta = await chrome.runtime.sendMessage({ tipo: "GERAR_RELATORIO" });
@@ -145,7 +149,29 @@ btnRelatorios.addEventListener("click", async () => {
     areaErros.hidden = false;
     areaErros.textContent = e && e.message ? e.message : String(e);
   } finally {
+    areaProgressoRelatorio.hidden = true;
     btnRelatorios.disabled = false;
+    btnAbrirTelaRelatorio.disabled = false;
+  }
+});
+
+btnAbrirTelaRelatorio.addEventListener("click", async () => {
+  btnAbrirTelaRelatorio.disabled = true;
+  areaErros.hidden = true;
+  setStatus("Abrindo a tela do Relatório Geral nesta aba...");
+
+  try {
+    const resposta = await chrome.runtime.sendMessage({ tipo: "ABRIR_TELA_RELATORIO" });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha ao abrir a tela do relatório.");
+    }
+    setStatus("Tela do Relatório Geral aberta nesta aba.");
+  } catch (e) {
+    setStatus("Erro ao abrir a tela do relatório.");
+    areaErros.hidden = false;
+    areaErros.textContent = e && e.message ? e.message : String(e);
+  } finally {
+    btnAbrirTelaRelatorio.disabled = false;
   }
 });
 
@@ -173,5 +199,10 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         `${mensagem.erros.length} erro(s): ` +
         mensagem.erros.map((e) => `${e.nome} (${e.mensagem})`).join("; ");
     }
+  }
+
+  if (mensagem.tipo === "PROGRESSO_RELATORIO") {
+    textoProgressoRelatorio.textContent = mensagem.texto || "Processando...";
+    setStatus(mensagem.texto || "Processando...");
   }
 });

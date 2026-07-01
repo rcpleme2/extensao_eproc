@@ -98,6 +98,15 @@ Cada tipo de documento entra no PDF único de um jeito diferente:
   uma página de aviso é inserida no lugar, indicando para consultar o
   arquivo individual.
 
+Documentos "html" são resolvidos de forma independente para cada opção
+marcada (arquivos individuais e PDF único não reaproveitam a mesma URL
+resolvida entre si) — a segunda camada desses documentos parece não
+aceitar bem ser acessada duas vezes com a mesma URL, então cada uso
+resolve a sua própria. Se ainda assim algum documento não puder ser
+incorporado, a página de aviso no PDF único agora inclui o motivo exato
+da falha (ex.: tempo esgotado, elemento não encontrado), para facilitar
+o diagnóstico.
+
 ## Relatório Geral (conclusos para despacho/sentença)
 
 O painel também tem um botão **"Relatórios"** que automatiza uma consulta
@@ -117,9 +126,19 @@ está vendo**:
 
 Como a aba oculta é criada com `active: false`, ela não rouba o foco nem
 troca o que aparece na tela — só pode aparecer brevemente na barra de
-abas enquanto carrega. O botão funciona a partir de qualquer página do
-eproc que tenha o menu lateral visível (não precisa estar na tela de um
-processo especificamente).
+abas enquanto carrega. Enquanto processa, o painel mostra um indicador de
+progresso com o passo atual (abrindo a aba, localizando o link,
+consultando cada situação, etc.), então dá para acompanhar sem achar que
+a extensão travou.
+
+Ao lado do botão "Relatórios" há um ícone **↗** que, diferente do botão
+principal, navega a **aba atual e visível** direto para a tela do
+Relatório Geral (sem consultar nada) — um atalho para quem prefere
+conferir manualmente.
+
+O botão funciona a partir de qualquer página do eproc que tenha o menu
+lateral visível (não precisa estar na tela de um processo
+especificamente).
 
 ## Observações
 
