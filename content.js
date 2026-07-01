@@ -26,6 +26,31 @@ function extrairNumeroEvento(anchorEl) {
   return { evento: null, doc: null };
 }
 
+const CLASSE_DESTAQUE = "eproc-exportador-destaque";
+const ID_ESTILO_DESTAQUE = "eproc-exportador-estilo-destaque";
+
+function garantirEstiloDestaque() {
+  if (document.getElementById(ID_ESTILO_DESTAQUE)) return;
+  const style = document.createElement("style");
+  style.id = ID_ESTILO_DESTAQUE;
+  style.textContent = `
+    a.${CLASSE_DESTAQUE} {
+      background-color: rgba(255, 235, 59, 0.45) !important;
+      outline: 1px solid #f9a825 !important;
+      border-radius: 3px !important;
+      box-shadow: 0 0 0 1px rgba(249, 168, 37, 0.4) !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function destacarAncoras(anchors) {
+  garantirEstiloDestaque();
+  for (const a of anchors) {
+    a.classList.add(CLASSE_DESTAQUE);
+  }
+}
+
 function listarDocumentos() {
   const anchors = Array.from(
     document.querySelectorAll("a.infraLinkDocumento[data-doc]")
@@ -56,6 +81,8 @@ function listarDocumentos() {
     if (x.evento !== y.evento) return (x.evento || 0) - (y.evento || 0);
     return (x.ordemDoc || 0) - (y.ordemDoc || 0);
   });
+
+  destacarAncoras(anchors);
 
   return {
     numeroProcesso: extrairNumeroProcesso(),

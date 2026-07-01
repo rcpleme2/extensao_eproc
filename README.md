@@ -14,18 +14,20 @@ baixa cada documento para a pasta de Downloads do navegador, organizado em:
 
 ```
 Downloads/eproc/<numero_do_processo>/
-  001_INIC1.pdf
-  001_OUT2.jpg
-  001_CALC3.pdf
-  001_ATOORD1.html
-  001_CERT1.html
-  001_MANDCITACAO1.html
+  0001_INIC1.pdf
+  0002_OUT2.jpg
+  0003_CALC3.pdf
+  0004_ATOORD1.html
+  0005_CERT1.html
+  0006_MANDCITACAO1.html
   ...
-  _indice.json   (lista com evento, nome, tipo e URL de cada documento)
+  _indice.json   (lista com sequencial, evento, nome, tipo e URL de cada documento)
 ```
 
-O número no início do nome do arquivo é o número do evento processual em que
-o documento foi juntado.
+O número no início do nome do arquivo é um sequencial global de 4 dígitos
+(`0001`, `0002`, ...), atribuído em ordem cronológica: o primeiro documento
+do primeiro evento do processo (a petição inicial) recebe `0001`, e os
+demais seguem na ordem em que os documentos foram juntados ao processo.
 
 ## Instalação (modo desenvolvedor)
 
@@ -41,7 +43,9 @@ o documento foi juntado.
    documentos).
 2. Clique no ícone da extensão.
 3. Clique em **"Detectar documentos"** — a extensão lista quantos documentos
-   encontrou na página.
+   encontrou na página e destaca (fundo amarelo claro) cada link de
+   documento reconhecido diretamente na página, para conferência visual
+   rápida contra os documentos exibidos.
 4. Clique em **"Baixar todos"** — os arquivos serão baixados para
    `Downloads/eproc/<numero_do_processo>/`.
 5. Acompanhe a barra de progresso no próprio popup.

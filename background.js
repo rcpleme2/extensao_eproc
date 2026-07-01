@@ -27,11 +27,11 @@ function extensaoParaMimetype(mimetype) {
   return EXTENSAO_POR_MIMETYPE[mimetype] || (mimetype ? mimetype.replace(/[^a-z0-9]/g, "") : "bin");
 }
 
-function montarNomeArquivo(pastaBase, doc, indice) {
-  const eventoStr = doc.evento != null ? String(doc.evento).padStart(3, "0") : "000";
+function montarNomeArquivo(pastaBase, doc, sequencial) {
+  const seqStr = String(sequencial).padStart(4, "0");
   const nomeBase = sanitizarNomeArquivo(doc.nome || doc.idDocumento);
   const ext = extensaoParaMimetype(doc.mimetype);
-  return `${pastaBase}/${eventoStr}_${nomeBase}.${ext}`;
+  return `${pastaBase}/${seqStr}_${nomeBase}.${ext}`;
 }
 
 const REGEX_IFRAME_CONTEUDO = /id=["']conteudoIframe["'][^>]*\ssrc=["']([^"']+)["']/i;
@@ -77,7 +77,8 @@ function baixarIndice(pastaBase, numeroProcesso, documentos) {
   const indice = {
     numeroProcesso,
     geradoEm: new Date().toISOString(),
-    documentos: documentos.map((d) => ({
+    documentos: documentos.map((d, i) => ({
+      sequencial: i + 1,
       evento: d.evento,
       nome: d.nome,
       tipo: d.mimetype,
@@ -105,8 +106,9 @@ async function processarFila(numeroProcesso, documentos, sender) {
     }).catch(() => {});
   };
 
-  for (const doc of documentos) {
-    const filename = montarNomeArquivo(pastaBase, doc);
+  for (let i = 0; i < documentos.length; i += 1) {
+    const doc = documentos[i];
+    const filename = montarNomeArquivo(pastaBase, doc, i + 1);
     try {
       const urlReal = await resolverUrlReal(doc.href);
       await baixarUm(filename, urlReal);
