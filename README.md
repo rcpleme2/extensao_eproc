@@ -98,6 +98,27 @@ Cada tipo de documento entra no PDF único de um jeito diferente:
   uma página de aviso é inserida no lugar, indicando para consultar o
   arquivo individual.
 
+## Relatório Geral (conclusos para despacho/sentença)
+
+O painel também tem um botão **"Relatórios"** que automatiza uma consulta
+que hoje precisa ser feita manualmente:
+
+1. Abre o item "Relatório Geral" do menu lateral do eproc **na aba atual**
+   (o link já existe no DOM mesmo com o menu colapsado, então a extensão
+   não precisa expandir o menu "Relatórios" antes).
+2. No campo "Situação", seleciona **"MOVIMENTO-AGUARDA DESPACHO"** e clica
+   em "Consultar", lendo o número de processos encontrados (badge
+   "Processos (N)").
+3. Repete o mesmo passo para **"MOVIMENTO-AGUARDA SENTENÇA"**.
+4. Mostra os dois números no painel: "Conclusos para despacho: N" e
+   "Conclusos para sentença: N".
+
+Como isso **navega a aba atual** para a página do Relatório Geral (saindo
+de onde você estava), use esse botão quando não precisar voltar
+imediatamente para a página anterior. O botão funciona a partir de
+qualquer página do eproc que tenha o menu lateral visível (não precisa
+estar na tela de um processo especificamente).
+
 ## Observações
 
 - Os documentos são baixados usando a mesma sessão autenticada do navegador

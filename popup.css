@@ -113,3 +113,21 @@ progress {
   padding: 8px;
   color: #a33;
 }
+
+.separador {
+  border: none;
+  border-top: 1px solid #e0e0e0;
+  margin: 16px 0;
+}
+
+.relatorio {
+  margin-top: 10px;
+  background: #f0f8f2;
+  border: 1px solid #cfe8d6;
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.relatorio div {
+  padding: 2px 0;
+}

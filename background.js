@@ -443,6 +443,137 @@ async function processarFila(numeroProcesso, documentos, opcoes) {
   }).catch(() => {});
 }
 
+// ---- Relatorio Geral (Conclusos para despacho/sentenca) ----
+
+// Valores das opcoes do campo "Situacao" (select#selStatusProcesso) no
+// Relatorio Geral, conforme a pagina do eproc analisada.
+const VALOR_SITUACAO_AGUARDA_DESPACHO = "M;22;C";
+const VALOR_SITUACAO_AGUARDA_SENTENCA = "M;21;C";
+
+// Roda inteiramente dentro da pagina "Relatorio Geral de Processos" (via
+// chrome.scripting.executeScript): para cada valor de situacao, marca so'
+// aquela opcao no select multiplo, dispara "change" (o bootstrap-select e
+// os handlers do eproc dependem desse evento nativo do <select>), clica
+// em "Consultar" e espera o badge de contagem "(N)" mudar antes de ler o
+// numero. Precisa ser uma funcao autocontida: e' serializada e executada
+// no contexto da pagina, sem acesso ao escopo deste arquivo.
+function coletarContagensRelatorioGeralNaPagina(valoresSituacao) {
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function extrairContagem(texto) {
+    const m = (texto || "").match(/\((\d+)\)/);
+    return m ? Number(m[1]) : null;
+  }
+
+  async function selecionarSituacaoEConsultar(valorOpcao) {
+    const select = document.getElementById("selStatusProcesso");
+    if (!select) throw new Error('Campo "Situação" não encontrado nesta página.');
+
+    let encontrouOpcao = false;
+    for (const opcao of select.options) {
+      const selecionada = opcao.value === valorOpcao;
+      opcao.selected = selecionada;
+      if (selecionada) encontrouOpcao = true;
+    }
+    if (!encontrouOpcao) {
+      throw new Error(`Opção de situação "${valorOpcao}" não encontrada na lista.`);
+    }
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+
+    // Da' tempo do bootstrap-select atualizar visualmente antes de
+    // consultar (nao estritamente necessario, mas mais fiel ao fluxo real
+    // de uso e evita clicar antes do componente terminar de reagir).
+    await aguardar(200);
+
+    const botaoConsultar = document.querySelector('button.btnConsultar[form="frmProcessoLista"]');
+    if (!botaoConsultar) throw new Error('Botão "Consultar" não encontrado nesta página.');
+
+    const badgeAntes = document.getElementById("tblProcessoLista_info-badge");
+    const textoAntes = badgeAntes ? badgeAntes.textContent : null;
+
+    botaoConsultar.click();
+
+    // A consulta e' via AJAX (sem recarregar a pagina); espera o texto do
+    // badge mudar (ou, apos um tempo minimo sem estar mais "Processando",
+    // aceita o valor atual mesmo que igual ao anterior).
+    for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+      await aguardar(250);
+      const badge = document.getElementById("tblProcessoLista_info-badge");
+      const textoAtual = badge ? badge.textContent : null;
+      const elementoProcessando = document.getElementById("tblProcessoLista_processing");
+      const estaProcessando =
+        elementoProcessando && getComputedStyle(elementoProcessando).display !== "none";
+
+      if (badge && !estaProcessando && textoAtual !== textoAntes) {
+        return extrairContagem(textoAtual);
+      }
+      if (badge && !estaProcessando && tentativa > 8) {
+        return extrairContagem(textoAtual);
+      }
+    }
+
+    throw new Error("Tempo esgotado esperando o resultado da consulta.");
+  }
+
+  return (async () => {
+    const resultado = {};
+    for (const [chave, valorOpcao] of Object.entries(valoresSituacao)) {
+      resultado[chave] = await selecionarSituacaoEConsultar(valorOpcao);
+    }
+    return resultado;
+  })();
+}
+
+async function gerarRelatorioGeral() {
+  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!aba || !aba.id) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  // O link "Relatório Geral" ja existe no DOM mesmo com o menu lateral
+  // colapsado (o collapse e' so' visual via CSS), entao nao e' preciso
+  // simular o clique no item "Relatórios" do menu antes.
+  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: () => {
+      const link = document.querySelector('a[href*="acao=relatorio_geral_listar"]');
+      if (!link) return false;
+      link.click();
+      return true;
+    },
+  });
+
+  if (!linkEncontrado) {
+    throw new Error(
+      'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
+    );
+  }
+
+  await aguardarCarregamentoAba(aba.id);
+  // Pequena espera extra para os scripts da pagina (bootstrap-select etc.)
+  // terminarem de inicializar apos o carregamento.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  const [{ result: contagens } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: coletarContagensRelatorioGeralNaPagina,
+    args: [
+      {
+        conclusosDespacho: VALOR_SITUACAO_AGUARDA_DESPACHO,
+        conclusosSentenca: VALOR_SITUACAO_AGUARDA_SENTENCA,
+      },
+    ],
+  });
+
+  if (!contagens) {
+    throw new Error("Não foi possível coletar os dados do Relatório Geral.");
+  }
+
+  return contagens;
+}
+
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "BAIXAR_DOCUMENTOS") {
     const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false };
@@ -450,5 +581,13 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     sendResponse({ ok: true });
     return true;
   }
+
+  if (mensagem && mensagem.tipo === "GERAR_RELATORIO") {
+    gerarRelatorioGeral()
+      .then((resultado) => sendResponse({ ok: true, resultado }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
   return false;
 });

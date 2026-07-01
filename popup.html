@@ -43,6 +43,22 @@
 
   <div id="area-erros" class="erros" hidden></div>
 
+  <hr class="separador" />
+
+  <h1>Relatório Geral</h1>
+  <div class="botoes">
+    <button id="btn-relatorios">Relatórios</button>
+  </div>
+  <div id="area-relatorio-info" class="status">
+    Abre o Relatório Geral do eproc na aba atual e consulta automaticamente
+    quantos processos estão em "MOVIMENTO-AGUARDA DESPACHO" e
+    "MOVIMENTO-AGUARDA SENTENÇA".
+  </div>
+  <div id="area-relatorio" class="relatorio" hidden>
+    <div>Conclusos para despacho: <strong id="valor-despacho"></strong></div>
+    <div>Conclusos para sentença: <strong id="valor-sentenca"></strong></div>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>

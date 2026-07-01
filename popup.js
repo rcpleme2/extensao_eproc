@@ -114,6 +114,41 @@ btnBaixar.addEventListener("click", async () => {
   });
 });
 
+const btnRelatorios = document.getElementById("btn-relatorios");
+const areaRelatorio = document.getElementById("area-relatorio");
+const valorDespachoEl = document.getElementById("valor-despacho");
+const valorSentencaEl = document.getElementById("valor-sentenca");
+
+function formatarContagem(valor) {
+  return valor === null || valor === undefined ? "?" : String(valor);
+}
+
+btnRelatorios.addEventListener("click", async () => {
+  btnRelatorios.disabled = true;
+  areaErros.hidden = true;
+  setStatus(
+    'Abrindo Relatório Geral e consultando "MOVIMENTO-AGUARDA DESPACHO" / "MOVIMENTO-AGUARDA SENTENÇA"...'
+  );
+
+  try {
+    const resposta = await chrome.runtime.sendMessage({ tipo: "GERAR_RELATORIO" });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao gerar o relatório.");
+    }
+
+    valorDespachoEl.textContent = formatarContagem(resposta.resultado.conclusosDespacho);
+    valorSentencaEl.textContent = formatarContagem(resposta.resultado.conclusosSentenca);
+    areaRelatorio.hidden = false;
+    setStatus("Relatório gerado com sucesso.");
+  } catch (e) {
+    setStatus("Erro ao gerar o relatório.");
+    areaErros.hidden = false;
+    areaErros.textContent = e && e.message ? e.message : String(e);
+  } finally {
+    btnRelatorios.disabled = false;
+  }
+});
+
 chrome.runtime.onMessage.addListener((mensagem) => {
   if (!mensagem) return;
 
