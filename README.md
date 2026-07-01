@@ -62,8 +62,11 @@ demais seguem na ordem em que os documentos foram juntados ao processo.
   iframe — sem esse passo, o arquivo salvo seria a casca HTML, não o
   documento em si.
 - Documentos gerados internamente pelo eproc (certidões, atos ordinatórios,
-  mandados, etc.) são páginas HTML e por isso são salvos com extensão
-  `.html`, preservando o conteúdo original.
+  mandados, etc.) são páginas HTML. Para esses, a URL do iframe ainda
+  devolve uma segunda casca (uma página vazia que carrega o conteúdo via
+  AJAX no carregamento). A extensão refaz essa chamada AJAX
+  (`X-Requested-With: XMLHttpRequest`) para obter o conteúdo real da
+  certidão/ato e salva um `.html` autocontido só com esse conteúdo.
 - A extensão funciona em qualquer domínio que siga o padrão de URL do eproc
   (`.../eproc/controlador.php`), não é restrita a um tribunal específico.
 - Se um download falhar (ex.: link expirado), o erro aparece no popup ao

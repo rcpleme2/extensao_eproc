@@ -73,6 +73,35 @@ function baixarUm(filename, url) {
   });
 }
 
+function construirDataUrl(mimetype, texto) {
+  return `data:${mimetype};charset=utf-8;base64,` + btoa(unescape(encodeURIComponent(texto)));
+}
+
+// Para documentos "html" (certidoes, atos ordinatorios, mandados), a URL
+// final ainda retorna uma segunda casca: uma pagina com uma div vazia
+// (#divdochtml) que e' preenchida via uma chamada AJAX disparada no
+// onload da propria pagina, para essa mesma URL. O servidor so devolve o
+// conteudo real quando a requisicao chega marcada como AJAX
+// (X-Requested-With: XMLHttpRequest); sem isso, devolve a casca com
+// scripts. Aqui replicamos essa chamada para obter o conteudo real.
+async function obterConteudoHtmlReal(url, nomeDocumento) {
+  let resposta;
+  try {
+    resposta = await fetch(url, {
+      credentials: "same-origin",
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+    });
+  } catch (e) {
+    return null;
+  }
+  if (!resposta.ok) return null;
+
+  const conteudo = await resposta.text();
+  if (!conteudo || !conteudo.trim()) return null;
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`;
+}
+
 function baixarIndice(pastaBase, numeroProcesso, documentos) {
   const indice = {
     numeroProcesso,
@@ -87,8 +116,7 @@ function baixarIndice(pastaBase, numeroProcesso, documentos) {
     })),
   };
   const json = JSON.stringify(indice, null, 2);
-  const dataUrl = "data:application/json;base64," + btoa(unescape(encodeURIComponent(json)));
-  return baixarUm(`${pastaBase}/_indice.json`, dataUrl);
+  return baixarUm(`${pastaBase}/_indice.json`, construirDataUrl("application/json", json));
 }
 
 async function processarFila(numeroProcesso, documentos, sender) {
@@ -111,7 +139,19 @@ async function processarFila(numeroProcesso, documentos, sender) {
     const filename = montarNomeArquivo(pastaBase, doc, i + 1);
     try {
       const urlReal = await resolverUrlReal(doc.href);
-      await baixarUm(filename, urlReal);
+
+      if (doc.mimetype === "html") {
+        const htmlFinal = await obterConteudoHtmlReal(urlReal, doc.nome);
+        if (htmlFinal) {
+          await baixarUm(filename, construirDataUrl("text/html", htmlFinal));
+        } else {
+          // Nao foi possivel obter o conteudo via AJAX; baixa o que
+          // conseguimos como ultimo recurso.
+          await baixarUm(filename, urlReal);
+        }
+      } else {
+        await baixarUm(filename, urlReal);
+      }
     } catch (e) {
       erros.push({ nome: doc.nome, mensagem: String(e) });
     }
