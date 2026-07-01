@@ -17,13 +17,39 @@ function extrairNumeroProcesso() {
 }
 
 function extrairNumeroEvento(anchorEl) {
-  // As celulas da tabela de eventos tem id="tdEvento{N}Doc{M}"
+  // Alguns documentos aparecem tambem em paineis/atalhos fora da tabela
+  // principal de eventos (sem celula "tdEvento{N}Doc{M}" como ancestral).
+  // Para cobrir esses casos, a fonte mais confiavel e' o texto oculto que
+  // o proprio eproc gera para o recurso "Copiar link para documento"
+  // (".widgetlinkdocumento[data-iddocumento]"), que sempre contem
+  // "processo ..., evento N, NOME" e existe em qualquer parte da pagina.
+  const idDoc = anchorEl.getAttribute("data-doc");
+  if (idDoc) {
+    const widget = document.querySelector(
+      `.widgetlinkdocumento[data-iddocumento="${idDoc}"]`
+    );
+    if (widget) {
+      const m = (widget.textContent || "").match(/evento\s+(\d+)/i);
+      if (m) return Number(m[1]);
+    }
+  }
+
+  // Fallback: celulas da tabela de eventos tem id="tdEvento{N}Doc{M}"
   const td = anchorEl.closest('td[id^="tdEvento"]');
   if (td) {
-    const m = td.id.match(/^tdEvento(\d+)Doc(\d+)/);
-    if (m) return { evento: Number(m[1]), doc: Number(m[2]) };
+    const m = td.id.match(/^tdEvento(\d+)/);
+    if (m) return Number(m[1]);
   }
-  return { evento: null, doc: null };
+
+  return null;
+}
+
+function extrairOrdemNoEvento(anchorEl) {
+  // O numero no final do rotulo visivel (INIC1 -> 1, OUT3 -> 3, ...)
+  // corresponde a posicao do documento dentro do seu evento.
+  const texto = (anchorEl.textContent || "").trim();
+  const m = texto.match(/(\d+)\s*$/);
+  return m ? Number(m[1]) : null;
 }
 
 const CLASSE_DESTAQUE = "eproc-exportador-destaque";
@@ -64,22 +90,28 @@ function listarDocumentos() {
     if (!idDoc || vistos.has(idDoc)) continue;
     vistos.add(idDoc);
 
-    const { evento, doc } = extrairNumeroEvento(a);
     documentos.push({
       idDocumento: idDoc,
       nome: (a.textContent || "").trim() || a.getAttribute("data-nome") || idDoc,
       dataNome: a.getAttribute("data-nome") || "",
       mimetype: (a.getAttribute("data-mimetype") || "").toLowerCase(),
       href: a.href,
-      evento,
-      ordemDoc: doc,
+      evento: extrairNumeroEvento(a),
+      ordemDoc: extrairOrdemNoEvento(a),
     });
   }
 
-  // Ordena por evento e depois pela ordem do documento no evento
+  // Ordena por evento e depois pela ordem do documento no evento.
+  // Evento desconhecido vai para o final (nunca para o inicio), para nao
+  // empurrar documentos legitimos do evento 1 (ex.: a peticao inicial)
+  // para depois de casos que nao puderam ser identificados.
   documentos.sort((x, y) => {
-    if (x.evento !== y.evento) return (x.evento || 0) - (y.evento || 0);
-    return (x.ordemDoc || 0) - (y.ordemDoc || 0);
+    const eventoX = x.evento == null ? Infinity : x.evento;
+    const eventoY = y.evento == null ? Infinity : y.evento;
+    if (eventoX !== eventoY) return eventoX - eventoY;
+    const ordemX = x.ordemDoc == null ? Infinity : x.ordemDoc;
+    const ordemY = y.ordemDoc == null ? Infinity : y.ordemDoc;
+    return ordemX - ordemY;
   });
 
   destacarAncoras(anchors);
