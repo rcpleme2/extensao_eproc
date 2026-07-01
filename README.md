@@ -101,23 +101,25 @@ Cada tipo de documento entra no PDF único de um jeito diferente:
 ## Relatório Geral (conclusos para despacho/sentença)
 
 O painel também tem um botão **"Relatórios"** que automatiza uma consulta
-que hoje precisa ser feita manualmente:
+que hoje precisa ser feita manualmente, **sem alterar a página que você
+está vendo**:
 
-1. Abre o item "Relatório Geral" do menu lateral do eproc **na aba atual**
-   (o link já existe no DOM mesmo com o menu colapsado, então a extensão
-   não precisa expandir o menu "Relatórios" antes).
-2. No campo "Situação", seleciona **"MOVIMENTO-AGUARDA DESPACHO"** e clica
-   em "Consultar", lendo o número de processos encontrados (badge
-   "Processos (N)").
+1. Abre uma aba oculta (em segundo plano) com a mesma página/sessão da
+   aba atual, e localiza nela o item "Relatório Geral" do menu lateral do
+   eproc (o link já existe no DOM mesmo com o menu colapsado, então não é
+   preciso simular a expansão do menu "Relatórios" antes).
+2. Nessa aba oculta, no campo "Situação", seleciona **"MOVIMENTO-AGUARDA
+   DESPACHO"** e clica em "Consultar", lendo o número de processos
+   encontrados (badge "Processos (N)").
 3. Repete o mesmo passo para **"MOVIMENTO-AGUARDA SENTENÇA"**.
-4. Mostra os dois números no painel: "Conclusos para despacho: N" e
-   "Conclusos para sentença: N".
+4. Fecha a aba oculta e mostra os dois números no painel: "Conclusos para
+   despacho: N" e "Conclusos para sentença: N".
 
-Como isso **navega a aba atual** para a página do Relatório Geral (saindo
-de onde você estava), use esse botão quando não precisar voltar
-imediatamente para a página anterior. O botão funciona a partir de
-qualquer página do eproc que tenha o menu lateral visível (não precisa
-estar na tela de um processo especificamente).
+Como a aba oculta é criada com `active: false`, ela não rouba o foco nem
+troca o que aparece na tela — só pode aparecer brevemente na barra de
+abas enquanto carrega. O botão funciona a partir de qualquer página do
+eproc que tenha o menu lateral visível (não precisa estar na tela de um
+processo especificamente).
 
 ## Observações
 

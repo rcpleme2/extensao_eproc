@@ -118,15 +118,14 @@ function aguardarCarregamentoAba(tabId) {
   });
 }
 
-function lerCampoDivDochtml(tabId, campo) {
+function lerHtmlDivDochtml(tabId) {
   return chrome.scripting
     .executeScript({
       target: { tabId },
-      func: (campoInjetado) => {
+      func: () => {
         const div = document.getElementById("divdochtml");
-        return div ? div[campoInjetado] : "";
+        return div ? div.innerHTML : "";
       },
-      args: [campo],
     })
     .then((resultados) => (resultados && resultados[0] ? resultados[0].result : ""))
     .catch(() => "");
@@ -138,9 +137,14 @@ function lerCampoDivDochtml(tabId, campo) {
 // AJAX sincrona disparada no onload). Nao da' para replicar isso com um
 // simples fetch (o servidor devolve a mesma casca de novo). Em vez disso,
 // abrimos o documento numa aba oculta, deixamos o script da pagina
-// preencher a div normalmente e lemos o resultado final (HTML ou texto
-// puro, conforme o campo pedido).
-async function abrirAbaEExtrairDivDochtml(url, campo) {
+// preencher a div normalmente e lemos o innerHTML resultante.
+//
+// Sempre le' innerHTML (nunca innerText): innerText depende de layout
+// renderizado, e o Chrome pode nao computar layout numa aba de fundo
+// (active: false), fazendo innerText voltar vazio silenciosamente mesmo
+// com o conteudo ja preenchido no DOM. innerHTML e' pura serializacao do
+// DOM e nao depende de renderizacao.
+async function abrirAbaEExtrairHtmlDivDochtml(url) {
   let tab;
   try {
     tab = await chrome.tabs.create({ url, active: false });
@@ -148,7 +152,7 @@ async function abrirAbaEExtrairDivDochtml(url, campo) {
 
     let conteudo = "";
     for (let tentativa = 0; tentativa < 25; tentativa += 1) {
-      conteudo = await lerCampoDivDochtml(tab.id, campo);
+      conteudo = await lerHtmlDivDochtml(tab.id);
       if (conteudo && conteudo.trim()) break;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -164,13 +168,33 @@ async function abrirAbaEExtrairDivDochtml(url, campo) {
 }
 
 async function obterConteudoHtmlReal(url, nomeDocumento) {
-  const conteudo = await abrirAbaEExtrairDivDochtml(url, "innerHTML");
+  const conteudo = await abrirAbaEExtrairHtmlDivDochtml(url);
   if (!conteudo) return null;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`;
 }
 
+// Converte o HTML do documento para texto simples, preservando quebras de
+// linha aproximadas (troca tags de bloco/<br> por "\n" antes de remover as
+// demais tags), para uso nas paginas de texto corrido do PDF unico.
+function converterHtmlParaTextoSimples(html) {
+  return html
+    .replace(/<(br|BR)\s*\/?>/g, "\n")
+    .replace(/<\/(p|P|div|DIV|li|LI|tr|TR|h[1-6]|H[1-6])>/g, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 async function obterTextoHtmlReal(url) {
-  return abrirAbaEExtrairDivDochtml(url, "innerText");
+  const html = await abrirAbaEExtrairHtmlDivDochtml(url);
+  if (!html) return null;
+  return converterHtmlParaTextoSimples(html);
 }
 
 function baixarIndice(pastaBase, numeroProcesso, documentos) {
@@ -527,51 +551,66 @@ function coletarContagensRelatorioGeralNaPagina(valoresSituacao) {
 }
 
 async function gerarRelatorioGeral() {
-  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!aba || !aba.id) {
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
 
-  // O link "Relatório Geral" ja existe no DOM mesmo com o menu lateral
-  // colapsado (o collapse e' so' visual via CSS), entao nao e' preciso
-  // simular o clique no item "Relatórios" do menu antes.
-  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: () => {
-      const link = document.querySelector('a[href*="acao=relatorio_geral_listar"]');
-      if (!link) return false;
-      link.click();
-      return true;
-    },
-  });
+  // Abre uma aba oculta (active: false) com a mesma pagina/sessao da aba
+  // atual, para nao alterar o que o usuario esta vendo. Todo o fluxo
+  // (achar o link, navegar, selecionar situacao, consultar) acontece
+  // nessa aba oculta, que e' fechada ao final.
+  let abaOculta;
+  try {
+    abaOculta = await chrome.tabs.create({ url: abaAtual.url, active: false });
+    await aguardarCarregamentoAba(abaOculta.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
-  if (!linkEncontrado) {
-    throw new Error(
-      'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
-    );
-  }
-
-  await aguardarCarregamentoAba(aba.id);
-  // Pequena espera extra para os scripts da pagina (bootstrap-select etc.)
-  // terminarem de inicializar apos o carregamento.
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
-  const [{ result: contagens } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: coletarContagensRelatorioGeralNaPagina,
-    args: [
-      {
-        conclusosDespacho: VALOR_SITUACAO_AGUARDA_DESPACHO,
-        conclusosSentenca: VALOR_SITUACAO_AGUARDA_SENTENCA,
+    // O link "Relatório Geral" ja existe no DOM mesmo com o menu lateral
+    // colapsado (o collapse e' so' visual via CSS), entao nao e' preciso
+    // simular o clique no item "Relatórios" do menu antes.
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: abaOculta.id },
+      func: () => {
+        const link = document.querySelector('a[href*="acao=relatorio_geral_listar"]');
+        if (!link) return false;
+        link.click();
+        return true;
       },
-    ],
-  });
+    });
 
-  if (!contagens) {
-    throw new Error("Não foi possível coletar os dados do Relatório Geral.");
+    if (!linkEncontrado) {
+      throw new Error(
+        'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
+      );
+    }
+
+    await aguardarCarregamentoAba(abaOculta.id);
+    // Pequena espera extra para os scripts da pagina (bootstrap-select
+    // etc.) terminarem de inicializar apos o carregamento.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: contagens } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: abaOculta.id },
+      func: coletarContagensRelatorioGeralNaPagina,
+      args: [
+        {
+          conclusosDespacho: VALOR_SITUACAO_AGUARDA_DESPACHO,
+          conclusosSentenca: VALOR_SITUACAO_AGUARDA_SENTENCA,
+        },
+      ],
+    });
+
+    if (!contagens) {
+      throw new Error("Não foi possível coletar os dados do Relatório Geral.");
+    }
+
+    return contagens;
+  } finally {
+    if (abaOculta && abaOculta.id) {
+      chrome.tabs.remove(abaOculta.id).catch(() => {});
+    }
   }
-
-  return contagens;
 }
 
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
