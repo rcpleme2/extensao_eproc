@@ -51,6 +51,12 @@ o documento foi juntado.
 - Os documentos são baixados usando a mesma sessão autenticada do navegador
   (os links já contêm o token de acesso gerado pelo eproc para aquela sessão),
   então é preciso estar logado e com a página do processo aberta.
+- O link de cada documento no eproc (`acao=acessar_documento`) retorna uma
+  página "casca" em HTML com um `<iframe>` que aponta para a URL que
+  realmente serve o arquivo (`acao=acessar_documento_implementacao`). Antes
+  de baixar, a extensão busca essa página casca e extrai a URL real do
+  iframe — sem esse passo, o arquivo salvo seria a casca HTML, não o
+  documento em si.
 - Documentos gerados internamente pelo eproc (certidões, atos ordinatórios,
   mandados, etc.) são páginas HTML e por isso são salvos com extensão
   `.html`, preservando o conteúdo original.

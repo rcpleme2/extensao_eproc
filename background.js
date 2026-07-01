@@ -34,6 +34,33 @@ function montarNomeArquivo(pastaBase, doc, indice) {
   return `${pastaBase}/${eventoStr}_${nomeBase}.${ext}`;
 }
 
+const REGEX_IFRAME_CONTEUDO = /id=["']conteudoIframe["'][^>]*\ssrc=["']([^"']+)["']/i;
+
+// A URL do link do documento (acao=acessar_documento) retorna uma pagina
+// "casca" em HTML com um <iframe id="conteudoIframe"> cujo src e' quem
+// efetivamente serve o arquivo (acao=acessar_documento_implementacao).
+// Sem isso, o download salva a casca HTML como se fosse o arquivo real.
+async function resolverUrlReal(url) {
+  let resposta;
+  try {
+    resposta = await fetch(url, { credentials: "same-origin" });
+  } catch (e) {
+    return url;
+  }
+  if (!resposta.ok) return url;
+
+  const texto = await resposta.text();
+  const match = texto.match(REGEX_IFRAME_CONTEUDO);
+  if (!match) return url;
+
+  const srcIframe = match[1].replace(/&amp;/g, "&");
+  try {
+    return new URL(srcIframe, url).toString();
+  } catch (e) {
+    return url;
+  }
+}
+
 function baixarUm(filename, url) {
   return new Promise((resolve, reject) => {
     chrome.downloads.download({ url, filename, saveAs: false, conflictAction: "uniquify" }, (downloadId) => {
@@ -81,7 +108,8 @@ async function processarFila(numeroProcesso, documentos, sender) {
   for (const doc of documentos) {
     const filename = montarNomeArquivo(pastaBase, doc);
     try {
-      await baixarUm(filename, doc.href);
+      const urlReal = await resolverUrlReal(doc.href);
+      await baixarUm(filename, urlReal);
     } catch (e) {
       erros.push({ nome: doc.nome, mensagem: String(e) });
     }
