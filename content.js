@@ -122,6 +122,33 @@ function listarDocumentos() {
   };
 }
 
+// Na tabela de movimentacao, o eproc identifica o autor do ato so pela
+// sigla funcional (ex.: "S287431"). O nome completo e o cargo ja existem
+// no atributo aria-label do proprio label, usado hoje so para popular o
+// tooltip nativo ao passar o mouse ("NOME<br>CARGO<br>LOTACAO", com as
+// entidades HTML ja decodificadas pelo navegador). Trocamos apenas o texto
+// visivel pelo nome completo, sem mexer no aria-label/tooltip original.
+function substituirSiglaPorNomeUsuario() {
+  const labels = document.querySelectorAll(
+    "label.infraEventoUsuario[aria-label]:not([data-nome-substituido])"
+  );
+  for (const label of labels) {
+    const ariaLabel = label.getAttribute("aria-label") || "";
+    const nomeCompleto = ariaLabel.split("<br>")[0].trim();
+    if (nomeCompleto) {
+      label.textContent = nomeCompleto;
+      label.setAttribute("data-nome-substituido", "1");
+    }
+  }
+}
+
+substituirSiglaPorNomeUsuario();
+
+const observadorEventos = new MutationObserver(() => {
+  substituirSiglaPorNomeUsuario();
+});
+observadorEventos.observe(document.body, { childList: true, subtree: true });
+
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "LISTAR_DOCUMENTOS") {
     sendResponse(listarDocumentos());

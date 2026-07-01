@@ -55,6 +55,15 @@ demais seguem na ordem em que os documentos foram juntados ao processo.
    `Downloads/eproc/<numero_do_processo>/`.
 5. Acompanhe a barra de progresso no próprio painel.
 
+## Nomes de usuário na movimentação
+
+Na tabela de movimentação do processo, o eproc mostra apenas a sigla
+funcional de quem praticou o ato (ex.: `S287431`). A extensão troca
+automaticamente esse texto pelo nome completo do usuário (ex.:
+`CRISLAINY MARCELO`), lido do próprio HTML da página (o nome já existe ali,
+usado hoje só para o tooltip que aparece ao passar o mouse). O tooltip com
+cargo e lotação continua funcionando normalmente.
+
 ## Observações
 
 - Os documentos são baixados usando a mesma sessão autenticada do navegador
