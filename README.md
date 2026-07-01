@@ -63,10 +63,15 @@ demais seguem na ordem em que os documentos foram juntados ao processo.
   documento em si.
 - Documentos gerados internamente pelo eproc (certidões, atos ordinatórios,
   mandados, etc.) são páginas HTML. Para esses, a URL do iframe ainda
-  devolve uma segunda casca (uma página vazia que carrega o conteúdo via
-  AJAX no carregamento). A extensão refaz essa chamada AJAX
-  (`X-Requested-With: XMLHttpRequest`) para obter o conteúdo real da
-  certidão/ato e salva um `.html` autocontido só com esse conteúdo.
+  devolve uma segunda casca: uma página com uma área vazia que só é
+  preenchida depois que o JavaScript da própria página roda no navegador
+  (uma chamada AJAX síncrona disparada ao carregar a página) — não dá para
+  reproduzir isso com uma simples requisição de rede. Por isso, para esses
+  documentos a extensão abre uma aba oculta com a página real, espera o
+  script nativo do eproc preencher o conteúdo, lê o resultado e fecha a
+  aba, salvando um `.html` autocontido só com o conteúdo real da
+  certidão/ato. Isso pode fazer o download desses documentos específicos
+  demorar um pouco mais (a aba precisa carregar de verdade).
 - A extensão funciona em qualquer domínio que siga o padrão de URL do eproc
   (`.../eproc/controlador.php`), não é restrita a um tribunal específico.
 - Se um download falhar (ex.: link expirado), o erro aparece no popup ao

@@ -77,29 +77,61 @@ function construirDataUrl(mimetype, texto) {
   return `data:${mimetype};charset=utf-8;base64,` + btoa(unescape(encodeURIComponent(texto)));
 }
 
-// Para documentos "html" (certidoes, atos ordinatorios, mandados), a URL
-// final ainda retorna uma segunda casca: uma pagina com uma div vazia
-// (#divdochtml) que e' preenchida via uma chamada AJAX disparada no
-// onload da propria pagina, para essa mesma URL. O servidor so devolve o
-// conteudo real quando a requisicao chega marcada como AJAX
-// (X-Requested-With: XMLHttpRequest); sem isso, devolve a casca com
-// scripts. Aqui replicamos essa chamada para obter o conteudo real.
+function aguardarCarregamentoAba(tabId) {
+  return new Promise((resolve) => {
+    function listener(idAtualizado, changeInfo) {
+      if (idAtualizado === tabId && changeInfo.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+function lerConteudoDivDochtml(tabId) {
+  return chrome.scripting
+    .executeScript({
+      target: { tabId },
+      func: () => {
+        const div = document.getElementById("divdochtml");
+        return div ? div.innerHTML : "";
+      },
+    })
+    .then((resultados) => (resultados && resultados[0] ? resultados[0].result : ""))
+    .catch(() => "");
+}
+
+// Documentos "html" (certidoes, atos ordinatorios, mandados) sao servidos
+// via uma pagina com uma div vazia (#divdochtml) que so e' preenchida
+// depois que o proprio JavaScript da pagina roda no navegador (uma chamada
+// AJAX sincrona disparada no onload). Nao da' para replicar isso com um
+// simples fetch (o servidor devolve a mesma casca de novo). Em vez disso,
+// abrimos o documento numa aba oculta, deixamos o script da pagina
+// preencher a div normalmente e lemos o resultado final.
 async function obterConteudoHtmlReal(url, nomeDocumento) {
-  let resposta;
+  let tab;
   try {
-    resposta = await fetch(url, {
-      credentials: "same-origin",
-      headers: { "X-Requested-With": "XMLHttpRequest" },
-    });
+    tab = await chrome.tabs.create({ url, active: false });
+    await aguardarCarregamentoAba(tab.id);
+
+    let conteudo = "";
+    for (let tentativa = 0; tentativa < 25; tentativa += 1) {
+      conteudo = await lerConteudoDivDochtml(tab.id);
+      if (conteudo && conteudo.trim()) break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    if (!conteudo || !conteudo.trim()) return null;
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`;
   } catch (e) {
     return null;
+  } finally {
+    if (tab && tab.id) {
+      chrome.tabs.remove(tab.id).catch(() => {});
+    }
   }
-  if (!resposta.ok) return null;
-
-  const conteudo = await resposta.text();
-  if (!conteudo || !conteudo.trim()) return null;
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`;
 }
 
 function baixarIndice(pastaBase, numeroProcesso, documentos) {
@@ -145,8 +177,8 @@ async function processarFila(numeroProcesso, documentos, sender) {
         if (htmlFinal) {
           await baixarUm(filename, construirDataUrl("text/html", htmlFinal));
         } else {
-          // Nao foi possivel obter o conteudo via AJAX; baixa o que
-          // conseguimos como ultimo recurso.
+          // Nao foi possivel capturar o conteudo renderizado pela aba;
+          // baixa a pagina bruta como ultimo recurso.
           await baixarUm(filename, urlReal);
         }
       } else {
