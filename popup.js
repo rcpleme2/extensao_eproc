@@ -5,12 +5,29 @@ const areaProcesso = document.getElementById("area-processo");
 const numeroProcessoEl = document.getElementById("numero-processo");
 const totalDocumentosEl = document.getElementById("total-documentos");
 const listaDocumentosEl = document.getElementById("lista-documentos");
+const areaOpcoes = document.getElementById("area-opcoes");
+const chkIndividuais = document.getElementById("chk-individuais");
+const chkPdfUnico = document.getElementById("chk-pdf-unico");
 const areaProgresso = document.getElementById("area-progresso");
 const barraProgresso = document.getElementById("barra-progresso");
 const textoProgresso = document.getElementById("texto-progresso");
 const areaErros = document.getElementById("area-erros");
 
+const ROTULO_FASE = {
+  individuais: "Arquivos individuais",
+  "pdf-unico": "PDF único",
+};
+
 let estadoAtual = { numeroProcesso: null, documentos: [] };
+
+function atualizarEstadoBotaoBaixar() {
+  const temDocumentos = estadoAtual.documentos.length > 0;
+  const algumaOpcaoMarcada = chkIndividuais.checked || chkPdfUnico.checked;
+  btnBaixar.disabled = !(temDocumentos && algumaOpcaoMarcada);
+}
+
+chkIndividuais.addEventListener("change", atualizarEstadoBotaoBaixar);
+chkPdfUnico.addEventListener("change", atualizarEstadoBotaoBaixar);
 
 function setStatus(texto) {
   areaStatus.textContent = texto;
@@ -47,8 +64,10 @@ btnDetectar.addEventListener("click", async () => {
       setStatus(
         "Nenhum documento encontrado. Confirme que voce esta na pagina de detalhes do processo no eproc."
       );
-      btnBaixar.disabled = true;
+      estadoAtual = { numeroProcesso: null, documentos: [] };
+      atualizarEstadoBotaoBaixar();
       areaProcesso.hidden = true;
+      areaOpcoes.hidden = true;
       listaDocumentosEl.innerHTML = "";
       return;
     }
@@ -57,9 +76,10 @@ btnDetectar.addEventListener("click", async () => {
     numeroProcessoEl.textContent = resposta.numeroProcesso;
     totalDocumentosEl.textContent = String(resposta.documentos.length);
     areaProcesso.hidden = false;
+    areaOpcoes.hidden = false;
     renderizarLista(resposta.documentos);
-    btnBaixar.disabled = false;
-    setStatus("Documentos detectados. Clique em \"Baixar todos\" para exportar.");
+    atualizarEstadoBotaoBaixar();
+    setStatus("Documentos detectados. Escolha o que baixar e clique em \"Baixar\".");
   } catch (e) {
     setStatus(
       "Nao foi possivel ler a pagina. Verifique se voce esta em uma pagina de processo do eproc e tente novamente."
@@ -69,19 +89,28 @@ btnDetectar.addEventListener("click", async () => {
 
 btnBaixar.addEventListener("click", async () => {
   if (!estadoAtual.documentos.length) return;
+  const opcoes = {
+    individuais: chkIndividuais.checked,
+    pdfUnico: chkPdfUnico.checked,
+  };
+  if (!opcoes.individuais && !opcoes.pdfUnico) return;
+
   btnBaixar.disabled = true;
   btnDetectar.disabled = true;
+  chkIndividuais.disabled = true;
+  chkPdfUnico.disabled = true;
   areaProgresso.hidden = false;
   barraProgresso.value = 0;
   barraProgresso.max = estadoAtual.documentos.length;
   textoProgresso.textContent = `0 / ${estadoAtual.documentos.length}`;
   areaErros.hidden = true;
-  setStatus("Baixando documentos...");
+  setStatus("Baixando...");
 
   chrome.runtime.sendMessage({
     tipo: "BAIXAR_DOCUMENTOS",
     numeroProcesso: estadoAtual.numeroProcesso,
     documentos: estadoAtual.documentos,
+    opcoes,
   });
 });
 
@@ -91,12 +120,17 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   if (mensagem.tipo === "PROGRESSO_DOWNLOAD") {
     barraProgresso.value = mensagem.concluidos;
     barraProgresso.max = mensagem.total;
-    textoProgresso.textContent = `${mensagem.concluidos} / ${mensagem.total}`;
+    const rotulo = ROTULO_FASE[mensagem.fase] || "";
+    textoProgresso.textContent = `${rotulo ? rotulo + ": " : ""}${mensagem.concluidos} / ${mensagem.total}`;
+    if (rotulo) setStatus(`Gerando ${rotulo.toLowerCase()}...`);
   }
 
   if (mensagem.tipo === "DOWNLOAD_FINALIZADO") {
     btnBaixar.disabled = false;
     btnDetectar.disabled = false;
+    chkIndividuais.disabled = false;
+    chkPdfUnico.disabled = false;
+    atualizarEstadoBotaoBaixar();
     setStatus(`Concluido! Arquivos salvos em Downloads/${mensagem.pasta}`);
     if (mensagem.erros && mensagem.erros.length > 0) {
       areaErros.hidden = false;

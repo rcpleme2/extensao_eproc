@@ -21,7 +21,8 @@ Downloads/eproc/<numero_do_processo>/
   0005_CERT1.html
   0006_MANDCITACAO1.html
   ...
-  _indice.json   (lista com sequencial, evento, nome, tipo e URL de cada documento)
+  _indice.json                          (lista com sequencial, evento, nome, tipo e URL de cada documento)
+  <numero_do_processo>_completo.pdf     (opcional: todos os documentos combinados em um único PDF)
 ```
 
 O número no início do nome do arquivo é um sequencial global de 4 dígitos
@@ -51,9 +52,17 @@ demais seguem na ordem em que os documentos foram juntados ao processo.
    encontrou na página e destaca (fundo amarelo claro) cada link de
    documento reconhecido diretamente na página, para conferência visual
    rápida contra os documentos exibidos.
-4. Clique em **"Baixar todos"** — os arquivos serão baixados para
-   `Downloads/eproc/<numero_do_processo>/`.
-5. Acompanhe a barra de progresso no próprio painel.
+4. Escolha o que deseja gerar, marcando uma ou as duas caixas:
+   - **Arquivos individuais** (marcada por padrão): um arquivo por
+     documento, como já era feito.
+   - **PDF único combinado**: gera também um único PDF com todos os
+     documentos do processo, na mesma ordem cronológica dos arquivos
+     individuais (petição inicial primeiro).
+5. Clique em **"Baixar"** — o que estiver marcado é gerado na mesma
+   execução, em `Downloads/eproc/<numero_do_processo>/`.
+6. Acompanhe a barra de progresso no próprio painel (ela indica a fase
+   atual — arquivos individuais ou PDF único — quando as duas opções
+   estão marcadas).
 
 ## Nomes de usuário na movimentação
 
@@ -64,6 +73,30 @@ fonte menor (ex.: `CRISLAINY MARCELO - DIRETOR DE DISTRIBUIÇÃO`), lido do
 próprio HTML da página (a informação já existe ali, usada hoje só para o
 tooltip que aparece ao passar o mouse). O tooltip com cargo e lotação
 continua funcionando normalmente.
+
+## PDF único combinado
+
+Ao marcar a opção "PDF único combinado", a extensão monta um único arquivo
+`<numero_do_processo>_completo.pdf` com todos os documentos do processo, na
+mesma ordem cronológica usada na numeração sequencial. A montagem usa a
+biblioteca [pdf-lib](https://pdf-lib.js.org/) (vendorizada em
+`libs/pdf-lib.min.js`), rodando inteiramente dentro da extensão — nenhum
+arquivo é enviado para servidores externos.
+
+Cada tipo de documento entra no PDF único de um jeito diferente:
+- **PDF**: as páginas do documento original são copiadas para o PDF final,
+  sem perda de qualidade.
+- **Imagens** (jpg, png, gif, bmp, webp): a imagem é convertida e desenhada
+  ocupando uma página inteira, do tamanho da imagem original.
+- **HTML** (certidões, atos ordinatórios, mandados): como não dá para
+  "imprimir" a página perfeitamente sem permissões extras, a extensão
+  extrai o **texto** do documento e desenha como texto corrido em uma ou
+  mais páginas de PDF. Tabelas, negrito e o layout original não são
+  preservados nessa versão combinada — se a formatação exata importar,
+  use o `.html` individual (esse sim fiel ao original).
+- **Outros tipos** (raros): quando não é possível incorporar o arquivo,
+  uma página de aviso é inserida no lugar, indicando para consultar o
+  arquivo individual.
 
 ## Observações
 

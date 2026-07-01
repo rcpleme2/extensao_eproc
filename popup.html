@@ -15,12 +15,23 @@
 
   <div class="botoes">
     <button id="btn-detectar">Detectar documentos</button>
-    <button id="btn-baixar" disabled>Baixar todos</button>
   </div>
 
   <div id="area-processo" class="processo" hidden>
     Processo: <strong id="numero-processo"></strong>
     (<span id="total-documentos"></span> documento(s))
+  </div>
+
+  <div id="area-opcoes" class="opcoes" hidden>
+    <label class="opcao-checkbox">
+      <input type="checkbox" id="chk-individuais" checked />
+      Arquivos individuais
+    </label>
+    <label class="opcao-checkbox">
+      <input type="checkbox" id="chk-pdf-unico" />
+      PDF único combinado
+    </label>
+    <button id="btn-baixar" disabled>Baixar</button>
   </div>
 
   <div id="area-progresso" class="progresso" hidden>
