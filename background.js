@@ -1362,39 +1362,49 @@ function consultarUmaVezNaPagina(parametros) {
 
   // Simula a digitacao no span editavel do Tagify e clica no item do
   // dropdown cujo atributo "value" bate com o alvo.
-  async function marcarPeticaoUrgente() {
-    const wrapper = document.getElementById("selDadoComplementar-wrapper");
-    if (!wrapper) {
-      throw new Error('Campo "Informação complementar" não encontrado nesta página.');
-    }
-    const inputSpan = wrapper.querySelector(".tagify__input");
-    const tagsEl = wrapper.querySelector("tags.tagify");
-    if (!inputSpan || !tagsEl) {
-      throw new Error('Estrutura do campo "Informação complementar" não reconhecida.');
-    }
+  // Localiza um campo Tagify pelo aria-label visivel do span editavel
+  // (ex.: "Informação complementar", "Localizador") - os dois campos sao
+  // construidos pelo mesmo widget (Tagify), so' mudando o rotulo e a
+  // lista de sugestoes.
+  function localizarCampoTagify(ariaLabel) {
+    const inputSpan = document.querySelector(`span.tagify__input[aria-label="${ariaLabel}"]`);
+    if (!inputSpan) return null;
+    const tagsEl = inputSpan.closest("tags.tagify");
+    if (!tagsEl) return null;
+    return { inputSpan, tagsEl };
+  }
 
-    const TEXTO_BUSCA = "Petição Urgente";
-    const VALOR_ALVO = "Petição Urgente - Sim";
+  // Digita "textoDigitado" no campo, espera a sugestao cujo texto/valor
+  // bate com "valorAlvo" aparecer no dropdown e clica nela - generaliza o
+  // que antes era so' "marcarPeticaoUrgente", reaproveitado agora tambem
+  // para selecionar um Localizador especifico no Relatório Gerencial da
+  // Unidade (Corregedoria).
+  async function selecionarTagify(ariaLabel, textoDigitado, valorAlvo) {
+    const campo = localizarCampoTagify(ariaLabel);
+    if (!campo) {
+      throw new Error(`Campo "${ariaLabel}" não encontrado nesta página.`);
+    }
+    const { inputSpan, tagsEl } = campo;
 
     inputSpan.focus();
-    inputSpan.textContent = TEXTO_BUSCA;
+    inputSpan.textContent = textoDigitado;
     inputSpan.dispatchEvent(
-      new InputEvent("input", { bubbles: true, inputType: "insertText", data: TEXTO_BUSCA })
+      new InputEvent("input", { bubbles: true, inputType: "insertText", data: textoDigitado })
     );
 
     let itemAlvo = null;
     for (let tentativa = 0; tentativa < 25; tentativa += 1) {
       await aguardar(200);
       itemAlvo =
-        document.querySelector(`.tagify__dropdown__item[value="${VALOR_ALVO}"]`) ||
+        document.querySelector(`.tagify__dropdown__item[value="${valorAlvo}"]`) ||
         Array.from(document.querySelectorAll(".tagify__dropdown__item")).find(
-          (el) => (el.textContent || "").trim() === VALOR_ALVO
+          (el) => (el.textContent || "").trim() === valorAlvo
         );
       if (itemAlvo) break;
     }
 
     if (!itemAlvo) {
-      throw new Error(`Sugestão "${VALOR_ALVO}" não encontrada no dropdown do Tagify.`);
+      throw new Error(`Sugestão "${valorAlvo}" não encontrada no dropdown do campo "${ariaLabel}".`);
     }
 
     itemAlvo.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
@@ -1404,8 +1414,12 @@ function consultarUmaVezNaPagina(parametros) {
     await aguardar(200);
 
     if (tagsEl.querySelectorAll(".tagify__tag").length === 0) {
-      throw new Error('A tag "Petição Urgente - Sim" não foi adicionada ao campo.');
+      throw new Error(`A tag "${valorAlvo}" não foi adicionada ao campo "${ariaLabel}".`);
     }
+  }
+
+  async function marcarPeticaoUrgente() {
+    await selecionarTagify("Informação complementar", "Petição Urgente", "Petição Urgente - Sim");
   }
 
   async function clicarConsultarELer() {
@@ -1468,6 +1482,14 @@ function consultarUmaVezNaPagina(parametros) {
         await marcarPeticaoUrgente();
       }
 
+      // Usado pelo Relatório Gerencial da Unidade (Corregedoria): filtra
+      // a consulta por um Localizador especifico (campo Tagify
+      // "Localizador", que so' lista os localizadores da unidade depois
+      // que um Órgão/Juízo foi selecionado no outro filtro).
+      if (parametros.valorLocalizador) {
+        await selecionarTagify("Localizador", parametros.valorLocalizador, parametros.valorLocalizador);
+      }
+
       await aguardar(200);
       const contagem = await clicarConsultarELer();
       return { contagem, erro: null };
@@ -1486,6 +1508,135 @@ function clicarLinkRelatorioGeralNaPagina() {
   if (!link) return false;
   link.click();
   return true;
+}
+
+// Seleciona uma unidade (Órgão/Juízo) no Relatório Geral, sem rodar
+// nenhuma consulta - usado antes de ler as opcoes do campo "Localizador"
+// (que so' lista os localizadores da unidade escolhida depois dessa
+// selecao). Autocontida, executada via chrome.scripting.executeScript.
+function selecionarOrgaoJuizoRelatorioGeralNaPagina(valorOrgaoJuizo) {
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) return { ok: false, erro: 'Campo "Órgão/Juízo" (#selIdOrgaoJuizo) não encontrado nesta página.' };
+
+  let encontrouOpcao = false;
+  for (const opcao of select.options) {
+    const selecionada = opcao.value === valorOrgaoJuizo;
+    opcao.selected = selecionada;
+    if (selecionada) encontrouOpcao = true;
+  }
+  if (!encontrouOpcao) {
+    return { ok: false, erro: `Unidade "${valorOrgaoJuizo}" não encontrada no filtro Órgão/Juízo.` };
+  }
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return { ok: true, erro: null };
+}
+
+// Le' todas as opcoes disponiveis no campo "Localizador" do Relatório
+// Geral (widget Tagify) - so' funciona depois que um Órgão/Juízo foi
+// selecionado no outro filtro da tela, que e' quando esse campo passa a
+// listar os localizadores daquela unidade. Digitar uma string vazia no
+// campo (em vez de um texto de busca especifico, como
+// "selecionarTagify" faz) e' o que faz o dropdown mostrar a lista
+// completa de sugestoes em vez de um resultado filtrado. Autocontida,
+// executada via chrome.scripting.executeScript. Nunca lanca excecao:
+// sempre resolve com { opcoes, erro }.
+function listarLocalizadoresNoFiltroRelatorioGeralNaPagina() {
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  return (async () => {
+    try {
+      const inputSpan = document.querySelector('span.tagify__input[aria-label="Localizador"]');
+      if (!inputSpan) {
+        return {
+          opcoes: [],
+          erro: 'Campo "Localizador" não encontrado nesta página (selecione um Órgão/Juízo primeiro).',
+        };
+      }
+
+      inputSpan.focus();
+      inputSpan.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "" }));
+
+      let itens = [];
+      for (let tentativa = 0; tentativa < 25; tentativa += 1) {
+        await aguardar(200);
+        itens = Array.from(document.querySelectorAll(".tagify__dropdown__item"));
+        if (itens.length > 0) break;
+      }
+
+      if (itens.length === 0) {
+        return { opcoes: [], erro: 'Nenhum localizador encontrado no campo "Localizador" (dropdown vazio).' };
+      }
+
+      const opcoes = itens.map((el) => ({
+        valor: el.getAttribute("value") || (el.textContent || "").trim(),
+        texto: (el.textContent || "").trim(),
+      }));
+
+      return { opcoes, erro: null };
+    } catch (e) {
+      return { opcoes: [], erro: e && e.message ? e.message : String(e) };
+    }
+  })();
+}
+
+// Abre uma aba oculta, navega ate' o Relatório Geral, seleciona a
+// unidade pedida e le' as opcoes disponiveis no campo "Localizador" -
+// usado pelo Relatório Gerencial da Unidade antes de consultar o total
+// de processos de cada um (uma consulta por localizador, cada uma na
+// sua propria aba - ver comentario sobre estabilidade do Tagify acima de
+// "gerarRelatorioGeral").
+async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJuizo) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioGeralNaPagina,
+    });
+
+    if (!linkEncontrado) {
+      return {
+        opcoes: [],
+        erro:
+          'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+      args: [valorOrgaoJuizo],
+    });
+
+    if (!resultadoSelecao || !resultadoSelecao.ok) {
+      return { opcoes: [], erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo." };
+    }
+
+    // Da' um tempo para o campo "Localizador" (Tagify) atualizar sua
+    // lista de sugestoes apos a troca de unidade.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: listarLocalizadoresNoFiltroRelatorioGeralNaPagina,
+    });
+
+    return result || { opcoes: [], erro: "Sem resultado ao ler as opções do campo Localizador." };
+  } catch (e) {
+    return { opcoes: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
 }
 
 // Roda ja' na tela do Relatório Geral, apos uma consulta ter sido feita:
@@ -1801,13 +1952,51 @@ function formatarLinhasBlocoUnidade(titulo, bloco) {
   return linhas;
 }
 
+// Le' o numero de processos de cada Localizador de uma unidade -
+// DIFERENTE do resto do painel (que usa a tela "Localizadores do
+// Órgão"): aqui a extracao e' feita direto no Relatório Geral, ja' que
+// e' onde o campo "Localizador" (Tagify) fica disponivel apos escolher
+// um Órgão/Juízo. Aduz cada localizador um de cada vez: seleciona o
+// Órgão, le' as opcoes do campo Localizador, e para cada uma roda uma
+// consulta (numa aba nova por consulta, mesmo padrao de estabilidade ja'
+// usado para o campo Tagify de "Informação complementar") anotando o
+// total de processos encontrado.
+async function consultarLocalizadoresUnidadeViaRelatorioGeral(urlBase, valorOrgaoJuizo, notificar) {
+  notificar("Lendo os localizadores disponíveis no Relatório Geral...");
+  const { opcoes, erro: erroListagem } = await abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJuizo);
+
+  if (opcoes.length === 0) {
+    return {
+      localizadores: [],
+      erro: erroListagem || 'Nenhum localizador encontrado no campo "Localizador" do Relatório Geral.',
+    };
+  }
+
+  const localizadores = [];
+  const erros = [];
+  for (let i = 0; i < opcoes.length; i += 1) {
+    const opcao = opcoes[i];
+    notificar(`Consultando localizador ${i + 1}/${opcoes.length}: ${opcao.texto}...`);
+    const r = await abrirAbaEConsultarUmaVez(urlBase, {
+      valorSituacao: null,
+      urgente: false,
+      diasSituacao: null,
+      valorOrgaoJuizo,
+      valorLocalizador: opcao.texto,
+    });
+    localizadores.push({ nome: opcao.texto, totalProcessos: r.contagem || 0 });
+    if (r.erro) erros.push(`${opcao.texto}: ${r.erro}`);
+  }
+
+  return { localizadores, erro: erros.length > 0 ? erros.join(" | ") : null };
+}
+
 // Orquestra o Relatório Gerencial da Unidade: navega a aba atual ate' o
 // Relatório Geral, roda as consultas de despacho/sentenca e de processos
 // sem movimentação filtradas pela unidade escolhida (reaproveitando as
-// mesmas funcoes do relatorio rapido do painel), coleta a lista de
-// Localizadores dessa unidade (reaproveitando a mesma coleta multi-
-// pagina ja' usada no cartao "Busca específica de localizadores") e
-// gera tudo num unico PDF.
+// mesmas funcoes do relatorio rapido do painel), consulta o total de
+// processos de cada Localizador dessa unidade (via campo "Localizador"
+// do proprio Relatório Geral) e gera tudo num unico PDF.
 async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
@@ -1851,10 +2040,10 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, aoPr
     if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
   }
 
-  notificar(`Abrindo a lista de Localizadores da unidade "${nomeUnidade}"...`);
-  const { itens: localizadores, erro: erroLocalizadores } = await abrirAbaEColetarLocalizadores(
+  const { localizadores, erro: erroLocalizadores } = await consultarLocalizadoresUnidadeViaRelatorioGeral(
     abaAtual.url,
-    valorUnidade
+    valorUnidade,
+    notificar
   );
   const localizadoresOrdenados = [...localizadores].sort((a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0));
 
@@ -2044,30 +2233,6 @@ function clicarLinkLocalizadoresNaPagina() {
   if (!link) return false;
   link.click();
   return true;
-}
-
-// Usado pelo Relatório Gerencial da Unidade: na tela de "Localizadores
-// do Órgão", o filtro "Órgão/Juízo" (#selIdOrgaoJuizo) e' um <select>
-// simples (nao um bootstrap-select) cujo onchange ja' submete o
-// formulario da propria pagina (recarregamento completo, filtrado pela
-// unidade escolhida) - so' precisa selecionar a opcao e disparar
-// "change" para o proprio onchange do eproc fazer o resto. Autocontida,
-// executada via chrome.scripting.executeScript.
-function selecionarOrgaoJuizoLocalizadoresNaPagina(valorOrgaoJuizo) {
-  const select = document.getElementById("selIdOrgaoJuizo");
-  if (!select) return { ok: false, erro: 'Campo "Órgão/Juízo" (#selIdOrgaoJuizo) não encontrado nesta página.' };
-
-  let encontrouOpcao = false;
-  for (const opcao of select.options) {
-    const selecionada = opcao.value === valorOrgaoJuizo;
-    opcao.selected = selecionada;
-    if (selecionada) encontrouOpcao = true;
-  }
-  if (!encontrouOpcao) {
-    return { ok: false, erro: `Unidade "${valorOrgaoJuizo}" não encontrada no filtro Órgão/Juízo.` };
-  }
-  select.dispatchEvent(new Event("change", { bubbles: true }));
-  return { ok: true, erro: null };
 }
 
 // Raspa a tabela da pagina ATUAL (colunas confirmadas numa pagina real do
@@ -2384,10 +2549,7 @@ async function coletarTodasPaginasInfraTable(tabId, funcRaspar) {
   return { itens: todos, erro: null };
 }
 
-// "valorOrgaoJuizo" (opcional): usado pelo Relatório Gerencial da
-// Unidade para filtrar a listagem por uma unidade especifica, em vez da
-// unidade padrao do perfil logado.
-async function abrirAbaEColetarLocalizadores(urlBase, valorOrgaoJuizo) {
+async function abrirAbaEColetarLocalizadores(urlBase) {
   let aba;
   try {
     aba = await chrome.tabs.create({ url: urlBase, active: false });
@@ -2409,23 +2571,6 @@ async function abrirAbaEColetarLocalizadores(urlBase, valorOrgaoJuizo) {
 
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
-
-    if (valorOrgaoJuizo) {
-      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
-        target: { tabId: aba.id },
-        func: selecionarOrgaoJuizoLocalizadoresNaPagina,
-        args: [valorOrgaoJuizo],
-      });
-
-      if (!resultadoSelecao || !resultadoSelecao.ok) {
-        return { itens: [], erro: (resultadoSelecao && resultadoSelecao.erro) || 'Falha ao selecionar a unidade no filtro Órgão/Juízo.' };
-      }
-
-      // O onchange da pagina submete o formulario (recarregamento
-      // completo, filtrado pela unidade escolhida).
-      await aguardarCarregamentoAba(aba.id);
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
 
     return await coletarTodasPaginasInfraTable(aba.id, raspaerLocalizadoresNaPagina);
   } catch (e) {

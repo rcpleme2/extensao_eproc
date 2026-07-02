@@ -403,16 +403,26 @@ perfil). Fluxo:
      urgentes (calculado como Total − Urgentes, sem precisar de uma
      consulta a mais) e Aguardando há mais de 90 dias.
    - Processos sem movimentação há mais de 30, 90 e 120 dias.
-   - A lista completa de Localizadores da unidade (nome, descrição e
-     total de processos), ordenada do maior para o menor total.
+   - O total de processos de cada Localizador da unidade, ordenado do
+     maior para o menor total.
 
    Tudo isso reaproveita as funções já existentes no painel: as mesmas
    consultas do Relatório Geral (agora com um filtro extra de
-   Órgão/Juízo), a mesma coleta multi-página de Localizadores do Órgão
-   (idem, com o filtro de unidade) e o mesmo gerador de tabela em PDF —
-   só que combinados num único arquivo
-   `relatorio_gerencial_<unidade>_<data>.pdf` em `Downloads/eproc/`, em
-   vez de arquivos separados.
+   Órgão/Juízo) e o mesmo gerador de tabela em PDF — combinados num
+   único arquivo `relatorio_gerencial_<unidade>_<data>.pdf` em
+   `Downloads/eproc/`, em vez de arquivos separados.
+
+   A extração dos Localizadores **não** usa a tela "Localizadores do
+   Órgão" (diferente do resto do painel) — o Relatório Geral tem seu
+   próprio campo **"Localizador"** (um widget Tagify, igual ao de
+   "Informação complementar"), que só lista os localizadores da unidade
+   depois que um Órgão/Juízo é selecionado no filtro da tela. A extensão
+   lê essa lista de sugestões e, um de cada vez, seleciona cada
+   localizador no campo e roda a consulta, anotando o total de processos
+   do resultado — uma aba nova por localizador, seguindo o mesmo padrão
+   de estabilidade já usado para o campo Tagify de "Informação
+   complementar" (reaproveitar a mesma aba para duas interações seguidas
+   com esse tipo de campo se mostrou instável nos testes anteriores).
 
 ## Regras de Automação
 
