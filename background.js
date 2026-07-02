@@ -151,11 +151,24 @@ function lerHtmlDivDochtml(tabId) {
 // poder relatar o motivo exato de uma falha em vez de so' "nao deu certo".
 async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
   let tab;
+  let abaAnteriorId = null;
   try {
+    // O Chrome desacelera bastante a execucao de script em abas em
+    // segundo plano (timers, requestAnimationFrame, e ate' scripts
+    // condicionados a pagina estar "visivel"), o que pode impedir a
+    // propria pagina do eproc de terminar de preencher a div via AJAX
+    // enquanto a aba nunca fica em primeiro plano. Por isso a aba e'
+    // criada em PRIMEIRO PLANO (active: true) so' durante essa extracao -
+    // guardamos qual aba estava ativa antes para devolver o foco a ela
+    // no final, minimizando a interrupcao visual para quem esta' usando
+    // o navegador.
+    const [abaAnterior] = await chrome.tabs.query({ active: true, currentWindow: true });
+    abaAnteriorId = abaAnterior && abaAnterior.id;
+
     try {
-      tab = await chrome.tabs.create({ url, active: false });
+      tab = await chrome.tabs.create({ url, active: true });
     } catch (e) {
-      return { conteudo: null, erro: `Falha ao abrir aba oculta: ${String(e)}` };
+      return { conteudo: null, erro: `Falha ao abrir aba: ${String(e)}` };
     }
 
     await aguardarCarregamentoAba(tab.id);
@@ -179,6 +192,9 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
   } finally {
     if (tab && tab.id) {
       chrome.tabs.remove(tab.id).catch(() => {});
+    }
+    if (abaAnteriorId) {
+      chrome.tabs.update(abaAnteriorId, { active: true }).catch(() => {});
     }
   }
 }
@@ -685,6 +701,20 @@ const FRASES_NAO_SAO_NOMES = [
 const REGEX_NOME_PROVAVEL =
   /\b[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+(?:de|d[ao]s?|e)\s+[A-ZÀ-Ý][a-zà-ÿ]+|\s+[A-ZÀ-Ý][a-zà-ÿ]+){2,5}\b/g;
 
+// Nomes de parte em CAIXA ALTA (pessoa ou empresa) NAO sao tocados pelo
+// heuristico acima de proposito (ver comentario dele) - mas peticoes
+// seguem quase sempre um padrao bem especifico logo apos qualificar a
+// parte: "NOME EM CAIXA ALTA, brasileiro/brasileira/pessoa jurídica/
+// portador(a)/inscrito(a)/residente/domiciliado(a)...". Esse padrao e'
+// especifico o suficiente (ao contrario de "CAIXA ALTA" sozinho, que
+// pegaria rotulos de evento/situação por engano) para reconhecer com
+// seguranca tanto nomes de pessoas quanto de empresas nessa posicao
+// especifica, sem exigir uma lista real das partes do processo. Nomes em
+// CAIXA ALTA em outros lugares do documento (sem essa qualificação logo
+// depois) continuam sem deteccao - e' melhor esforço, nao NLP.
+const REGEX_NOME_MAIUSCULO_QUALIFICADO =
+  /\b[A-ZÀ-Ý][A-ZÀ-Ý0-9\s.&–-]{3,120}?(?=,\s*(?:pessoa jurídica|pessoa física|brasileiro|brasileira|portador|portadora|inscrit[oa]|residente|domiciliad[oa]))/g;
+
 function abreviarNome(nomeCompleto) {
   const CONECTIVOS = new Set(["de", "da", "do", "dos", "das", "e"]);
   const partes = nomeCompleto.trim().split(/\s+/);
@@ -694,6 +724,7 @@ function abreviarNome(nomeCompleto) {
   const ultimo = partes[partes.length - 1];
   const meio = partes.slice(1, -1).map((parte) => {
     if (CONECTIVOS.has(parte.toLowerCase())) return parte.toLowerCase();
+    if (!/[A-Za-zÀ-ÿ]/.test(parte)) return parte; // pontuação solta (ex.: "–"), mantém como está
     return `${parte[0].toUpperCase()}.`;
   });
 
@@ -717,6 +748,8 @@ function anonimizarTexto(texto) {
   // CEP que sobrar solto (sem um inicio de endereco reconhecido por
   // perto) ainda e' removido, so' que sozinho - nao a linha inteira.
   resultado = resultado.replace(REGEX_CEP, "[CEP removido]");
+
+  resultado = resultado.replace(REGEX_NOME_MAIUSCULO_QUALIFICADO, (trecho) => abreviarNome(trecho));
 
   resultado = resultado.replace(REGEX_NOME_PROVAVEL, (trecho) => {
     if (FRASES_NAO_SAO_NOMES.some((frase) => trecho.includes(frase))) return trecho;
@@ -749,11 +782,7 @@ function construirSecaoMovimentacao(movimentacao) {
     return `- **${evento.dataHora}** — ${numero}: ${evento.descricao || "(sem descrição)"}`;
   });
 
-  return (
-    "### Movimentação processual\n\n" +
-    "> Detecção automática (melhor esforço) da tabela de movimentação da página - confira contra a tela do eproc.\n\n" +
-    `${linhas.join("\n\n")}\n`
-  );
+  return `### Movimentação processual\n\n${linhas.join("\n\n")}\n`;
 }
 
 // Agrupa os documentos pelo numero do evento a que pertencem (ja'

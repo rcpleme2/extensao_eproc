@@ -189,9 +189,14 @@ completa") permite ajustar a detecção com precisão.
 - **HTML** (certidões, atos ordinatórios, mandados): reaproveita o mesmo
   mecanismo de aba oculta já usado nos outros modos para ler o texto real
   do documento (uma aba própria por documento, separada da aba
-  compartilhada dos PDFs). Se a primeira tentativa não conseguir ler o
-  conteúdo a tempo (a página do eproc demora a preencher o documento via
-  AJAX), uma segunda tentativa é feita automaticamente, com uma aba nova.
+  compartilhada dos PDFs). Essa aba precisa ficar **em primeiro plano**
+  brevemente durante a extração — o Chrome desacelera bastante a
+  execução de script em abas mantidas em segundo plano, o que podia
+  impedir a própria página do eproc de terminar de preencher o
+  documento via AJAX; o foco volta para a aba em que você estava assim
+  que a extração termina. Se ainda assim a primeira tentativa não
+  conseguir ler o conteúdo a tempo, uma segunda tentativa é feita
+  automaticamente, com uma aba nova.
 
 ### Anonimização (melhor esforço)
 
@@ -208,20 +213,29 @@ uma anonimização automática:
   quem mora lá, contexto, etc.) permanece intacto — diferente de versões
   anteriores, que apagavam a linha inteira (e, em documentos PDF sem
   quebras de linha bem definidas, chegavam a apagar a página toda).
-- **Nomes de pessoas**: sequências de 3 ou mais palavras em
-  Maiúscula+minúscula (ex.: "Maria Aparecida Santos") são detectadas e
-  abreviadas (ex.: "Maria A. Santos"), preservando primeiro e último
-  nome. Uma pequena lista de frases institucionais comuns ("Poder
-  Judiciário", "Tribunal de Justiça", ...) é excluída dessa detecção para
-  não abreviá-las por engano.
+- **Nomes de pessoas (Maiúscula+minúscula)**: sequências de 3 ou mais
+  palavras (ex.: "Maria Aparecida Santos") são detectadas e abreviadas
+  (ex.: "Maria A. Santos"), preservando primeiro e último nome. Uma
+  pequena lista de frases institucionais comuns ("Poder Judiciário",
+  "Tribunal de Justiça", ...) é excluída dessa detecção para não
+  abreviá-las por engano.
+- **Nomes de partes em CAIXA ALTA (pessoa ou empresa)**: reconhecidos
+  especificamente quando seguidos de uma qualificação jurídica padrão
+  ("..., brasileiro", "..., pessoa jurídica", "..., portador(a)",
+  "..., inscrito(a)", "..., residente/domiciliado(a)"), um padrão comum
+  logo após nomear uma parte em petições. Ex.: `"ACIT – ASSOCIAÇÃO
+  COMERCIAL E INDUSTRIAL DE TOMAZINA, pessoa jurídica..."` vira `"ACIT –
+  A. C. e I. de TOMAZINA, pessoa jurídica..."`. Fora dessa posição
+  específica, nomes em CAIXA ALTA continuam sem detecção (ver limitação
+  abaixo).
 
 **Isso é um processo de melhor esforço baseado em padrões, não uma
 garantia de anonimização completa** — não é NLP nem usa uma lista real
 das partes do processo. Em particular:
-- Nomes escritos em **CAIXA ALTA** (comum em petições/certidões) não são
-  tocados de propósito, já que no eproc esse padrão normalmente indica
-  rótulos de evento/situação, não nomes de pessoas — abreviar tudo em
-  caixa alta geraria muitos falsos positivos.
+- Nomes em **CAIXA ALTA sem uma qualificação jurídica logo em seguida**
+  não são tocados de propósito, já que no eproc CAIXA ALTA sozinha
+  normalmente indica rótulos de evento/situação, não nomes de pessoas —
+  abreviar todo bloco em caixa alta geraria muitos falsos positivos.
 - Endereços sem as palavras-chave reconhecidas, ou em formatos atípicos,
   podem não ser detectados.
 
