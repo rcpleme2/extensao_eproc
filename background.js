@@ -1774,23 +1774,21 @@ function clicarLinkLocalizadoresNaPagina() {
   return true;
 }
 
-// Roda inteiramente dentro da tela "Localizadores do Órgão": raspa a
-// tabela da pagina atual (colunas confirmadas numa pagina real do eproc:
-// [0] checkbox, [1] Localizador, [2] Nome do Localizador, [3] Descrição
-// do Localizador, [4] Localizador Sistema, [5] Data Inclusão, [6] Total
-// de processos, [7] Ações) e, se houver mais paginas
-// (id="lnkInfraProximaPaginaSuperior" sem a classe "disabled"), clica em
-// "Próxima Página" e espera a tabela recarregar via AJAX (detectado pela
-// mudanca no texto do <caption>, ex.: "1 a 50" -> "51 a 100") antes de
-// raspar a proxima. Autocontida, executada via
-// chrome.scripting.executeScript. Nunca lanca excecao: sempre resolve com
-// { itens, erro }, mesmo que erro seja so' parcial (itens ja' coletados
-// ate' a pagina que falhou continuam no resultado).
-function coletarLocalizadoresNaPagina() {
-  function aguardar(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
+// Raspa a tabela da pagina ATUAL (colunas confirmadas numa pagina real do
+// eproc: [0] checkbox, [1] Localizador, [2] Nome do Localizador, [3]
+// Descrição do Localizador, [4] Localizador Sistema, [5] Data Inclusão,
+// [6] Total de processos, [7] Ações), o texto da legenda (para detectar
+// quando a pagina seguinte terminou de carregar) e se o botao "Próxima
+// Página" esta' disponivel. Inteiramente SINCRONA de proposito (nada de
+// async/await/clique aqui dentro): clicar em "Próxima Página" pode
+// disparar uma navegacao de verdade (nao so' AJAX), o que destroi o
+// frame no meio d euma execucao assincrona e derruba a chamada inteira
+// com "Frame with ID 0 was removed". Cada etapa (raspar / clicar
+// próximo / raspar de novo) roda como uma chamada de
+// chrome.scripting.executeScript separada e curta, orquestrada pelo
+// background.js - nunca um loop assincrono unico rodando dentro da
+// pagina. Autocontida, executada via chrome.scripting.executeScript.
+function raspaerLocalizadoresNaPagina() {
   function localizarTabela() {
     const tabelas = Array.from(document.querySelectorAll("table.infraTable"));
     return (
@@ -1801,80 +1799,48 @@ function coletarLocalizadoresNaPagina() {
     );
   }
 
-  function textoCaption(tabela) {
-    const caption = tabela.querySelector("caption");
-    return caption ? (caption.textContent || "").trim() : "";
+  const tabela = localizarTabela();
+  if (!tabela) {
+    return { itens: [], caption: null, temProxima: false, erro: "Tabela de Localizadores do Órgão não encontrada nesta página." };
   }
 
-  function raspar(tabela) {
-    const linhas = Array.from(tabela.querySelectorAll("tr.infraTrClara, tr.infraTrEscura"));
-    const itens = [];
-    for (const tr of linhas) {
-      const celulas = Array.from(tr.querySelectorAll(":scope > td"));
-      if (celulas.length < 8) continue;
-      const nome = (celulas[1].textContent || "").replace(/\s+/g, " ").trim();
-      const descricao = (celulas[3].textContent || "").replace(/\s+/g, " ").trim();
-      const totalTexto = (celulas[6].textContent || "").replace(/\s+/g, " ").trim();
-      const totalMatch = totalTexto.match(/\d+/);
-      itens.push({ nome, descricao, totalProcessos: totalMatch ? Number(totalMatch[0]) : 0 });
-    }
-    return itens;
+  const linhas = Array.from(tabela.querySelectorAll("tr.infraTrClara, tr.infraTrEscura"));
+  const itens = [];
+  for (const tr of linhas) {
+    const celulas = Array.from(tr.querySelectorAll(":scope > td"));
+    if (celulas.length < 8) continue;
+    const nome = (celulas[1].textContent || "").replace(/\s+/g, " ").trim();
+    const descricao = (celulas[3].textContent || "").replace(/\s+/g, " ").trim();
+    const totalTexto = (celulas[6].textContent || "").replace(/\s+/g, " ").trim();
+    const totalMatch = totalTexto.match(/\d+/);
+    itens.push({ nome, descricao, totalProcessos: totalMatch ? Number(totalMatch[0]) : 0 });
   }
 
-  function proximaPaginaDisponivel() {
-    const li = document.getElementById("lnkInfraProximaPaginaSuperior");
-    return !!(li && !li.classList.contains("disabled"));
-  }
+  const caption = tabela.querySelector("caption");
+  const li = document.getElementById("lnkInfraProximaPaginaSuperior");
+  const temProxima = !!(li && !li.classList.contains("disabled"));
 
-  return (async () => {
-    try {
-      let tabela = localizarTabela();
-      if (!tabela) {
-        return { itens: [], erro: "Tabela de Localizadores do Órgão não encontrada nesta página." };
-      }
+  return { itens, caption: caption ? (caption.textContent || "").trim() : "", temProxima, erro: null };
+}
 
-      const todos = [];
-      let pagina = 1;
-      const LIMITE_PAGINAS = 200; // seguranca contra loop infinito
-
-      while (true) {
-        todos.push(...raspar(tabela));
-
-        if (!proximaPaginaDisponivel() || pagina >= LIMITE_PAGINAS) break;
-
-        const captionAntes = textoCaption(tabela);
-        const link = document.querySelector("#lnkInfraProximaPaginaSuperior a");
-        if (!link) break;
-        link.click();
-
-        let mudou = false;
-        for (let tentativa = 0; tentativa < 40; tentativa += 1) {
-          await aguardar(300);
-          tabela = localizarTabela();
-          if (tabela && textoCaption(tabela) !== captionAntes) {
-            mudou = true;
-            break;
-          }
-        }
-        if (!mudou) {
-          return {
-            itens: todos,
-            erro: `Parou na página ${pagina} - a página seguinte não terminou de carregar a tempo.`,
-          };
-        }
-        pagina += 1;
-      }
-
-      return { itens: todos, erro: null };
-    } catch (e) {
-      return { itens: [], erro: e && e.message ? e.message : String(e) };
-    }
-  })();
+// So' clica em "Próxima Página" e retorna - nao espera nada aqui dentro
+// (ver comentario de "raspaerLocalizadoresNaPagina" sobre o motivo).
+function clicarProximaPaginaLocalizadores() {
+  const link = document.querySelector("#lnkInfraProximaPaginaSuperior a");
+  if (!link) return false;
+  link.click();
+  return true;
 }
 
 // Abre uma aba oculta a partir da URL da aba atual (mesmo padrao ja'
 // usado no Relatório Geral), navega ate' a tela de Localizadores do
-// Órgão e coleta todas as paginas, depois fecha a aba.
+// Órgão e coleta todas as paginas, depois fecha a aba. A paginacao e'
+// conduzida DAQUI (background.js), nao de dentro da pagina: cada
+// raspagem/clique e' uma chamada de executeScript curta e independente,
+// entao se "Próxima Página" navegar a pagina de verdade (em vez de so'
+// atualizar a tabela via AJAX), o pior que acontece e' uma chamada
+// individual falhar (frame destruido no meio dela) e ser re-tentada,
+// nunca o processo inteiro cair com "Frame with ID 0 was removed".
 async function abrirAbaEColetarLocalizadores(urlBase) {
   let aba;
   try {
@@ -1898,12 +1864,96 @@ async function abrirAbaEColetarLocalizadores(urlBase) {
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const [{ result } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: coletarLocalizadoresNaPagina,
-    });
+    async function raspaerPaginaAtualComRetentativa() {
+      let ultimoErro;
+      for (let tentativa = 0; tentativa < 5; tentativa += 1) {
+        try {
+          const [{ result } = {}] = await chrome.scripting.executeScript({
+            target: { tabId: aba.id },
+            func: raspaerLocalizadoresNaPagina,
+          });
+          if (result) return result;
+        } catch (e) {
+          ultimoErro = e;
+          // O frame pode estar no meio de uma navegacao disparada pelo
+          // clique em "Próxima Página" - espera um pouco e tenta de novo
+          // em vez de desistir na primeira falha.
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+      }
+      throw ultimoErro || new Error("Sem resultado ao ler a página.");
+    }
 
-    return result || { itens: [], erro: "Sem resultado retornado pela aba." };
+    const todos = [];
+    let pagina = 1;
+    const LIMITE_PAGINAS = 200; // seguranca contra loop infinito
+
+    while (pagina <= LIMITE_PAGINAS) {
+      let leitura;
+      try {
+        leitura = await raspaerPaginaAtualComRetentativa();
+      } catch (e) {
+        return {
+          itens: todos,
+          erro: `Falha ao ler a página ${pagina}: ${e && e.message ? e.message : String(e)}`,
+        };
+      }
+
+      if (leitura.erro) return { itens: todos, erro: leitura.erro };
+      todos.push(...leitura.itens);
+
+      if (!leitura.temProxima) break;
+
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: aba.id },
+          func: clicarProximaPaginaLocalizadores,
+        });
+      } catch (e) {
+        return {
+          itens: todos,
+          erro: `Falha ao clicar em "Próxima Página" (página ${pagina}): ${e && e.message ? e.message : String(e)}`,
+        };
+      }
+
+      // Cobre os dois jeitos possiveis dessa paginacao: se for uma
+      // navegacao de verdade, espera o "complete" da aba; se for so' AJAX
+      // no mesmo documento (a aba nunca sai de "complete"), essa espera
+      // e' praticamente um no-op e o polling abaixo (pela mudanca no
+      // texto da legenda) e' quem realmente detecta o fim do carregamento.
+      await aguardarCarregamentoAba(aba.id).catch(() => {});
+
+      const captionAntes = leitura.caption;
+      let mudou = false;
+      let leituraNova = null;
+      for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        try {
+          const [{ result } = {}] = await chrome.scripting.executeScript({
+            target: { tabId: aba.id },
+            func: raspaerLocalizadoresNaPagina,
+          });
+          leituraNova = result;
+        } catch (e) {
+          continue; // frame ainda se recuperando de uma navegacao - tenta de novo
+        }
+        if (leituraNova && leituraNova.caption !== captionAntes) {
+          mudou = true;
+          break;
+        }
+      }
+
+      if (!mudou) {
+        return {
+          itens: todos,
+          erro: `Parou na página ${pagina} - a página seguinte não terminou de carregar a tempo.`,
+        };
+      }
+
+      pagina += 1;
+    }
+
+    return { itens: todos, erro: null };
   } catch (e) {
     return { itens: [], erro: e && e.message ? e.message : String(e) };
   } finally {
