@@ -474,11 +474,27 @@ function prepararAmbientePdfNaPagina() {
       for (let i = 1; i <= pdf.numPages; i += 1) {
         const pagina = await pdf.getPage(i);
         const conteudoTexto = await pagina.getTextContent();
-        const texto = conteudoTexto.items
-          .map((item) => item.str || "")
-          .join(" ")
-          .replace(/\s+/g, " ")
-          .trim();
+
+        // Cada "item" e' um fragmento de texto (nem sempre uma linha
+        // inteira); "item.hasEOL" marca quando aquele fragmento termina
+        // uma linha visual da pagina. Sem usar isso, juntar tudo so' com
+        // espaco faz a pagina inteira virar UMA linha so' - o que e'
+        // ruim tanto para leitura quanto para a anonimizacao (que age por
+        // linha): uma unica palavra de endereco em qualquer parte da
+        // pagina apagaria a pagina inteira. Reconstruir as quebras reais
+        // deixa cada linha do PDF como uma linha de texto de verdade.
+        let linhaAtual = "";
+        const linhas = [];
+        for (const item of conteudoTexto.items) {
+          linhaAtual += item.str || "";
+          if (item.hasEOL) {
+            linhas.push(linhaAtual.replace(/\s+/g, " ").trim());
+            linhaAtual = "";
+          }
+        }
+        if (linhaAtual.trim()) linhas.push(linhaAtual.replace(/\s+/g, " ").trim());
+
+        const texto = linhas.filter(Boolean).join("\n");
         partes.push(
           texto || "_(sem texto nesta página - o documento pode ser uma imagem digitalizada, sem OCR nesta versão)_"
         );
@@ -573,7 +589,14 @@ const REGEX_CNPJ = /\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g;
 const REGEX_CPF = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
 const REGEX_TELEFONE = /\(?\b\d{2}\)?[\s-]?9?\d{4}-?\d{4}\b/g;
 const REGEX_CEP = /\b\d{5}-?\d{3}\b/;
-const REGEX_PALAVRA_ENDERECO = /\b(Rua|Av\.|Avenida|Alameda|Rodovia|Travessa|Pra[çc]a|Bairro|CEP|Logradouro|Quadra|Lote|Apto\.?|Apartamento|Condom[íi]nio)\b/i;
+// "\b" nunca da' match logo apos um "." (ponto e o caractere seguinte,
+// tipicamente um espaco, sao os dois "nao-palavra" - no ponto de fronteira
+// de word boundary): "Av\.\b" ou "Apto\.?\b" simplesmente NUNCA batem
+// quando o ponto esta' realmente presente, por mais que pareca que
+// deveriam. Por isso as abreviacoes com ponto ficam sem o ponto no
+// padrao (so' "Av"/"Apto"): o "\b" ja' delimita a palavra corretamente
+// nesse caso (fronteira entre "v"/"o" e o proprio ponto, se houver).
+const REGEX_PALAVRA_ENDERECO = /\b(Rua|Av|Avenida|Alameda|Rodovia|Travessa|Pra[çc]a|Bairro|CEP|Logradouro|Quadra|Lote|Apto|Apartamento|Condom[íi]nio)\b/i;
 
 // Frases institucionais comuns que o heuristico de nomes (Maiuscula +
 // minuscula, 3+ palavras) acertaria por engano - excluidas explicitamente.

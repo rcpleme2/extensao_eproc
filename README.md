@@ -187,9 +187,12 @@ uma anonimização automática:
 
 - **CPF, CNPJ, telefone e e-mail**: identificados por padrão (regex) e
   substituídos por `[CPF removido]`, `[CNPJ removido]`, etc.
-- **Linhas com possível endereço**: qualquer linha contendo palavras como
-  "Rua", "Av.", "CEP", "Bairro" etc. é removida por inteiro e substituída
-  por `[linha com possível endereço removida]`.
+- **Linhas com possível endereço**: qualquer *linha* contendo palavras
+  como "Rua", "Av.", "CEP", "Bairro" etc. é removida por inteiro e
+  substituída por `[linha com possível endereço removida]` - o texto de
+  PDF é reconstruído linha a linha (usando as quebras de linha reais do
+  próprio PDF), então isso afeta só a linha específica do endereço, não o
+  documento inteiro nem o parágrafo ao redor.
 - **Nomes de pessoas**: sequências de 3 ou mais palavras em
   Maiúscula+minúscula (ex.: "Maria Aparecida Santos") são detectadas e
   abreviadas (ex.: "Maria A. Santos"), preservando primeiro e último
