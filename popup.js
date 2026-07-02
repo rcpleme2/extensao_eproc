@@ -349,38 +349,71 @@ btnAbrirTelaRelatorio.addEventListener("click", async () => {
   }
 });
 
-const areaBtnRelatorioGerencial = document.getElementById("area-btn-relatorio-gerencial");
+const cardCorregedoria = document.getElementById("card-corregedoria");
+const areaCorregedoriaInfo = document.getElementById("area-corregedoria-info");
 const btnRelatorioGerencialUnidade = document.getElementById("btn-relatorio-gerencial-unidade");
 const areaProgressoUnidades = document.getElementById("area-progresso-unidades");
 const textoProgressoUnidades = document.getElementById("texto-progresso-unidades");
 const areaSelectUnidade = document.getElementById("area-select-unidade");
 const selectUnidadeRelatorio = document.getElementById("select-unidade-relatorio");
+const areaUnidadeSelecionada = document.getElementById("area-unidade-selecionada");
+const areaBtnExportarGerencial = document.getElementById("area-btn-exportar-gerencial");
+const btnExportarRelatorioGerencial = document.getElementById("btn-exportar-relatorio-gerencial");
+const areaProgressoRelatorioGerencial = document.getElementById("area-progresso-relatorio-gerencial");
+const textoProgressoRelatorioGerencial = document.getElementById("texto-progresso-relatorio-gerencial");
+const areaErrosCorregedoria = document.getElementById("area-erros-corregedoria");
 
-// O botao "Relatório Gerencial da Unidade" so' aparece quando o perfil
-// ativo da aba atual (select#selInfraUnidades no cabecalho do eproc) e'
-// "CORREGEDORIA" - reavaliado sempre que o usuario troca de aba ou
-// navega, ja' que o painel lateral permanece aberto durante isso.
-async function atualizarBotaoRelatorioGerencial() {
+// A unidade escolhida no dropdown (nome + valor do filtro Órgão/Juízo) -
+// e' o "campo com a escolha da unidade" que todo relatório deste painel
+// da Corregedoria precisa conferir antes de rodar (ver
+// "exigirUnidadeSelecionada" abaixo).
+let unidadeSelecionadaCorregedoria = null;
+
+function setStatusCorregedoria(texto) {
+  areaCorregedoriaInfo.textContent = texto;
+}
+
+// Todo relatório do painel da Corregedoria (hoje so' o Relatório
+// Gerencial da Unidade consolidado, mas a mesma checagem vale para
+// qualquer outro que venha a ser adicionado aqui) precisa conferir se
+// uma unidade foi escolhida antes de rodar - lanca erro com uma mensagem
+// clara em vez de deixar a operacao seguir sem saber de qual unidade
+// extrair os dados.
+function exigirUnidadeSelecionada() {
+  if (!unidadeSelecionadaCorregedoria || !unidadeSelecionadaCorregedoria.valor) {
+    throw new Error('Selecione uma unidade na lista antes de gerar este relatório.');
+  }
+  return unidadeSelecionadaCorregedoria;
+}
+
+// O cartão "Corregedoria" so' aparece quando o perfil ativo da aba atual
+// (select#selInfraUnidades no cabecalho do eproc) e' "CORREGEDORIA" -
+// reavaliado sempre que o usuario troca de aba ou navega, ja' que o
+// painel lateral permanece aberto durante isso.
+async function atualizarCardCorregedoria() {
   try {
     const aba = await getAbaAtiva();
     if (!aba || !aba.id) {
-      areaBtnRelatorioGerencial.hidden = true;
+      cardCorregedoria.hidden = true;
       return;
     }
     const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LER_PERFIL_ATUAL" }).catch(() => null);
-    areaBtnRelatorioGerencial.hidden = !(resposta && resposta.perfil === "CORREGEDORIA");
+    cardCorregedoria.hidden = !(resposta && resposta.perfil === "CORREGEDORIA");
   } catch (e) {
-    areaBtnRelatorioGerencial.hidden = true;
+    cardCorregedoria.hidden = true;
   }
 }
 
 btnRelatorioGerencialUnidade.addEventListener("click", async () => {
   btnRelatorioGerencialUnidade.disabled = true;
-  areaErrosRelatorio.hidden = true;
+  areaErrosCorregedoria.hidden = true;
   areaSelectUnidade.hidden = true;
+  areaUnidadeSelecionada.hidden = true;
+  areaBtnExportarGerencial.hidden = true;
+  unidadeSelecionadaCorregedoria = null;
   areaProgressoUnidades.hidden = false;
   textoProgressoUnidades.textContent = "Iniciando...";
-  setStatusRelatorio("Abrindo o Relatório Geral e lendo as unidades disponíveis (sua aba atual será navegada)...");
+  setStatusCorregedoria("Abrindo o Relatório Geral e lendo as unidades disponíveis (sua aba atual será navegada)...");
 
   // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
   // comecou; o resultado final chega pela mensagem
@@ -391,19 +424,78 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar o carregamento.");
     }
   } catch (e) {
-    setStatusRelatorio("Erro ao carregar as unidades.");
-    areaErrosRelatorio.hidden = false;
-    areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
+    setStatusCorregedoria("Erro ao carregar as unidades.");
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
     areaProgressoUnidades.hidden = true;
     btnRelatorioGerencialUnidade.disabled = false;
   }
 });
 
-chrome.tabs.onActivated.addListener(atualizarBotaoRelatorioGerencial);
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === "complete") atualizarBotaoRelatorioGerencial();
+// Ao escolher uma unidade no dropdown, preenche o campo indicando de
+// onde a informação será extraída (e' esse campo que
+// "exigirUnidadeSelecionada" confere antes de qualquer relatório deste
+// painel) e libera o botao de exportar o relatorio consolidado.
+selectUnidadeRelatorio.addEventListener("change", () => {
+  const valor = selectUnidadeRelatorio.value;
+  const opcaoSelecionada = selectUnidadeRelatorio.selectedOptions[0];
+  if (!valor || !opcaoSelecionada) {
+    unidadeSelecionadaCorregedoria = null;
+    areaUnidadeSelecionada.hidden = true;
+    areaBtnExportarGerencial.hidden = true;
+    return;
+  }
+  unidadeSelecionadaCorregedoria = { valor, nome: opcaoSelecionada.textContent };
+  areaUnidadeSelecionada.hidden = false;
+  areaUnidadeSelecionada.textContent = `Informações serão extraídas de: ${unidadeSelecionadaCorregedoria.nome}`;
+  areaBtnExportarGerencial.hidden = false;
 });
-atualizarBotaoRelatorioGerencial();
+
+btnExportarRelatorioGerencial.addEventListener("click", async () => {
+  areaErrosCorregedoria.hidden = true;
+
+  let unidade;
+  try {
+    unidade = exigirUnidadeSelecionada();
+  } catch (e) {
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+    return;
+  }
+
+  btnExportarRelatorioGerencial.disabled = true;
+  areaProgressoRelatorioGerencial.hidden = false;
+  textoProgressoRelatorioGerencial.textContent = "Iniciando...";
+  setStatusCorregedoria(
+    `Gerando o Relatório Gerencial de "${unidade.nome}" em segundo plano (sua aba atual será navegada)...`
+  );
+
+  // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
+  // comecou; o resultado final chega pela mensagem
+  // RELATORIO_GERENCIAL_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "EXPORTAR_RELATORIO_GERENCIAL_UNIDADE",
+      valorUnidade: unidade.valor,
+      nomeUnidade: unidade.nome,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
+    }
+  } catch (e) {
+    setStatusCorregedoria("Erro ao gerar o relatório gerencial.");
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+    areaProgressoRelatorioGerencial.hidden = true;
+    btnExportarRelatorioGerencial.disabled = false;
+  }
+});
+
+chrome.tabs.onActivated.addListener(atualizarCardCorregedoria);
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "complete") atualizarCardCorregedoria();
+});
+atualizarCardCorregedoria();
 
 chrome.runtime.onMessage.addListener((mensagem) => {
   if (!mensagem) return;
@@ -499,7 +591,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
   if (mensagem.tipo === "PROGRESSO_UNIDADES_RELATORIO") {
     textoProgressoUnidades.textContent = mensagem.texto || "Processando...";
-    setStatusRelatorio(mensagem.texto || "Processando...");
+    setStatusCorregedoria(mensagem.texto || "Processando...");
   }
 
   if (mensagem.tipo === "UNIDADES_RELATORIO_FINALIZADO") {
@@ -516,16 +608,40 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         selectUnidadeRelatorio.appendChild(opcao);
       }
       areaSelectUnidade.hidden = unidades.length === 0;
-      setStatusRelatorio(
+      setStatusCorregedoria(
         unidades.length > 0
-          ? `${unidades.length} unidade(s) encontrada(s) no Relatório Geral.`
+          ? `${unidades.length} unidade(s) encontrada(s) no Relatório Geral - selecione uma.`
           : "Nenhuma unidade encontrada no filtro Órgão/Juízo."
       );
     } else {
-      setStatusRelatorio("Erro ao carregar as unidades.");
-      areaErrosRelatorio.hidden = false;
-      areaErrosRelatorio.textContent =
+      setStatusCorregedoria("Erro ao carregar as unidades.");
+      areaErrosCorregedoria.hidden = false;
+      areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao carregar as unidades.";
+    }
+  }
+
+  if (mensagem.tipo === "PROGRESSO_RELATORIO_GERENCIAL") {
+    textoProgressoRelatorioGerencial.textContent = mensagem.texto || "Processando...";
+    setStatusCorregedoria(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "RELATORIO_GERENCIAL_FINALIZADO") {
+    areaProgressoRelatorioGerencial.hidden = true;
+    btnExportarRelatorioGerencial.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      setStatusCorregedoria(
+        `Concluído! Relatório Gerencial de "${resultado.unidade || ""}" salvo em Downloads/eproc/ (${
+          resultado.totalLocalizadores || 0
+        } localizador(es) incluído(s)).`
+      );
+    } else {
+      setStatusCorregedoria("Erro ao gerar o relatório gerencial.");
+      areaErrosCorregedoria.hidden = false;
+      areaErrosCorregedoria.textContent =
+        mensagem.erro || "Falha desconhecida ao gerar o relatório gerencial.";
     }
   }
 });

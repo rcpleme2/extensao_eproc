@@ -1305,6 +1305,29 @@ function consultarUmaVezNaPagina(parametros) {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  // Usado pelo Relatório Gerencial da Unidade (Corregedoria): filtra a
+  // consulta por uma unidade especifica (Órgão/Juízo), em vez da unidade
+  // padrao do perfil logado. Visualmente um dropdown do bootstrap-select,
+  // mas o <select> nativo continua no DOM por baixo (so' escondido) com
+  // as mesmas <option> - mudar seu valor e disparar "change" atualiza o
+  // filtro e o widget visual junto (bootstrap-select escuta esse
+  // evento), do mesmo jeito que "selecionarSituacao" ja' faz.
+  function selecionarOrgaoJuizo(valorOrgaoJuizo) {
+    const select = document.getElementById("selIdOrgaoJuizo");
+    if (!select) throw new Error('Campo "Órgão/Juízo" (#selIdOrgaoJuizo) não encontrado nesta página.');
+
+    let encontrouOpcao = false;
+    for (const opcao of select.options) {
+      const selecionada = opcao.value === valorOrgaoJuizo;
+      opcao.selected = selecionada;
+      if (selecionada) encontrouOpcao = true;
+    }
+    if (!encontrouOpcao) {
+      throw new Error(`Unidade "${valorOrgaoJuizo}" não encontrada no filtro Órgão/Juízo.`);
+    }
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   // Usa o setter nativo do HTMLInputElement (em vez de so' "input.value =
   // ...") para garantir que a mudanca seja percebida mesmo se algum
   // framework de formulario estiver "escutando" o proprio setter da
@@ -1418,6 +1441,14 @@ function consultarUmaVezNaPagina(parametros) {
 
   return (async () => {
     try {
+      // Se um Órgão/Juízo especifico foi pedido (Relatório Gerencial da
+      // Unidade), seleciona ele ANTES de tudo - a troca de unidade pode
+      // recarregar/reajustar outros campos da tela.
+      if (parametros.valorOrgaoJuizo) {
+        selecionarOrgaoJuizo(parametros.valorOrgaoJuizo);
+        await aguardar(300);
+      }
+
       // O filtro "Dias sem movimentação" (demonstrativo de processos
       // parados) e' independente da "Situação": nesse caso
       // "parametros.valorSituacao" vem nulo e o select nao e' tocado.
@@ -1702,6 +1733,176 @@ async function listarUnidadesRelatorioGeral(aoProgredir) {
   return { unidades: result.unidades };
 }
 
+// Dias de atraso usados no Relatório Gerencial da Unidade (diferente do
+// DIAS_LIMITE_ATRASO de 30 dias usado no relatorio "rapido" do painel -
+// aqui o pedido foi especificamente "aguardando há mais de 90 dias").
+const DIAS_LIMITE_ATRASO_UNIDADE = 90;
+
+// Consulta total/urgentes/+90 dias de uma situacao (despacho ou
+// sentenca) filtrada por uma unidade especifica - reaproveita
+// "abrirAbaEConsultarUmaVez"/"consultarUmaVezNaPagina" (mesmas funcoes
+// do relatorio rapido do painel), so' que com "valorOrgaoJuizo" preenchido
+// e o limite de dias em 90 em vez de 30. "Não urgentes" e' calculado
+// aqui mesmo (total - urgentes) para nao precisar de mais uma consulta -
+// nao ha' filtro de "não urgente" na tela do eproc.
+async function consultarBlocoUnidade(urlBase, valorOrgaoJuizo, nomeSituacao, valorSituacao, notificar) {
+  const bloco = { total: null, urgentes: null, naoUrgentes: null, mais90Dias: null, erros: [] };
+
+  notificar(`Consultando ${nomeSituacao}: total...`);
+  let r = await abrirAbaEConsultarUmaVez(urlBase, {
+    valorSituacao,
+    urgente: false,
+    diasSituacao: null,
+    valorOrgaoJuizo,
+  });
+  bloco.total = r.contagem;
+  if (r.erro) bloco.erros.push(`total: ${r.erro}`);
+
+  notificar(`Consultando ${nomeSituacao}: urgentes...`);
+  r = await abrirAbaEConsultarUmaVez(urlBase, {
+    valorSituacao,
+    urgente: true,
+    diasSituacao: null,
+    valorOrgaoJuizo,
+  });
+  bloco.urgentes = r.contagem;
+  if (r.erro) bloco.erros.push(`urgentes: ${r.erro}`);
+
+  if (bloco.total != null && bloco.urgentes != null) {
+    bloco.naoUrgentes = Math.max(0, bloco.total - bloco.urgentes);
+  }
+
+  notificar(`Consultando ${nomeSituacao}: há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias...`);
+  r = await abrirAbaEConsultarUmaVez(urlBase, {
+    valorSituacao,
+    urgente: false,
+    diasSituacao: DIAS_LIMITE_ATRASO_UNIDADE,
+    valorOrgaoJuizo,
+  });
+  bloco.mais90Dias = r.contagem;
+  if (r.erro) bloco.erros.push(`+${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${r.erro}`);
+
+  return bloco;
+}
+
+// Monta as linhas de texto de um bloco (despacho/sentenca) para o PDF.
+function formatarLinhasBlocoUnidade(titulo, bloco) {
+  const fmt = (v) => (v == null ? "?" : String(v));
+  const linhas = [
+    titulo,
+    `- Total: ${fmt(bloco.total)}`,
+    `- Urgentes: ${fmt(bloco.urgentes)}`,
+    `- Não urgentes: ${fmt(bloco.naoUrgentes)}`,
+    `- Aguardando há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${fmt(bloco.mais90Dias)}`,
+  ];
+  if (bloco.erros.length > 0) {
+    linhas.push(`- Avisos: ${bloco.erros.join(" | ")}`);
+  }
+  return linhas;
+}
+
+// Orquestra o Relatório Gerencial da Unidade: navega a aba atual ate' o
+// Relatório Geral, roda as consultas de despacho/sentenca e de processos
+// sem movimentação filtradas pela unidade escolhida (reaproveitando as
+// mesmas funcoes do relatorio rapido do painel), coleta a lista de
+// Localizadores dessa unidade (reaproveitando a mesma coleta multi-
+// pagina ja' usada no cartao "Busca específica de localizadores") e
+// gera tudo num unico PDF.
+async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  if (!valorUnidade) {
+    throw new Error("Selecione uma unidade antes de exportar o relatório.");
+  }
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  const despacho = await consultarBlocoUnidade(
+    abaAtual.url,
+    valorUnidade,
+    "conclusos para decisão",
+    VALOR_SITUACAO_AGUARDA_DESPACHO,
+    notificar
+  );
+  const sentenca = await consultarBlocoUnidade(
+    abaAtual.url,
+    valorUnidade,
+    "conclusos para sentença",
+    VALOR_SITUACAO_AGUARDA_SENTENCA,
+    notificar
+  );
+
+  const semMovimentacao = { erros: [] };
+  for (const dias of FAIXAS_DIAS_SEM_MOVIMENTACAO) {
+    notificar(`Consultando processos sem movimentação há mais de ${dias} dias...`);
+    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      valorSituacao: null,
+      urgente: false,
+      diasSituacao: null,
+      diasSemMovimentacao: dias,
+      valorOrgaoJuizo: valorUnidade,
+    });
+    semMovimentacao[`dias${dias}`] = r.contagem;
+    if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
+  }
+
+  notificar(`Abrindo a lista de Localizadores da unidade "${nomeUnidade}"...`);
+  const { itens: localizadores, erro: erroLocalizadores } = await abrirAbaEColetarLocalizadores(
+    abaAtual.url,
+    valorUnidade
+  );
+  const localizadoresOrdenados = [...localizadores].sort((a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0));
+
+  notificar("Gerando PDF...");
+
+  const dataInformacao = new Date().toLocaleString("pt-BR");
+  const linhasResumo = [
+    `Unidade: ${nomeUnidade}`,
+    `Data da informação: ${dataInformacao}`,
+    "",
+    ...formatarLinhasBlocoUnidade("Conclusos para decisão:", despacho),
+    "",
+    ...formatarLinhasBlocoUnidade("Conclusos para sentença:", sentenca),
+    "",
+    "Processos sem movimentação:",
+    `- Há mais de 30 dias: ${semMovimentacao.dias30 == null ? "?" : semMovimentacao.dias30}`,
+    `- Há mais de 90 dias: ${semMovimentacao.dias90 == null ? "?" : semMovimentacao.dias90}`,
+    `- Há mais de 120 dias: ${semMovimentacao.dias120 == null ? "?" : semMovimentacao.dias120}`,
+    ...(semMovimentacao.erros.length > 0 ? [`- Avisos: ${semMovimentacao.erros.join(" | ")}`] : []),
+  ];
+  if (erroLocalizadores) {
+    linhasResumo.push("", `Aviso (Localizadores): ${erroLocalizadores}`);
+  }
+
+  const pdfFinal = await PDFDocument.create();
+  const fonteTexto = await pdfFinal.embedFont(StandardFonts.Helvetica);
+  adicionarTextoComoPaginas(pdfFinal, fonteTexto, "Relatório Gerencial da Unidade", linhasResumo.join("\n"));
+
+  if (localizadoresOrdenados.length > 0) {
+    const bytesLocalizadores = await construirPdfLocalizadores(
+      localizadoresOrdenados,
+      `Localizadores da unidade "${nomeUnidade}" — ${localizadoresOrdenados.length} registro(s)`
+    );
+    const pdfLocalizadores = await PDFDocument.load(bytesLocalizadores);
+    const paginasCopiadas = await pdfFinal.copyPages(pdfLocalizadores, pdfLocalizadores.getPageIndices());
+    paginasCopiadas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  const bytesFinais = await pdfFinal.save();
+  const nomeArquivo = `eproc/relatorio_gerencial_${sanitizarNomeArquivo(nomeUnidade)}_${new Date()
+    .toISOString()
+    .slice(0, 10)}.pdf`;
+  await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytesFinais));
+
+  notificar("Finalizando...");
+  return { unidade: nomeUnidade, totalLocalizadores: localizadoresOrdenados.length };
+}
+
 // Traduz os identificadores usados no painel para os parametros que
 // "consultarUmaVezNaPagina" entende. Duas categorias de relatorio:
 // - "situacao" (padrao): situacao "despacho"/"sentenca" + filtro
@@ -1843,6 +2044,30 @@ function clicarLinkLocalizadoresNaPagina() {
   if (!link) return false;
   link.click();
   return true;
+}
+
+// Usado pelo Relatório Gerencial da Unidade: na tela de "Localizadores
+// do Órgão", o filtro "Órgão/Juízo" (#selIdOrgaoJuizo) e' um <select>
+// simples (nao um bootstrap-select) cujo onchange ja' submete o
+// formulario da propria pagina (recarregamento completo, filtrado pela
+// unidade escolhida) - so' precisa selecionar a opcao e disparar
+// "change" para o proprio onchange do eproc fazer o resto. Autocontida,
+// executada via chrome.scripting.executeScript.
+function selecionarOrgaoJuizoLocalizadoresNaPagina(valorOrgaoJuizo) {
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) return { ok: false, erro: 'Campo "Órgão/Juízo" (#selIdOrgaoJuizo) não encontrado nesta página.' };
+
+  let encontrouOpcao = false;
+  for (const opcao of select.options) {
+    const selecionada = opcao.value === valorOrgaoJuizo;
+    opcao.selected = selecionada;
+    if (selecionada) encontrouOpcao = true;
+  }
+  if (!encontrouOpcao) {
+    return { ok: false, erro: `Unidade "${valorOrgaoJuizo}" não encontrada no filtro Órgão/Juízo.` };
+  }
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return { ok: true, erro: null };
 }
 
 // Raspa a tabela da pagina ATUAL (colunas confirmadas numa pagina real do
@@ -2159,7 +2384,10 @@ async function coletarTodasPaginasInfraTable(tabId, funcRaspar) {
   return { itens: todos, erro: null };
 }
 
-async function abrirAbaEColetarLocalizadores(urlBase) {
+// "valorOrgaoJuizo" (opcional): usado pelo Relatório Gerencial da
+// Unidade para filtrar a listagem por uma unidade especifica, em vez da
+// unidade padrao do perfil logado.
+async function abrirAbaEColetarLocalizadores(urlBase, valorOrgaoJuizo) {
   let aba;
   try {
     aba = await chrome.tabs.create({ url: urlBase, active: false });
@@ -2181,6 +2409,23 @@ async function abrirAbaEColetarLocalizadores(urlBase) {
 
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
+
+    if (valorOrgaoJuizo) {
+      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoJuizoLocalizadoresNaPagina,
+        args: [valorOrgaoJuizo],
+      });
+
+      if (!resultadoSelecao || !resultadoSelecao.ok) {
+        return { itens: [], erro: (resultadoSelecao && resultadoSelecao.erro) || 'Falha ao selecionar a unidade no filtro Órgão/Juízo.' };
+      }
+
+      // O onchange da pagina submete o formulario (recarregamento
+      // completo, filtrado pela unidade escolhida).
+      await aguardarCarregamentoAba(aba.id);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
 
     return await coletarTodasPaginasInfraTable(aba.id, raspaerLocalizadoresNaPagina);
   } catch (e) {
@@ -2947,6 +3192,29 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({
             tipo: "REGRAS_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_GERENCIAL_UNIDADE") {
+    // Mesmo padrao das demais operacoes em segundo plano.
+    exportarRelatorioGerencialUnidade(mensagem.valorUnidade, mensagem.nomeUnidade, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_GERENCIAL", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_GERENCIAL_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })

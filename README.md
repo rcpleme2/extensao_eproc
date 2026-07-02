@@ -374,23 +374,45 @@ O botão funciona a partir de qualquer página do eproc que tenha o menu
 lateral visível (não precisa estar na tela de um processo
 especificamente).
 
-### Relatório Gerencial da Unidade (em construção)
+## Corregedoria
 
 Quando o perfil ativo (select de perfil no cabeçalho do eproc,
-`#selInfraUnidades`) é **"CORREGEDORIA"**, aparece um botão adicional
-**"Relatório Gerencial da Unidade"**. Por enquanto ele só faz a primeira
-etapa do que vai virar um relatório mais completo:
+`#selInfraUnidades`) é **"CORREGEDORIA"**, um cartão exclusivo
+**"Corregedoria"** aparece no painel (fica oculto para qualquer outro
+perfil). Fluxo:
 
-1. Navega a aba atual até o Relatório Geral (mesmo mecanismo do botão
-   "↗" já existente).
-2. Lê todas as opções do filtro "Órgão/Juízo" dessa tela (visualmente um
+1. **"Carregar unidades do Relatório Geral"**: navega a aba atual até o
+   Relatório Geral (mesmo mecanismo do botão "↗" do cartão Relatórios) e
+   lê todas as opções do filtro "Órgão/Juízo" dessa tela — visualmente um
    dropdown do bootstrap-select, mas a leitura é feita direto no
    `<select id="selIdOrgaoJuizo">` nativo por trás dele, sem precisar
-   simular a abertura do dropdown visual).
-3. Mostra essas unidades num menu suspenso no painel.
+   simular a abertura do menu visual — preenchendo um menu suspenso no
+   painel.
+2. Ao **escolher uma unidade** no menu, o painel mostra "Informações
+   serão extraídas de: `<nome da unidade>`" e libera o botão
+   **"Exportar Relatório Gerencial da Unidade (PDF)"**. Todo relatório
+   deste cartão (hoje só este; qualquer outro que vier a ser adicionado
+   aqui segue a mesma regra) confere se uma unidade foi escolhida antes
+   de rodar — sem isso, mostra o erro "Selecione uma unidade na lista
+   antes de gerar este relatório." em vez de seguir sem saber de onde
+   extrair os dados.
+3. **"Exportar Relatório Gerencial da Unidade (PDF)"** gera, filtrado
+   pela unidade escolhida, um único PDF com:
+   - Nome da unidade e data/hora da extração.
+   - Conclusos para decisão e para sentença: Total, Urgentes, Não
+     urgentes (calculado como Total − Urgentes, sem precisar de uma
+     consulta a mais) e Aguardando há mais de 90 dias.
+   - Processos sem movimentação há mais de 30, 90 e 120 dias.
+   - A lista completa de Localizadores da unidade (nome, descrição e
+     total de processos), ordenada do maior para o menor total.
 
-Nenhuma consulta ou exportação a partir dessas unidades foi implementada
-ainda — é só a leitura e exibição da lista, como primeiro passo.
+   Tudo isso reaproveita as funções já existentes no painel: as mesmas
+   consultas do Relatório Geral (agora com um filtro extra de
+   Órgão/Juízo), a mesma coleta multi-página de Localizadores do Órgão
+   (idem, com o filtro de unidade) e o mesmo gerador de tabela em PDF —
+   só que combinados num único arquivo
+   `relatorio_gerencial_<unidade>_<data>.pdf` em `Downloads/eproc/`, em
+   vez de arquivos separados.
 
 ## Regras de Automação
 

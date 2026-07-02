@@ -139,8 +139,23 @@
       <div id="aviso-urgencia" class="aviso-urgencia" hidden></div>
     </div>
 
-    <div class="botoes" id="area-btn-relatorio-gerencial" hidden>
-      <button id="btn-relatorio-gerencial-unidade">Relatório Gerencial da Unidade</button>
+    <div id="area-erros-relatorio" class="erros" hidden></div>
+  </section>
+
+  <section class="card" id="card-corregedoria" hidden>
+    <h2 class="card-titulo">
+      <span class="card-icone" aria-hidden="true">🏛️</span>
+      Corregedoria
+    </h2>
+
+    <div id="area-corregedoria-info" class="status">
+      Disponível porque o perfil ativo é "CORREGEDORIA". Carregue as
+      unidades do Relatório Geral, escolha uma e gere o Relatório
+      Gerencial da Unidade.
+    </div>
+
+    <div class="botoes">
+      <button id="btn-relatorio-gerencial-unidade">Carregar unidades do Relatório Geral</button>
     </div>
 
     <div id="area-progresso-unidades" class="progresso-relatorio" hidden>
@@ -154,7 +169,18 @@
       </select>
     </div>
 
-    <div id="area-erros-relatorio" class="erros" hidden></div>
+    <div id="area-unidade-selecionada" class="status" hidden></div>
+
+    <div class="botoes" id="area-btn-exportar-gerencial" hidden>
+      <button id="btn-exportar-relatorio-gerencial">Exportar Relatório Gerencial da Unidade (PDF)</button>
+    </div>
+
+    <div id="area-progresso-relatorio-gerencial" class="progresso-relatorio" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="texto-progresso-relatorio-gerencial"></span>
+    </div>
+
+    <div id="area-erros-corregedoria" class="erros" hidden></div>
   </section>
 
   <section class="card">
