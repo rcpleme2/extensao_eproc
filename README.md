@@ -127,17 +127,16 @@ está vendo**:
    para despacho: N (urgentes: N)" e "Conclusos para sentença: N
    (urgentes: N)".
 
-O campo "Informação complementar" combina Tagify (exibição das tags) com
-o widget jQuery UI Autocomplete (busca/sugestões) — em vez de tentar
-simular digitação e clique numa lista suspensa cuja marcação exata é
-gerada dinamicamente, a extensão usa a API pública do próprio widget
-jQuery UI (`autocomplete('search', ...)` e o evento `select` do widget)
-para selecionar "Petição Urgente - Sim" de forma equivalente a um clique
-real, sem depender de acertar classes CSS de um menu efêmero. Se, ainda
-assim, o jQuery/o widget não estiverem disponíveis ou a sugestão não for
-encontrada, o total de conclusos continua aparecendo normalmente; só o
-número de urgentes fica com um aviso explicando o motivo (visível no
-painel), sem travar o resto do relatório.
+O campo "Informação complementar" usa o dropdown de sugestões nativo do
+Tagify (confirmado inspecionando a página ao vivo: os itens aparecem como
+`div.tagify__dropdown__item`, com o valor exato no atributo `value`). A
+extensão simula a digitação de "Petição Urgente" no campo, espera a
+sugestão "Petição Urgente - Sim" aparecer no dropdown e clica nela — o
+mesmo que um clique real faria. Se a sugestão não aparecer por algum
+motivo (ex.: mudança futura na página), o total de conclusos continua
+aparecendo normalmente; só o número de urgentes fica com um aviso
+explicando o motivo (visível no painel), sem travar o resto do
+relatório.
 
 Como a aba oculta é criada com `active: false`, ela não rouba o foco nem
 troca o que aparece na tela — só pode aparecer brevemente na barra de

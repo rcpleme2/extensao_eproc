@@ -524,19 +524,19 @@ const VALOR_SITUACAO_AGUARDA_SENTENCA = "M;21;C";
 // Roda inteiramente dentro da pagina "Relatorio Geral de Processos" (via
 // chrome.scripting.executeScript): marca a situacao pedida no select
 // multiplo, consulta o total, depois marca tambem o filtro "Informação
-// complementar" = "Petição Urgente - Sim" (campo Tagify + jQuery UI
-// Autocomplete: id="selDadoComplementar") e consulta de novo para saber
-// quantos desses sao urgentes. Precisa ser autocontida: e' serializada e
-// executada no contexto da pagina, sem acesso ao escopo deste arquivo.
+// complementar" = "Petição Urgente - Sim" (campo Tagify:
+// id="selDadoComplementar") e consulta de novo para saber quantos desses
+// sao urgentes. Precisa ser autocontida: e' serializada e executada no
+// contexto da pagina, sem acesso ao escopo deste arquivo.
 //
-// A parte de urgencia foi feita por engenharia reversa do HTML estatico
-// da pagina (o campo usa Tagify + jQuery UI Autocomplete, confirmado
-// pelas classes "tagify"/"ui-autocomplete-input" e pelos scripts
-// carregados), mas a lista de sugestoes em si e' gerada dinamicamente
-// (nao aparece no HTML estatico), entao os seletores do dropdown sao uma
-// aposta razoavel, nao uma certeza absoluta. Se a sugestao nao for
-// encontrada, a consulta do total ainda funciona normalmente; so' o
-// numero de urgentes fica nulo com um aviso explicando o motivo.
+// A parte de urgencia depende do dropdown nativo do Tagify (confirmado
+// via inspecao ao vivo com MutationObserver: os itens de sugestao sao
+// "div.tagify__dropdown__item" dentro de "div.tagify__dropdown", com o
+// valor exato no atributo "value" - nao e' jQuery UI Autocomplete, apesar
+// das classes "ui-autocomplete-*" no wrapper). Se a sugestao nao for
+// encontrada por algum motivo (ex.: mudanca na pagina), a consulta do
+// total ainda funciona normalmente; so' o numero de urgentes fica nulo
+// com um aviso explicando o motivo.
 function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
   function aguardar(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -569,74 +569,61 @@ function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
     wrapper.querySelectorAll(".tagify__tag__removeBtn").forEach((botao) => botao.click());
   }
 
-  // O campo "Informação complementar" combina Tagify (exibição das tags)
-  // com o widget jQuery UI Autocomplete (busca/sugestoes) - confirmado
-  // pelas classes "ui-autocomplete-wrapper"/"ui-autocomplete-input" no
-  // HTML da pagina. Em vez de tentar simular digitação + clique numa
-  // lista suspensa cuja marcação exata é gerada dinamicamente (tentativa
-  // anterior, que não encontrou a sugestão), usamos a API pública do
-  // proprio widget jQuery UI (".autocomplete('search', ...)" e
-  // "._trigger('select', ...)"), que é estável e não depende de acertar
-  // classes CSS de um menu que só existe enquanto a busca está ativa.
+  // O campo "Informação complementar" e' um Tagify de verdade, com o
+  // dropdown de sugestoes NATIVO da propria biblioteca (confirmado via
+  // MutationObserver numa sessao real: os itens aparecem como
+  // "div.tagify__dropdown__item" dentro de "div.tagify__dropdown", com o
+  // valor exato no atributo "value" - nao e' jQuery UI Autocomplete, as
+  // classes "ui-autocomplete-*" no wrapper eram so' nomenclatura, sem o
+  // widget de fato instanciado). Simula a digitacao no span editavel do
+  // Tagify (que já demonstrado funcionar: o dropdown real reage e filtra
+  // ao digitar) e clica no item cujo atributo "value" bate com o alvo.
   async function marcarPeticaoUrgente() {
-    const $ = window.jQuery || window.$;
-    if (!$) throw new Error("jQuery não disponível nesta página.");
-
-    const $input = $("#selDadoComplementar");
-    if ($input.length === 0) {
-      throw new Error('Campo "Informação complementar" (#selDadoComplementar) não encontrado.');
+    const wrapper = document.getElementById("selDadoComplementar-wrapper");
+    if (!wrapper) {
+      throw new Error('Campo "Informação complementar" não encontrado nesta página.');
     }
-
-    const autocomplete = $input.autocomplete("instance");
-    if (!autocomplete) {
-      throw new Error('Widget jQuery UI Autocomplete não inicializado em "Informação complementar".');
+    const inputSpan = wrapper.querySelector(".tagify__input");
+    const tagsEl = wrapper.querySelector("tags.tagify");
+    if (!inputSpan || !tagsEl) {
+      throw new Error('Estrutura do campo "Informação complementar" não reconhecida.');
     }
 
     limparInformacaoComplementar();
     await aguardar(150);
 
     const TEXTO_BUSCA = "Petição Urgente";
-    const TEXTO_ALVO = "Petição Urgente - Sim";
+    const VALOR_ALVO = "Petição Urgente - Sim";
 
-    $input.val(TEXTO_BUSCA);
-    $input.autocomplete("search", TEXTO_BUSCA);
+    inputSpan.focus();
+    inputSpan.textContent = TEXTO_BUSCA;
+    inputSpan.dispatchEvent(
+      new InputEvent("input", { bubbles: true, inputType: "insertText", data: TEXTO_BUSCA })
+    );
 
-    let itemDados = null;
+    let itemAlvo = null;
     for (let tentativa = 0; tentativa < 25; tentativa += 1) {
       await aguardar(200);
-      const menu = autocomplete.menu;
-      const $itens = menu && menu.element ? menu.element.find("li") : $();
-      for (let i = 0; i < $itens.length; i += 1) {
-        const $li = $itens.eq(i);
-        const dados = $li.data("ui-autocomplete-item") || $li.data("item.autocomplete");
-        const texto = (dados && (dados.label || dados.value)) || $li.text();
-        if ((texto || "").trim() === TEXTO_ALVO) {
-          itemDados = dados || { value: texto, label: texto };
-          break;
-        }
-      }
-      if (itemDados) break;
+      itemAlvo =
+        document.querySelector(`.tagify__dropdown__item[value="${VALOR_ALVO}"]`) ||
+        Array.from(document.querySelectorAll(".tagify__dropdown__item")).find(
+          (el) => (el.textContent || "").trim() === VALOR_ALVO
+        );
+      if (itemAlvo) break;
     }
 
-    if (!itemDados) {
-      throw new Error(
-        `Sugestão "${TEXTO_ALVO}" não encontrada no autocomplete de "Informação complementar" (via widget jQuery UI).`
-      );
+    if (!itemAlvo) {
+      throw new Error(`Sugestão "${VALOR_ALVO}" não encontrada no dropdown do Tagify.`);
     }
 
-    // Dispara o proprio evento "select" do widget, que e' o que o
-    // handler customizado do eproc escuta para adicionar a tag - o mesmo
-    // que aconteceria com um clique real na sugestão.
-    autocomplete._trigger("select", null, { item: itemDados });
-    autocomplete.close();
+    itemAlvo.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    itemAlvo.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    itemAlvo.click();
 
     await aguardar(200);
 
-    const tagsEl = document.querySelector("#selDadoComplementar-wrapper tags.tagify");
-    if (!tagsEl || tagsEl.querySelectorAll(".tagify__tag").length === 0) {
-      throw new Error(
-        'A tag "Petição Urgente - Sim" não foi adicionada após a seleção via jQuery UI Autocomplete.'
-      );
+    if (tagsEl.querySelectorAll(".tagify__tag").length === 0) {
+      throw new Error('A tag "Petição Urgente - Sim" não foi adicionada ao campo.');
     }
   }
 
@@ -747,18 +734,10 @@ async function gerarRelatorioGeral(aoProgredir) {
     // etc.) terminarem de inicializar apos o carregamento.
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // world: "MAIN" e' essencial aqui: por padrao o executeScript roda
-    // no "mundo isolado" (mesmo escopo dos content scripts), que tem seu
-    // proprio "window" separado do da pagina - "window.jQuery" so'
-    // existe no mundo principal, onde os scripts da propria pagina
-    // rodam. Sem isso, o acesso ao jQuery (necessario pra manipular o
-    // widget jQuery UI Autocomplete de "Informação complementar") falha
-    // com "jQuery não disponível".
     notificar('Consultando "MOVIMENTO-AGUARDA DESPACHO" (total e urgentes)...');
     const [{ result: resultadoDespacho } = {}] = await chrome.scripting.executeScript({
       target: { tabId: abaOculta.id },
       func: consultarSituacaoComUrgenciaNaPagina,
-      world: "MAIN",
       args: [VALOR_SITUACAO_AGUARDA_DESPACHO],
     });
 
@@ -766,7 +745,6 @@ async function gerarRelatorioGeral(aoProgredir) {
     const [{ result: resultadoSentenca } = {}] = await chrome.scripting.executeScript({
       target: { tabId: abaOculta.id },
       func: consultarSituacaoComUrgenciaNaPagina,
-      world: "MAIN",
       args: [VALOR_SITUACAO_AGUARDA_SENTENCA],
     });
 
