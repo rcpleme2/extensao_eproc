@@ -39,6 +39,19 @@
         <input type="radio" name="modo-exportacao" id="radio-pdf-unico" />
         PDF único combinado
       </label>
+      <label class="opcao-radio">
+        <input type="radio" name="modo-exportacao" id="radio-md-unico" />
+        MD único (texto, com OCR e anonimizado)
+      </label>
+      <div id="aviso-md-unico" class="aviso-md-unico" hidden>
+        Extrai o texto de todos os documentos (usa OCR automático para
+        páginas/imagens escaneadas, o que baixa um motor de reconhecimento
+        de ~alguns MB na primeira vez) e remove automaticamente CPF, CNPJ,
+        telefone, e-mail, linhas com possível endereço e abrevia nomes.
+        <strong>Isso é um processo de melhor esforço, não uma garantia de
+        anonimização completa</strong> — sempre revise o arquivo gerado
+        antes de compartilhar externamente.
+      </div>
       <button id="btn-baixar" disabled>Baixar</button>
     </div>
 

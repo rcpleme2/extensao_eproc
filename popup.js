@@ -8,6 +8,8 @@ const listaDocumentosEl = document.getElementById("lista-documentos");
 const areaOpcoes = document.getElementById("area-opcoes");
 const radioIndividuais = document.getElementById("radio-individuais");
 const radioPdfUnico = document.getElementById("radio-pdf-unico");
+const radioMdUnico = document.getElementById("radio-md-unico");
+const avisoMdUnico = document.getElementById("aviso-md-unico");
 const areaProgresso = document.getElementById("area-progresso");
 const barraProgresso = document.getElementById("barra-progresso");
 const textoProgresso = document.getElementById("texto-progresso");
@@ -16,15 +18,25 @@ const areaErros = document.getElementById("area-erros");
 const ROTULO_FASE = {
   individuais: "Arquivos individuais",
   "pdf-unico": "PDF único",
+  "md-unico": "MD único",
 };
 
 let estadoAtual = { numeroProcesso: null, documentos: [] };
 
-// Os dois modos sao mutuamente exclusivos (radio buttons), entao sempre
+// Os tres modos sao mutuamente exclusivos (radio buttons), entao sempre
 // ha' exatamente um marcado; so' falta ter documentos detectados.
 function atualizarEstadoBotaoBaixar() {
   btnBaixar.disabled = estadoAtual.documentos.length === 0;
 }
+
+// O aviso sobre OCR/anonimizacao so' aparece quando esse modo esta'
+// selecionado, para nao poluir a interface quando o usuario nao vai usa-lo.
+function atualizarAvisoMdUnico() {
+  avisoMdUnico.hidden = !radioMdUnico.checked;
+}
+radioIndividuais.addEventListener("change", atualizarAvisoMdUnico);
+radioPdfUnico.addEventListener("change", atualizarAvisoMdUnico);
+radioMdUnico.addEventListener("change", atualizarAvisoMdUnico);
 
 function setStatus(texto) {
   areaStatus.textContent = texto;
@@ -91,12 +103,14 @@ btnBaixar.addEventListener("click", async () => {
   const opcoes = {
     individuais: radioIndividuais.checked,
     pdfUnico: radioPdfUnico.checked,
+    mdUnico: radioMdUnico.checked,
   };
 
   btnBaixar.disabled = true;
   btnDetectar.disabled = true;
   radioIndividuais.disabled = true;
   radioPdfUnico.disabled = true;
+  radioMdUnico.disabled = true;
   areaProgresso.hidden = false;
   barraProgresso.value = 0;
   barraProgresso.max = estadoAtual.documentos.length;
@@ -309,6 +323,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     btnDetectar.disabled = false;
     radioIndividuais.disabled = false;
     radioPdfUnico.disabled = false;
+    radioMdUnico.disabled = false;
     atualizarEstadoBotaoBaixar();
     setStatus(`Concluido! Arquivos salvos em Downloads/${mensagem.pasta}`);
     if (mensagem.erros && mensagem.erros.length > 0) {

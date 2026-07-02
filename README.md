@@ -22,8 +22,9 @@ Downloads/eproc/<numero_do_processo>/
   0005_CERT1.html
   0006_MANDCITACAO1.html
   ...
-  _indice.json                          (lista com sequencial, evento, nome, tipo e URL de cada documento)
-  <numero_do_processo>_completo.pdf     (opcional: todos os documentos combinados em um único PDF)
+  _indice.json                                       (lista com sequencial, evento, nome, tipo e URL de cada documento)
+  <numero_do_processo>_completo.pdf                  (opcional: todos os documentos combinados em um único PDF)
+  <numero_do_processo>_completo_anonimizado.md       (opcional: texto de todos os documentos, com OCR e anonimizado)
 ```
 
 O número no início do nome do arquivo é um sequencial global de 4 dígitos
@@ -53,12 +54,15 @@ demais seguem na ordem em que os documentos foram juntados ao processo.
    encontrou na página e destaca (fundo amarelo claro) cada link de
    documento reconhecido diretamente na página, para conferência visual
    rápida contra os documentos exibidos.
-4. Escolha **um** dos dois modos (são alternativos, só um pode estar
+4. Escolha **um** dos três modos (são alternativos, só um pode estar
    marcado por vez):
    - **Arquivos individuais** (marcada por padrão): um arquivo por
      documento, como já era feito.
    - **PDF único combinado**: um único PDF com todos os documentos do
      processo, na mesma ordem cronológica (petição inicial primeiro).
+   - **MD único (texto, com OCR e anonimizado)**: um único arquivo
+     Markdown com o texto de todos os documentos, anonimizado
+     automaticamente — ver seção própria abaixo.
 5. Clique em **"Baixar"** — gera o modo escolhido em
    `Downloads/eproc/<numero_do_processo>/`.
 6. Acompanhe a barra de progresso no próprio painel.
@@ -97,14 +101,84 @@ Cada tipo de documento entra no PDF único de um jeito diferente:
   uma página de aviso é inserida no lugar, indicando para consultar o
   arquivo individual.
 
-Os dois modos (arquivos individuais / PDF único) são mutuamente
-exclusivos por esse motivo, entre outros: a segunda camada dos
+Os três modos (arquivos individuais / PDF único / MD único) são
+mutuamente exclusivos por esse motivo, entre outros: a segunda camada dos
 documentos "html" (a página com a `div` preenchida via AJAX) parece não
 aceitar bem ser acessada duas vezes seguidas para o mesmo documento, o
-que causava falhas quando as duas opções rodavam juntas na mesma
-execução. Se ainda assim algum documento não puder ser incorporado, a
-página de aviso no PDF único inclui o motivo exato da falha (ex.: tempo
-esgotado, elemento não encontrado), para facilitar o diagnóstico.
+que causava falhas quando duas opções rodavam juntas na mesma execução.
+Se ainda assim algum documento não puder ser incorporado, a página de
+aviso no PDF único inclui o motivo exato da falha (ex.: tempo esgotado,
+elemento não encontrado), para facilitar o diagnóstico.
+
+## MD único (texto, com OCR e anonimizado)
+
+Ao escolher o modo "MD único", a extensão monta um único arquivo
+`<numero_do_processo>_completo_anonimizado.md` com o **texto** de todos
+os documentos do processo, na mesma ordem cronológica da numeração
+sequencial, cada um em uma seção própria (`## 0001 — INIC1`, `## 0002 —
+OUT2`, ...).
+
+### Extração de texto e OCR
+
+- **PDF com camada de texto** (a maioria dos documentos gerados
+  digitalmente): o texto é extraído diretamente, usando a biblioteca
+  [pdf.js](https://mozilla.github.io/pdf.js/) (vendorizada em
+  `libs/pdf.min.js` / `libs/pdf.worker.min.js`).
+- **PDF escaneado ou imagem** (jpg, png, gif, bmp, webp) sem camada de
+  texto (ou com muito pouco texto extraído): a extensão renderiza a
+  página/imagem e roda **OCR automático** nela, usando
+  [Tesseract.js](https://tesseract.projectnaptha.com/) (vendorizado em
+  `libs/tesseract.min.js` / `libs/tesseract-worker.min.js`), configurado
+  para português. Trechos obtidos por OCR vêm marcados no arquivo com um
+  aviso (`⚠️ Texto obtido por OCR...`), já que reconhecimento automático
+  de imagem pode conter erros de leitura, especialmente em documentos
+  escaneados de baixa qualidade.
+- **HTML** (certidões, atos ordinatórios, mandados): reaproveita o mesmo
+  mecanismo de aba oculta já usado nos outros modos para ler o texto real
+  do documento.
+
+Esse processamento roda numa **aba oculta** própria (não a sua aba
+atual), separada da aba usada para os outros documentos "html". O motor
+de OCR (Tesseract) e os dados do idioma português são baixados de uma CDN
+pública (jsdelivr) na primeira vez que o OCR for usado nesta aba —
+alguns MB, feito uma única vez por sessão de exportação e cacheado pelo
+navegador depois. **Nenhum conteúdo dos seus documentos é enviado para
+fora**: só o motor/dados de OCR (arquivos genéricos, iguais para
+qualquer usuário) são baixados; o reconhecimento de texto em si roda
+inteiramente no seu navegador. Isso é a única parte da extensão que faz
+chamadas de rede além do próprio eproc.
+
+### Anonimização (melhor esforço)
+
+Antes de salvar, o texto combinado passa por uma anonimização automática:
+
+- **CPF, CNPJ, telefone e e-mail**: identificados por padrão (regex) e
+  substituídos por `[CPF removido]`, `[CNPJ removido]`, etc.
+- **Linhas com possível endereço**: qualquer linha contendo palavras como
+  "Rua", "Av.", "CEP", "Bairro" etc. é removida por inteiro e substituída
+  por `[linha com possível endereço removida]`.
+- **Nomes de pessoas**: sequências de 3 ou mais palavras em
+  Maiúscula+minúscula (ex.: "Maria Aparecida Santos") são detectadas e
+  abreviadas (ex.: "Maria A. Santos"), preservando primeiro e último
+  nome. Uma pequena lista de frases institucionais comuns ("Poder
+  Judiciário", "Tribunal de Justiça", ...) é excluída dessa detecção para
+  não abreviá-las por engano.
+
+**Isso é um processo de melhor esforço baseado em padrões, não uma
+garantia de anonimização completa** — não é NLP nem usa uma lista real
+das partes do processo. Em particular:
+- Nomes escritos em **CAIXA ALTA** (comum em petições/certidões) não são
+  tocados de propósito, já que no eproc esse padrão normalmente indica
+  rótulos de evento/situação, não nomes de pessoas — abreviar tudo em
+  caixa alta geraria muitos falsos positivos.
+- Endereços sem as palavras-chave reconhecidas, ou em formatos atípicos,
+  podem não ser detectados.
+- Erros de OCR podem fazer um CPF/nome não bater exatamente com o padrão
+  esperado e escapar da anonimização.
+
+**Sempre revise o arquivo `.md` gerado antes de compartilhar
+externamente** — o aviso já aparece no próprio painel ao escolher esse
+modo e no cabeçalho do arquivo gerado.
 
 ## Relatório Geral (conclusos para despacho/sentença)
 
@@ -266,3 +340,9 @@ painel), em vez do ícone genérico de documento usado antes.
   (`.../eproc/controlador.php`), não é restrita a um tribunal específico.
 - Se um download falhar (ex.: link expirado), o erro aparece no painel ao
   final do processo; os demais downloads continuam normalmente.
+- **Único ponto da extensão que acessa a internet além do eproc**: o modo
+  "MD único" baixa o motor de OCR e os dados de idioma (Tesseract) de uma
+  CDN pública (jsdelivr) na primeira vez que o OCR é usado numa aba. Todas
+  as outras funcionalidades (exportar documentos, PDF único, relatórios,
+  regras de automação) funcionam inteiramente offline/local, sem nenhuma
+  chamada de rede além do próprio eproc.

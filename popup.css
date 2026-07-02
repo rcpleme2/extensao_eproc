@@ -121,6 +121,17 @@ button:disabled {
   margin-top: 4px;
 }
 
+.aviso-md-unico {
+  margin: 2px 0 4px;
+  padding: 6px 8px;
+  background: #fff8e1;
+  border: 1px solid #f0d98c;
+  border-radius: 4px;
+  color: #7a5c00;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
 .progresso {
   display: flex;
   align-items: center;

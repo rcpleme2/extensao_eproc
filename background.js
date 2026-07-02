@@ -413,6 +413,341 @@ async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProce
   await baixarUm(nomeArquivo, dataUrl);
 }
 
+// ---- Construcao do MD unico (com OCR e anonimizacao "melhor esforco") ----
+//
+// Diferente do PDF unico (que roda inteiramente no service worker, usando
+// pdf-lib), este modo precisa de pdf.js (para ler a camada de texto de
+// PDFs) e do Tesseract.js (OCR, para paginas escaneadas/imagens sem texto).
+// Nenhuma das duas roda bem num service worker MV3: paginas de extensao
+// (service worker incluso) tem uma CSP fixa que bloqueia a execucao de
+// script remoto, e o Tesseract precisa baixar da CDN (jsdelivr) o motor
+// (WASM) e os dados do idioma - so' esses dois arquivos grandes, nunca o
+// conteudo dos documentos, que nao sai do navegador. Por isso essa etapa
+// roda dentro de uma ABA OCULTA de verdade, aberta no proprio dominio do
+// eproc (nao numa pagina da extensao): scripts injetados via
+// chrome.scripting.executeScript (arquivo ou funcao) nao ficam presos a
+// CSP da extensao, entao o Tesseract consegue buscar o motor/idioma
+// normalmente nessa aba.
+const LIMIAR_CARACTERES_TEXTO_PDF = 20;
+
+// Injetada UMA vez por aba (via files: ["libs/pdf.min.js",
+// "libs/tesseract.min.js"] + esta funcao), depois que os dois arquivos
+// vendorizados ja' foram carregados como scripts na aba. Aponta o worker
+// do pdf.js para o arquivo local (em vez de tentar buscar da CDN) e define,
+// no escopo global da PAGINA (window.__eproc*), as funcoes que processam
+// cada documento. Isso e' necessario porque cada chamada de
+// executeScript com "func" e' serializada e avaliada isoladamente, sem
+// acesso as demais funcoes deste arquivo (background.js) - entao elas
+// precisam ja existir no escopo da pagina antes de serem chamadas uma vez
+// por documento.
+function prepararAmbienteMdNaPagina() {
+  if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("libs/pdf.worker.min.js");
+  }
+
+  // Um unico worker do Tesseract e' reaproveitado para todos os
+  // documentos desta aba (criar um worker novo por documento seria muito
+  // mais lento). Guardar a PROMESSA (nao o worker resolvido) evita criar
+  // dois workers se dois documentos comecarem a ser processados quase ao
+  // mesmo tempo.
+  async function obterTesseractWorker() {
+    if (!window.__eprocTesseractWorker) {
+      window.__eprocTesseractWorker = window.Tesseract.createWorker("por", 1, {
+        workerPath: chrome.runtime.getURL("libs/tesseract-worker.min.js"),
+        // corePath/langPath ficam no padrao do Tesseract.js (CDN
+        // jsdelivr) - sao o motor (wasm) e os dados do idioma, os unicos
+        // arquivos grandes o suficiente para nao vendorizar. Isso baixa
+        // alguns MB na primeira vez que o OCR e' usado (o navegador
+        // guarda em cache depois); nenhum conteudo de documento e'
+        // enviado para fora, so' esses dois arquivos sao baixados.
+      });
+    }
+    return window.__eprocTesseractWorker;
+  }
+
+  async function extrairTextoPdf(buffer) {
+    const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
+    const partes = [];
+    let ocrUsado = false;
+
+    for (let i = 1; i <= pdf.numPages; i += 1) {
+      const pagina = await pdf.getPage(i);
+      const conteudoTexto = await pagina.getTextContent();
+      let texto = conteudoTexto.items
+        .map((item) => item.str || "")
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (texto.length < 20) {
+        // Pouco ou nenhum texto na camada nativa do PDF - provavel pagina
+        // escaneada. Renderiza a pagina para um canvas e tenta OCR nela.
+        const worker = await obterTesseractWorker();
+        const viewport = pagina.getViewport({ scale: 2 });
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext("2d");
+        await pagina.render({ canvasContext: ctx, viewport }).promise;
+        const dataUrl = canvas.toDataURL("image/png");
+        const resultado = await worker.recognize(dataUrl);
+        const textoOcr = (resultado.data.text || "").trim();
+        if (textoOcr) {
+          texto = textoOcr;
+          ocrUsado = true;
+        }
+      }
+
+      partes.push(texto || "(sem texto identificado nesta página)");
+    }
+
+    return { texto: partes.join("\n\n"), ocrUsado, erro: null };
+  }
+
+  async function extrairTextoImagem(buffer, mimetype) {
+    const worker = await obterTesseractWorker();
+    const tipoMime = mimetype === "jpg" ? "jpeg" : mimetype;
+    const blob = new Blob([buffer], { type: `image/${tipoMime}` });
+    const resultado = await worker.recognize(blob);
+    const texto = (resultado.data.text || "").trim();
+    return { texto, ocrUsado: true, erro: texto ? null : "OCR não identificou texto na imagem." };
+  }
+
+  const MIMETYPES_IMAGEM_OCR = ["jpg", "jpeg", "png", "gif", "bmp", "webp"];
+
+  window.__eprocProcessarDocumentoMd = async function (parametros) {
+    try {
+      const resposta = await fetch(parametros.url, { credentials: "same-origin" });
+      if (!resposta.ok) {
+        throw new Error(`Falha ao baixar o documento (HTTP ${resposta.status}).`);
+      }
+      const buffer = await resposta.arrayBuffer();
+
+      if (parametros.mimetype === "pdf") {
+        return await extrairTextoPdf(buffer);
+      }
+
+      if (MIMETYPES_IMAGEM_OCR.includes(parametros.mimetype)) {
+        return await extrairTextoImagem(buffer, parametros.mimetype);
+      }
+
+      return {
+        texto: "",
+        ocrUsado: false,
+        erro: `Tipo "${parametros.mimetype}" não suportado para extração de texto no MD único.`,
+      };
+    } catch (e) {
+      return { texto: "", ocrUsado: false, erro: e && e.message ? e.message : String(e) };
+    }
+  };
+}
+
+// Chamada uma vez por documento (executeScript so' aceita passar "args"
+// junto de "func", nao junto de "files") - so' repassa para a funcao real
+// ja' definida no escopo da pagina por "prepararAmbienteMdNaPagina".
+function chamarProcessarDocumentoMdNaPagina(parametros) {
+  return window.__eprocProcessarDocumentoMd(parametros);
+}
+
+function encerrarTesseractWorkerNaPagina() {
+  if (window.__eprocTesseractWorker) {
+    return window.__eprocTesseractWorker.then((worker) => worker.terminate()).catch(() => {});
+  }
+  return Promise.resolve();
+}
+
+async function prepararAbaProcessamentoMd(urlOrigemEproc) {
+  const aba = await chrome.tabs.create({ url: urlOrigemEproc, active: false });
+  await aguardarCarregamentoAba(aba.id);
+
+  await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    files: ["libs/pdf.min.js", "libs/tesseract.min.js"],
+  });
+
+  await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: prepararAmbienteMdNaPagina,
+  });
+
+  return aba;
+}
+
+async function processarDocumentoMd(tabId, url, mimetype, nome) {
+  const [{ result } = {}] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: chamarProcessarDocumentoMdNaPagina,
+    args: [{ url, mimetype, nome }],
+  });
+  return result || { texto: "", ocrUsado: false, erro: "Sem resultado retornado pela aba." };
+}
+
+// ---- Anonimizacao "melhor esforco" ----
+//
+// IMPORTANTE: isto e' deteccao por padroes (regex) e uma heuristica de
+// nomes - nao e' NLP nem usa uma lista real das partes do processo. Serve
+// para reduzir a exposicao de dados pessoais mais obvios (CPF/CNPJ,
+// telefone, e-mail, linhas de endereco, nomes em Maiuscula+minuscula), mas
+// NAO e' uma garantia de anonimizacao completa. Documentos digitalizados
+// com OCR de baixa qualidade, nomes escritos em CAIXA ALTA (comuns em
+// petições/certidões) ou formatos atipicos de documento podem passar sem
+// ser detectados. Sempre revise o arquivo gerado antes de compartilhar
+// externamente.
+const REGEX_EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
+const REGEX_CNPJ = /\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g;
+const REGEX_CPF = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
+const REGEX_TELEFONE = /\(?\b\d{2}\)?[\s-]?9?\d{4}-?\d{4}\b/g;
+const REGEX_CEP = /\b\d{5}-?\d{3}\b/;
+const REGEX_PALAVRA_ENDERECO = /\b(Rua|Av\.|Avenida|Alameda|Rodovia|Travessa|Pra[çc]a|Bairro|CEP|Logradouro|Quadra|Lote|Apto\.?|Apartamento|Condom[íi]nio)\b/i;
+
+// Frases institucionais comuns que o heuristico de nomes (Maiuscula +
+// minuscula, 3+ palavras) acertaria por engano - excluidas explicitamente.
+const FRASES_NAO_SAO_NOMES = [
+  "Poder Judiciário",
+  "Tribunal de Justiça",
+  "Ministério Público",
+  "Justiça Federal",
+  "Justiça do Trabalho",
+  "Vara Única",
+  "Juizado Especial",
+  "Diário de Justiça",
+  "Secretaria de Vara",
+  "Termo de Audiência",
+  "Certidão de Publicação",
+  "Ato Ordinatório",
+];
+
+// Nomes de pessoa reais no Brasil quase sempre tem 3+ palavras (incluindo
+// conectivos como "de"/"da"/"dos"). Exigir 3+ (em vez de 2+) reduz bastante
+// falsos positivos com termos institucionais de 2 palavras ("Poder
+// Judiciário", "Vara Única", etc). Blocos em CAIXA ALTA sao ignorados de
+// proposito: no eproc normalmente sao rotulos de evento/situação, nao
+// nomes - o efeito colateral e' que nomes de pessoas escritos em CAIXA
+// ALTA (comum em petições) nao sao abreviados por este heuristico.
+const REGEX_NOME_PROVAVEL =
+  /\b[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+(?:de|d[ao]s?|e)\s+[A-ZÀ-Ý][a-zà-ÿ]+|\s+[A-ZÀ-Ý][a-zà-ÿ]+){2,5}\b/g;
+
+function abreviarNome(nomeCompleto) {
+  const CONECTIVOS = new Set(["de", "da", "do", "dos", "das", "e"]);
+  const partes = nomeCompleto.trim().split(/\s+/);
+  if (partes.length <= 2) return nomeCompleto;
+
+  const primeiro = partes[0];
+  const ultimo = partes[partes.length - 1];
+  const meio = partes.slice(1, -1).map((parte) => {
+    if (CONECTIVOS.has(parte.toLowerCase())) return parte.toLowerCase();
+    return `${parte[0].toUpperCase()}.`;
+  });
+
+  return [primeiro, ...meio, ultimo].join(" ");
+}
+
+function anonimizarTexto(texto) {
+  let resultado = texto;
+
+  resultado = resultado.replace(REGEX_EMAIL, "[e-mail removido]");
+  resultado = resultado.replace(REGEX_CNPJ, "[CNPJ removido]");
+  resultado = resultado.replace(REGEX_CPF, "[CPF removido]");
+  resultado = resultado.replace(REGEX_TELEFONE, "[telefone removido]");
+
+  resultado = resultado
+    .split("\n")
+    .map((linha) => {
+      if (REGEX_PALAVRA_ENDERECO.test(linha) || REGEX_CEP.test(linha)) {
+        return "[linha com possível endereço removida]";
+      }
+      return linha;
+    })
+    .join("\n");
+
+  resultado = resultado.replace(REGEX_NOME_PROVAVEL, (trecho) => {
+    if (FRASES_NAO_SAO_NOMES.some((frase) => trecho.includes(frase))) return trecho;
+    return abreviarNome(trecho);
+  });
+
+  return resultado;
+}
+
+async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProcesso, aoProgredir) {
+  if (documentos.length === 0) return;
+
+  // Precisa ser uma URL com o caminho "/eproc/..." (nao so' a origem) para
+  // bater com o host_permissions declarado no manifest
+  // ("*://*/eproc/*") - senao chrome.scripting.executeScript e' negado
+  // nesta aba por falta de permissao de host.
+  const origemEproc = `${new URL(documentos[0].href).origin}/eproc/controlador.php`;
+  const aba = await prepararAbaProcessamentoMd(origemEproc);
+
+  const secoes = [];
+  const avisos = [];
+
+  try {
+    for (let i = 0; i < documentos.length; i += 1) {
+      const doc = documentos[i];
+      const numero = String(i + 1).padStart(4, "0");
+      let corpo;
+
+      try {
+        const urlReal = await resolverUrl(doc);
+
+        if (doc.mimetype === "html") {
+          const { texto, erro } = await obterTextoHtmlReal(urlReal);
+          if (texto) {
+            corpo = texto;
+          } else {
+            corpo = `_Não foi possível extrair o conteúdo deste documento (${erro || "motivo desconhecido"})._`;
+            avisos.push(`${doc.nome}: ${erro || "motivo desconhecido"}`);
+          }
+        } else {
+          const resultado = await processarDocumentoMd(aba.id, urlReal, doc.mimetype, doc.nome);
+          if (resultado.erro && !resultado.texto) {
+            corpo = `_Não foi possível extrair o texto deste documento (${resultado.erro})._`;
+            avisos.push(`${doc.nome}: ${resultado.erro}`);
+          } else {
+            corpo = resultado.texto || "_(sem texto identificado)_";
+            if (resultado.ocrUsado) {
+              corpo = `> ⚠️ Texto obtido por OCR (reconhecimento automático de imagem) — pode conter erros de leitura.\n\n${corpo}`;
+            }
+          }
+        }
+      } catch (e) {
+        corpo = `_Não foi possível processar este documento (${String(e)})._`;
+        avisos.push(`${doc.nome}: ${String(e)}`);
+      }
+
+      secoes.push(`## ${numero} — ${doc.nome}\n\n${corpo.trim()}\n`);
+      if (aoProgredir) aoProgredir(i + 1, documentos.length);
+    }
+  } finally {
+    await chrome.scripting
+      .executeScript({ target: { tabId: aba.id }, func: encerrarTesseractWorkerNaPagina })
+      .catch(() => {});
+    chrome.tabs.remove(aba.id).catch(() => {});
+  }
+
+  const cabecalho = [
+    `# Processo ${numeroProcesso} — documentos combinados (anonimizado)`,
+    "",
+    `> Gerado automaticamente em ${new Date().toLocaleString("pt-BR")}. Passou por uma anonimização` +
+      " automática (nomes em Maiúscula+minúscula abreviados, CPF/CNPJ/telefone/e-mail e linhas com" +
+      " possível endereço removidos) que é **melhor esforço, não uma garantia de anonimização completa**" +
+      " — revise o conteúdo antes de compartilhar externamente.",
+    "",
+  ];
+
+  if (avisos.length > 0) {
+    cabecalho.push(
+      `> **Avisos:** ${avisos.length} documento(s) com problema na extração de texto: ${avisos.join(" | ")}`,
+      ""
+    );
+  }
+
+  const corpoCompleto = anonimizarTexto([...cabecalho, ...secoes].join("\n"));
+
+  const nomeArquivo = `${pastaBase}/${sanitizarNomeArquivo(numeroProcesso)}_completo_anonimizado.md`;
+  await baixarUm(nomeArquivo, construirDataUrl("text/markdown", corpoCompleto));
+}
+
 // ---- Orquestracao geral ----
 
 async function processarFila(numeroProcesso, documentos, opcoes) {
@@ -504,6 +839,24 @@ async function processarFila(numeroProcesso, documentos, opcoes) {
       await construirPdfUnico(documentos, obterUrlResolvida, pastaBase, numeroProcesso, enviarProgressoPdf);
     } catch (e) {
       erros.push({ nome: "PDF unico", mensagem: String(e) });
+    }
+  }
+
+  if (opcoes.mdUnico) {
+    const enviarProgressoMd = (concluidos, total) => {
+      chrome.runtime.sendMessage({
+        tipo: "PROGRESSO_DOWNLOAD",
+        fase: "md-unico",
+        concluidos,
+        total,
+        erros,
+      }).catch(() => {});
+    };
+
+    try {
+      await construirMdUnico(documentos, obterUrlResolvida, pastaBase, numeroProcesso, enviarProgressoMd);
+    } catch (e) {
+      erros.push({ nome: "MD unico", mensagem: String(e) });
     }
   }
 
