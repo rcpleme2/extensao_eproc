@@ -44,6 +44,21 @@ function extrairNumeroEvento(anchorEl) {
   return null;
 }
 
+// A descricao livre que o usuario digita ao anexar um documento (comum em
+// documentos do tipo "Outros") fica num <span class="infraTextoTooltip
+// infraTextoTooltipObservacao"> logo apos o link, dentro da mesma celula
+// da tabela - confirmado na pagina real do eproc (ex.: "OUT8</a><br>
+// <span class="infraTextoTooltip infraTextoTooltipObservacao">imagem</span>").
+// O aria-label do proprio link ("Visualizar documento OUT8 do tipo jpeg")
+// NAO e' essa descricao, so' repete nome+tipo - por isso nao e' usado
+// aqui. Nem todo documento tem essa observacao preenchida.
+function extrairDescricaoDocumento(anchorEl) {
+  const td = anchorEl.closest("td");
+  if (!td) return "";
+  const span = td.querySelector(".infraTextoTooltipObservacao");
+  return span ? (span.textContent || "").replace(/\s+/g, " ").trim() : "";
+}
+
 function extrairOrdemNoEvento(anchorEl) {
   // O numero no final do rotulo visivel (INIC1 -> 1, OUT3 -> 3, ...)
   // corresponde a posicao do documento dentro do seu evento.
@@ -94,6 +109,7 @@ function listarDocumentos() {
       idDocumento: idDoc,
       nome: (a.textContent || "").trim() || a.getAttribute("data-nome") || idDoc,
       dataNome: a.getAttribute("data-nome") || "",
+      descricao: extrairDescricaoDocumento(a),
       mimetype: (a.getAttribute("data-mimetype") || "").toLowerCase(),
       href: a.href,
       evento: extrairNumeroEvento(a),
@@ -119,7 +135,137 @@ function listarDocumentos() {
   return {
     numeroProcesso: extrairNumeroProcesso(),
     documentos,
+    movimentacao: listarMovimentacaoProcessual(),
   };
+}
+
+const CLASSE_DESTAQUE_MOVIMENTACAO = "eproc-exportador-destaque-movimentacao";
+const ID_ESTILO_DESTAQUE_MOVIMENTACAO = "eproc-exportador-estilo-destaque-movimentacao";
+
+// Mesma ideia de "garantirEstiloDestaque"/"destacarAncoras" (usadas para
+// destacar os links de documento), so' que para as linhas de
+// movimentação identificadas - com uma cor diferente (azul) para não se
+// confundir com o destaque amarelo dos documentos.
+function garantirEstiloDestaqueMovimentacao() {
+  if (document.getElementById(ID_ESTILO_DESTAQUE_MOVIMENTACAO)) return;
+  const style = document.createElement("style");
+  style.id = ID_ESTILO_DESTAQUE_MOVIMENTACAO;
+  style.textContent = `
+    tr.${CLASSE_DESTAQUE_MOVIMENTACAO} {
+      background-color: rgba(33, 150, 243, 0.16) !important;
+      outline: 1px solid #1565c0 !important;
+      box-shadow: 0 0 0 1px rgba(21, 101, 192, 0.35) !important;
+    }
+    tr.${CLASSE_DESTAQUE_MOVIMENTACAO} > td {
+      background-color: rgba(33, 150, 243, 0.16) !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function destacarLinhasMovimentacao(linhas) {
+  garantirEstiloDestaqueMovimentacao();
+  for (const linha of linhas) {
+    linha.classList.add(CLASSE_DESTAQUE_MOVIMENTACAO);
+  }
+}
+
+// Le' a tabela de movimentação do processo (numero do evento, data/hora e
+// descrição), usada para incluir uma linha do tempo no MD único - mesmo
+// quando o processo não tem nenhum documento anexado - e destaca
+// visualmente (fundo azul) cada linha reconhecida na própria página,
+// para conferência visual, do mesmo jeito que já é feito com os
+// documentos (fundo amarelo).
+//
+// Estrutura confirmada com uma página real do eproc (tela de detalhes do
+// processo): tabela "#tblEventos", uma linha "<tr id=\"trEventoN\">" por
+// evento, com colunas diretas (não aninhadas) para número do evento,
+// data/hora ("dd/mm/aaaa hh:mm:ss") e descrição
+// ("td.infraEventoDescricao"). Os documentos de cada evento ficam numa
+// tabela ANINHADA dentro de uma dessas colunas (por isso não usamos mais
+// "td[id^=tdEvento]" para achar a linha do evento - esse id pertence à
+// tabela aninhada de documentos, não à linha do evento).
+//
+// Estratégia 2 (fallback): usada só se a estratégia 1 não encontrar
+// nada, ex. num tribunal cuja tabela tenha outro id/estrutura - considera
+// qualquer <tr> cuja alguma célula direta seja reconhecível como
+// data/hora.
+function listarMovimentacaoProcessual() {
+  const REGEX_DATA_HORA = /^(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)$/;
+
+  function celulasDiretas(linha) {
+    return Array.from(linha.querySelectorAll(":scope > td"));
+  }
+
+  function extrairDeLinha(linha) {
+    const idMatch = (linha.id || "").match(/^trEvento(\d+)$/);
+    const numeroEvento = idMatch ? Number(idMatch[1]) : null;
+
+    const tds = celulasDiretas(linha);
+    const tdData = tds.find((td) => REGEX_DATA_HORA.test((td.textContent || "").trim()));
+    if (!tdData) return null;
+    const dataHora = (tdData.textContent || "").trim();
+
+    const tdDescricao = linha.querySelector(":scope > td.infraEventoDescricao");
+    let descricao;
+    if (tdDescricao) {
+      descricao = (tdDescricao.textContent || "").replace(/\s+/g, " ").trim();
+    } else {
+      // Fallback generico (tribunal sem a classe "infraEventoDescricao"):
+      // junta as demais celulas diretas, exceto a de data e uma que seja
+      // so' o numero do evento repetido.
+      descricao = tds
+        .filter(
+          (td) =>
+            td !== tdData &&
+            (numeroEvento == null || (td.textContent || "").trim() !== String(numeroEvento))
+        )
+        .map((td) => (td.textContent || "").replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .join(" — ");
+    }
+
+    return { linha, numeroEvento, dataHora, descricao };
+  }
+
+  const eventos = [];
+  const linhasDestacar = [];
+  const vistos = new Set();
+
+  const processarLinha = (linha) => {
+    const evento = extrairDeLinha(linha);
+    if (!evento) return;
+    const chave = `${evento.numeroEvento}|${evento.dataHora}|${evento.descricao}`;
+    if (vistos.has(chave)) return;
+    vistos.add(chave);
+    linhasDestacar.push(linha);
+    eventos.push({
+      numeroEvento: evento.numeroEvento,
+      dataHora: evento.dataHora,
+      descricao: evento.descricao,
+    });
+  };
+
+  document
+    .querySelectorAll('#tblEventos tbody > tr[id^="trEvento"], table.infraTable tbody > tr[id^="trEvento"]')
+    .forEach(processarLinha);
+
+  if (eventos.length === 0) {
+    document.querySelectorAll("tr").forEach((tr) => {
+      if (celulasDiretas(tr).some((td) => REGEX_DATA_HORA.test((td.textContent || "").trim()))) {
+        processarLinha(tr);
+      }
+    });
+  }
+
+  eventos.sort((a, b) => {
+    if (a.numeroEvento != null && b.numeroEvento != null) return a.numeroEvento - b.numeroEvento;
+    return 0;
+  });
+
+  destacarLinhasMovimentacao(linhasDestacar);
+
+  return eventos;
 }
 
 const CLASSE_CARGO_USUARIO = "eproc-exportador-cargo-usuario";

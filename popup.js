@@ -8,6 +8,8 @@ const listaDocumentosEl = document.getElementById("lista-documentos");
 const areaOpcoes = document.getElementById("area-opcoes");
 const radioIndividuais = document.getElementById("radio-individuais");
 const radioPdfUnico = document.getElementById("radio-pdf-unico");
+const radioMdUnico = document.getElementById("radio-md-unico");
+const avisoMdUnico = document.getElementById("aviso-md-unico");
 const areaProgresso = document.getElementById("area-progresso");
 const barraProgresso = document.getElementById("barra-progresso");
 const textoProgresso = document.getElementById("texto-progresso");
@@ -16,15 +18,42 @@ const areaErros = document.getElementById("area-erros");
 const ROTULO_FASE = {
   individuais: "Arquivos individuais",
   "pdf-unico": "PDF único",
+  "md-unico": "MD único",
 };
 
-let estadoAtual = { numeroProcesso: null, documentos: [] };
+let estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [] };
 
-// Os dois modos sao mutuamente exclusivos (radio buttons), entao sempre
-// ha' exatamente um marcado; so' falta ter documentos detectados.
+// Os tres modos sao mutuamente exclusivos (radio buttons), entao sempre
+// ha' exatamente um marcado. O botao "Baixar" fica habilitado se houver
+// documentos OU movimentacao detectados - o "MD único" sozinho consegue
+// gerar um arquivo so' com a movimentação, mesmo sem nenhum documento
+// anexado.
 function atualizarEstadoBotaoBaixar() {
-  btnBaixar.disabled = estadoAtual.documentos.length === 0;
+  const temDocumentos = estadoAtual.documentos.length > 0;
+  const temMovimentacao = estadoAtual.movimentacao.length > 0;
+  btnBaixar.disabled = !temDocumentos && !temMovimentacao;
 }
+
+// "Arquivos individuais" e "PDF único" não tem o que gerar sem nenhum
+// documento anexado - reaplicado tanto apos detectar quanto apos um
+// download terminar, para nao reabilitar por engano essas duas opcoes
+// quando o processo so' tem movimentação.
+function atualizarEstadoRadiosConformeDocumentos() {
+  const semDocumentos = estadoAtual.documentos.length === 0;
+  radioIndividuais.disabled = semDocumentos;
+  radioPdfUnico.disabled = semDocumentos;
+  radioMdUnico.disabled = false;
+}
+
+// O aviso sobre extração de texto/anonimização so' aparece quando esse
+// modo esta' selecionado, para nao poluir a interface quando o usuario
+// nao vai usa-lo.
+function atualizarAvisoMdUnico() {
+  avisoMdUnico.hidden = !radioMdUnico.checked;
+}
+radioIndividuais.addEventListener("change", atualizarAvisoMdUnico);
+radioPdfUnico.addEventListener("change", atualizarAvisoMdUnico);
+radioMdUnico.addEventListener("change", atualizarAvisoMdUnico);
 
 function setStatus(texto) {
   areaStatus.textContent = texto;
@@ -57,11 +86,14 @@ btnDetectar.addEventListener("click", async () => {
     const aba = await getAbaAtiva();
     const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_DOCUMENTOS" });
 
-    if (!resposta || !resposta.documentos || resposta.documentos.length === 0) {
+    const documentos = (resposta && resposta.documentos) || [];
+    const movimentacao = (resposta && resposta.movimentacao) || [];
+
+    if (!resposta || (documentos.length === 0 && movimentacao.length === 0)) {
       setStatus(
-        "Nenhum documento encontrado. Confirme que voce esta na pagina de detalhes do processo no eproc."
+        "Nenhum documento nem movimentação encontrados. Confirme que você está na página de detalhes do processo no eproc."
       );
-      estadoAtual = { numeroProcesso: null, documentos: [] };
+      estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [] };
       atualizarEstadoBotaoBaixar();
       areaProcesso.hidden = true;
       areaOpcoes.hidden = true;
@@ -70,15 +102,36 @@ btnDetectar.addEventListener("click", async () => {
       return;
     }
 
-    estadoAtual = resposta;
+    estadoAtual = { numeroProcesso: resposta.numeroProcesso, documentos, movimentacao };
     numeroProcessoEl.textContent = resposta.numeroProcesso;
-    totalDocumentosEl.textContent = String(resposta.documentos.length);
+    totalDocumentosEl.textContent = String(documentos.length);
     areaProcesso.hidden = false;
     areaOpcoes.hidden = false;
-    listaDocumentosEl.hidden = false;
-    renderizarLista(resposta.documentos);
+
+    // Sem nenhum documento anexado (so' movimentação), os modos
+    // "Arquivos individuais" e "PDF único" não têm o que gerar - só "MD
+    // único" consegue produzir algo (a linha do tempo de movimentação).
+    const semDocumentos = documentos.length === 0;
+    atualizarEstadoRadiosConformeDocumentos();
+    if (semDocumentos) {
+      radioMdUnico.checked = true;
+    }
+    atualizarAvisoMdUnico();
+
+    if (semDocumentos) {
+      listaDocumentosEl.hidden = true;
+      listaDocumentosEl.innerHTML = "";
+    } else {
+      listaDocumentosEl.hidden = false;
+      renderizarLista(documentos);
+    }
+
     atualizarEstadoBotaoBaixar();
-    setStatus("Documentos detectados. Escolha o que baixar e clique em \"Baixar\".");
+    setStatus(
+      semDocumentos
+        ? `Nenhum documento anexado, mas ${movimentacao.length} evento(s) de movimentação encontrado(s) - só "MD único" está disponível.`
+        : 'Documentos detectados. Escolha o que baixar e clique em "Baixar".'
+    );
   } catch (e) {
     setStatus(
       "Nao foi possivel ler a pagina. Verifique se voce esta em uma pagina de processo do eproc e tente novamente."
@@ -87,19 +140,21 @@ btnDetectar.addEventListener("click", async () => {
 });
 
 btnBaixar.addEventListener("click", async () => {
-  if (!estadoAtual.documentos.length) return;
+  if (!estadoAtual.documentos.length && !estadoAtual.movimentacao.length) return;
   const opcoes = {
     individuais: radioIndividuais.checked,
     pdfUnico: radioPdfUnico.checked,
+    mdUnico: radioMdUnico.checked,
   };
 
   btnBaixar.disabled = true;
   btnDetectar.disabled = true;
   radioIndividuais.disabled = true;
   radioPdfUnico.disabled = true;
+  radioMdUnico.disabled = true;
   areaProgresso.hidden = false;
   barraProgresso.value = 0;
-  barraProgresso.max = estadoAtual.documentos.length;
+  barraProgresso.max = Math.max(estadoAtual.documentos.length, 1);
   textoProgresso.textContent = `0 / ${estadoAtual.documentos.length}`;
   areaErros.hidden = true;
   setStatus("Baixando...");
@@ -108,6 +163,7 @@ btnBaixar.addEventListener("click", async () => {
     tipo: "BAIXAR_DOCUMENTOS",
     numeroProcesso: estadoAtual.numeroProcesso,
     documentos: estadoAtual.documentos,
+    movimentacao: estadoAtual.movimentacao,
     opcoes,
   });
 });
@@ -300,15 +356,15 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     barraProgresso.value = mensagem.concluidos;
     barraProgresso.max = mensagem.total;
     const rotulo = ROTULO_FASE[mensagem.fase] || "";
-    textoProgresso.textContent = `${rotulo ? rotulo + ": " : ""}${mensagem.concluidos} / ${mensagem.total}`;
+    const sufixoDocumento = mensagem.nomeAtual ? ` (${mensagem.nomeAtual})` : "";
+    textoProgresso.textContent = `${rotulo ? rotulo + ": " : ""}${mensagem.concluidos} / ${mensagem.total}${sufixoDocumento}`;
     if (rotulo) setStatus(`Gerando ${rotulo.toLowerCase()}...`);
   }
 
   if (mensagem.tipo === "DOWNLOAD_FINALIZADO") {
     btnBaixar.disabled = false;
     btnDetectar.disabled = false;
-    radioIndividuais.disabled = false;
-    radioPdfUnico.disabled = false;
+    atualizarEstadoRadiosConformeDocumentos();
     atualizarEstadoBotaoBaixar();
     setStatus(`Concluido! Arquivos salvos em Downloads/${mensagem.pasta}`);
     if (mensagem.erros && mensagem.erros.length > 0) {
@@ -578,3 +634,74 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "complete") atualizarEstadoBotaoRegras();
 });
 atualizarEstadoBotaoRegras();
+
+const areaLocalizadoresInfo = document.getElementById("area-localizadores-info");
+const chkLocalizadoresPdf = document.getElementById("chk-localizadores-pdf");
+const chkLocalizadoresExcel = document.getElementById("chk-localizadores-excel");
+const btnExportarLocalizadores = document.getElementById("btn-exportar-localizadores");
+const areaProgressoLocalizadores = document.getElementById("area-progresso-localizadores");
+const textoProgressoLocalizadores = document.getElementById("texto-progresso-localizadores");
+const areaErrosLocalizadores = document.getElementById("area-erros-localizadores");
+
+function setStatusLocalizadores(texto) {
+  areaLocalizadoresInfo.textContent = texto;
+}
+
+btnExportarLocalizadores.addEventListener("click", async () => {
+  const formatos = { pdf: chkLocalizadoresPdf.checked, excel: chkLocalizadoresExcel.checked };
+  if (!formatos.pdf && !formatos.excel) {
+    areaErrosLocalizadores.hidden = false;
+    areaErrosLocalizadores.textContent = "Marque ao menos um formato (PDF ou Excel).";
+    return;
+  }
+
+  btnExportarLocalizadores.disabled = true;
+  areaErrosLocalizadores.hidden = true;
+  areaProgressoLocalizadores.hidden = false;
+  textoProgressoLocalizadores.textContent = "Iniciando...";
+  setStatusLocalizadores(
+    "Exportando localizadores em segundo plano (percorrendo todas as páginas da listagem)..."
+  );
+
+  // Mesmo padrao de GERAR_RELATORIO: so' confirma que comecou; o
+  // resultado final chega pela mensagem LOCALIZADORES_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_LOCALIZADORES", formatos });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
+    }
+  } catch (e) {
+    setStatusLocalizadores("Erro ao iniciar a exportação.");
+    areaErrosLocalizadores.hidden = false;
+    areaErrosLocalizadores.textContent = e && e.message ? e.message : String(e);
+    areaProgressoLocalizadores.hidden = true;
+    btnExportarLocalizadores.disabled = false;
+  }
+});
+
+chrome.runtime.onMessage.addListener((mensagem) => {
+  if (!mensagem) return;
+
+  if (mensagem.tipo === "PROGRESSO_LOCALIZADORES") {
+    textoProgressoLocalizadores.textContent = mensagem.texto || "Processando...";
+    setStatusLocalizadores(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "LOCALIZADORES_FINALIZADO") {
+    areaProgressoLocalizadores.hidden = true;
+    btnExportarLocalizadores.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      setStatusLocalizadores(
+        `Concluído! ${resultado.total || 0} localizador(es) exportado(s) para Downloads/eproc/.` +
+          (resultado.erroColeta ? ` Aviso: ${resultado.erroColeta}` : "")
+      );
+    } else {
+      setStatusLocalizadores("Erro ao exportar os localizadores.");
+      areaErrosLocalizadores.hidden = false;
+      areaErrosLocalizadores.textContent =
+        mensagem.erro || "Falha desconhecida ao exportar os localizadores.";
+    }
+  }
+});

@@ -1,7 +1,9 @@
 // Service worker: recebe a lista de documentos do painel e dispara os
 // downloads via chrome.downloads, um de cada vez, reportando progresso.
-// Tambem sabe montar um PDF unico combinando todos os documentos, usando
-// a biblioteca vendorizada pdf-lib (libs/pdf-lib.min.js).
+// Tambem sabe montar um PDF unico (pdf-lib, aqui mesmo no service worker)
+// e um MD unico com texto anonimizado - a extracao de texto de PDF (via
+// pdf.js) roda numa aba oculta, nao aqui (ver comentario mais abaixo,
+// perto de "Construcao do MD unico", sobre o motivo).
 
 importScripts("libs/pdf-lib.min.js");
 const { PDFDocument, StandardFonts } = self.PDFLib;
@@ -108,27 +110,62 @@ function construirDataUrlBinario(mimetype, bytes) {
 
 function aguardarCarregamentoAba(tabId) {
   return new Promise((resolve) => {
+    let resolvido = false;
+    function concluir() {
+      if (resolvido) return;
+      resolvido = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }
     function listener(idAtualizado, changeInfo) {
-      if (idAtualizado === tabId && changeInfo.status === "complete") {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
+      if (idAtualizado === tabId && changeInfo.status === "complete") concluir();
     }
     chrome.tabs.onUpdated.addListener(listener);
+
+    // Corrida rara, mas possivel: se a aba ja tiver terminado de carregar
+    // ANTES desse listener ser registrado (ex.: pagina muito rapida/em
+    // cache), o evento "complete" ja disparou e nunca mais vai disparar -
+    // sem essa checagem extra, a promessa ficaria pendurada para sempre.
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError) return;
+      if (tab && tab.status === "complete") concluir();
+    });
   });
 }
 
-function lerHtmlDivDochtml(tabId) {
+// Le' o estado da div "#divdochtml" na aba: existe ou nao, e o
+// innerHTML atual (pode ser vazio mesmo que a div exista, enquanto o
+// AJAX da pagina ainda nao terminou). Nunca lanca excecao - qualquer erro
+// do proprio executeScript (aba fechada, navegacao no meio, etc.) volta
+// como "erro" em vez de ser silenciosamente engolido, para aparecer nos
+// logs em vez de so' "nao deu certo".
+function lerEstadoDivDochtml(tabId) {
   return chrome.scripting
     .executeScript({
       target: { tabId },
       func: () => {
         const div = document.getElementById("divdochtml");
-        return div ? div.innerHTML : "";
+        const textoBody = !div && document.body ? (document.body.innerText || "").trim() : "";
+        return {
+          existe: !!div,
+          conteudo: div ? div.innerHTML : "",
+          urlPagina: window.location.href,
+          // Se a div nao existir, um pedaco do body ajuda a ver o que a
+          // pagina realmente carregou (pagina de erro/login, outra
+          // estrutura, etc.) - so' os primeiros 500 caracteres para nao
+          // poluir o log.
+          amostraBody: !div ? textoBody.slice(0, 500) || null : null,
+          // Alguns documentos (ex.: atos ordinatorios ligados ao DJEN) nao
+          // usam a div "#divdochtml" nem AJAX - a pagina inteira ja' vem
+          // pronta, com o conteudo real direto no body. Guarda o texto
+          // completo (nao só a amostra) para usar como conteudo do
+          // documento sem precisar esperar uma div que nunca vai existir.
+          corpoTextoCompleto: !div ? textoBody : null,
+        };
       },
     })
-    .then((resultados) => (resultados && resultados[0] ? resultados[0].result : ""))
-    .catch(() => "");
+    .then((resultados) => (resultados && resultados[0] ? resultados[0].result : { existe: false, conteudo: "", urlPagina: null }))
+    .catch((e) => ({ existe: false, conteudo: "", urlPagina: null, erro: String(e), abaSumiu: /no tab with id/i.test(String(e)) }));
 }
 
 // Documentos "html" (certidoes, atos ordinatorios, mandados) sao servidos
@@ -147,7 +184,14 @@ function lerHtmlDivDochtml(tabId) {
 //
 // Retorna sempre { conteudo, erro }, nunca lanca excecao, para o chamador
 // poder relatar o motivo exato de uma falha em vez de so' "nao deu certo".
-async function abrirAbaEExtrairHtmlDivDochtml(url) {
+//
+// Diagnostico ("[eproc-html]" no console do service worker, em
+// chrome://extensions): loga a URL apos o carregamento, se a div
+// "#divdochtml" chegou a existir no DOM (independente de ter conteudo) e
+// quantas tentativas de poll foram feitas - para descobrir se o problema
+// e' a div nunca aparecer (pagina errada/redirecionada) ou aparecer e so'
+// nunca ser preenchida (AJAX que nao completa).
+async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
   let tab;
   try {
     try {
@@ -155,23 +199,73 @@ async function abrirAbaEExtrairHtmlDivDochtml(url) {
     } catch (e) {
       return { conteudo: null, erro: `Falha ao abrir aba oculta: ${String(e)}` };
     }
+    console.log("[eproc-html]", "Aba criada", tab.id, "para", url);
 
     await aguardarCarregamentoAba(tab.id);
 
-    let conteudo = "";
+    const abaCarregada = await chrome.tabs.get(tab.id).catch(() => null);
+    console.log("[eproc-html]", "Aba", tab.id, "carregada. URL atual:", abaCarregada && abaCarregada.url);
+
+    let ultimoEstado = { existe: false, conteudo: "" };
     for (let tentativa = 0; tentativa < 60; tentativa += 1) {
-      conteudo = await lerHtmlDivDochtml(tab.id);
-      if (conteudo && conteudo.trim()) break;
+      ultimoEstado = await lerEstadoDivDochtml(tab.id);
+      if (tentativa === 0) {
+        console.log(
+          "[eproc-html]",
+          "Primeira leitura - div existe?",
+          ultimoEstado.existe,
+          "| URL da página:",
+          ultimoEstado.urlPagina,
+          "| amostra do body:",
+          ultimoEstado.amostraBody,
+          "| erro:",
+          ultimoEstado.erro
+        );
+        // Se a div nunca existiu mas o body ja' trouxe um texto
+        // substancial, essa pagina nao usa o fluxo classico de "casca +
+        // AJAX" - o conteudo real ja' esta' pronto de imediato (visto em
+        // atos ordinatorios ligados ao DJEN). Usa esse texto direto, sem
+        // esperar os 18s de polling por uma div que nunca vai aparecer.
+        if (!ultimoEstado.existe && ultimoEstado.corpoTextoCompleto && ultimoEstado.corpoTextoCompleto.length > 30) {
+          console.log("[eproc-html]", "Página sem #divdochtml, mas com conteúdo pronto no body - usando direto.");
+          return { conteudo: null, textoBruto: ultimoEstado.corpoTextoCompleto, erro: null };
+        }
+      }
+      if (ultimoEstado.conteudo && ultimoEstado.conteudo.trim()) break;
+      // Se a aba fechou sozinha (ex.: a propria pagina se fecha por nao
+      // estar dentro do iframe que ela espera), nao adianta continuar
+      // tentando ler uma aba que nao existe mais pelos proximos segundos
+      // - para na hora e relata isso especificamente.
+      if (ultimoEstado.abaSumiu) {
+        console.warn("[eproc-html]", "A aba fechou sozinha antes de terminar (tentativa", tentativa, ").");
+        break;
+      }
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
-    if (!conteudo || !conteudo.trim()) {
+    if (!ultimoEstado.conteudo || !ultimoEstado.conteudo.trim()) {
+      console.warn(
+        "[eproc-html]",
+        "Div não preencheu a tempo. Existia?",
+        ultimoEstado.existe,
+        "| URL final:",
+        ultimoEstado.urlPagina,
+        "| amostra do body:",
+        ultimoEstado.amostraBody,
+        "| erro:",
+        ultimoEstado.erro
+      );
+      const motivo = ultimoEstado.abaSumiu
+        ? "a aba fechou sozinha antes de terminar (a própria página do eproc pode estar se fechando)"
+        : !ultimoEstado.existe
+        ? 'a div "#divdochtml" nem chegou a existir nesta página - pode ter sido redirecionada para outro lugar'
+        : 'a div "#divdochtml" existe mas continuou vazia (o AJAX da página não terminou a tempo)';
       return {
         conteudo: null,
-        erro: 'Conteúdo não carregou a tempo (div "#divdochtml" continuou vazia).',
+        erro: `Conteúdo não carregou a tempo (${motivo}).`,
       };
     }
-    return { conteudo, erro: null };
+    return { conteudo: ultimoEstado.conteudo, erro: null };
   } catch (e) {
     return { conteudo: null, erro: String(e) };
   } finally {
@@ -181,13 +275,83 @@ async function abrirAbaEExtrairHtmlDivDochtml(url) {
   }
 }
 
+// Envolve "tentarAbrirAbaEExtrairHtmlDivDochtml" com uma segunda
+// tentativa (aba nova do zero) se a primeira falhar por timeout - um
+// documento especifico (ex.: um ato ordinatorio) as vezes demora mais
+// para a pagina do eproc preencher a div via AJAX do que os 18s da
+// primeira tentativa, mas funciona numa segunda tentativa.
+async function abrirAbaEExtrairHtmlDivDochtml(url) {
+  const primeira = await tentarAbrirAbaEExtrairHtmlDivDochtml(url);
+  if (primeira.conteudo || primeira.textoBruto) return primeira;
+
+  console.warn(
+    "[eproc-html]",
+    "Primeira tentativa falhou, tentando novamente com uma aba nova:",
+    primeira.erro
+  );
+  return tentarAbrirAbaEExtrairHtmlDivDochtml(url);
+}
+
+// Ultimo recurso quando a aba oculta falha por completo (ex.: a propria
+// pagina fecha a aba sozinha antes de terminar - visto em alguns
+// documentos gerados automaticamente, como atos ordinatorios ligados a
+// publicacao no DJEN, cuja URL pode nao seguir o fluxo classico de
+// "casca + AJAX"). So' um fetch bruto da URL: se vier HTML, tenta
+// aproveitar o que vier; se vier um PDF de verdade, avisa claramente em
+// vez de devolver bytes binarios como se fossem texto.
+async function tentarFallbackFetchHtml(url) {
+  try {
+    const resposta = await fetch(url, { credentials: "same-origin" });
+    if (!resposta.ok) {
+      return { html: null, erro: `Falha ao baixar via fetch (HTTP ${resposta.status}).` };
+    }
+    const tipoConteudo = (resposta.headers.get("content-type") || "").toLowerCase();
+    if (tipoConteudo.includes("pdf")) {
+      return {
+        html: null,
+        erro:
+          'O documento parece ser um PDF servido diretamente (não uma página HTML do eproc) - use o modo "Arquivos individuais" para baixá-lo corretamente.',
+      };
+    }
+    const html = await resposta.text();
+    if (!html || !html.trim()) {
+      return { html: null, erro: "O download direto (fetch) voltou vazio." };
+    }
+    return { html, erro: null };
+  } catch (e) {
+    return { html: null, erro: `Falha no download direto: ${e && e.message ? e.message : String(e)}` };
+  }
+}
+
+function escaparHtml(texto) {
+  return texto
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 async function obterConteudoHtmlReal(url, nomeDocumento) {
-  const { conteudo, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
-  if (!conteudo) return { html: null, erro };
-  return {
-    html: `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`,
-    erro: null,
-  };
+  const { conteudo, textoBruto, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
+  if (conteudo) {
+    return {
+      html: `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`,
+      erro: null,
+    };
+  }
+  if (textoBruto) {
+    return {
+      html: `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body><pre>${escaparHtml(
+        textoBruto
+      )}</pre></body></html>`,
+      erro: null,
+    };
+  }
+
+  console.warn("[eproc-html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
+  const fallback = await tentarFallbackFetchHtml(url);
+  if (fallback.html) return fallback;
+
+  return { html: null, erro: erro || fallback.erro };
 }
 
 // Converte o HTML do documento para texto simples, preservando quebras de
@@ -209,9 +373,25 @@ function converterHtmlParaTextoSimples(html) {
 }
 
 async function obterTextoHtmlReal(url) {
-  const { conteudo, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
-  if (!conteudo) return { texto: null, erro };
-  const texto = converterHtmlParaTextoSimples(conteudo);
+  const { conteudo, textoBruto, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
+  if (textoBruto) return { texto: textoBruto, erro: null };
+
+  let html = conteudo;
+  let erroFinal = erro;
+
+  if (!html) {
+    console.warn("[eproc-html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
+    const fallback = await tentarFallbackFetchHtml(url);
+    if (fallback.html) {
+      html = fallback.html;
+    } else {
+      erroFinal = erro || fallback.erro;
+    }
+  }
+
+  if (!html) return { texto: null, erro: erroFinal };
+
+  const texto = converterHtmlParaTextoSimples(html);
   if (!texto) {
     return {
       texto: null,
@@ -295,7 +475,7 @@ function quebrarLinhas(texto, fonte, tamanhoFonte, larguraMaxima) {
 function adicionarTextoComoPaginas(pdfFinal, fonte, titulo, texto) {
   const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
   const linhas = [
-    sanitizarTextoPdf(titulo),
+    ...quebrarLinhas(sanitizarTextoPdf(titulo), fonte, TAMANHO_FONTE_TEXTO, larguraUtil),
     "",
     ...quebrarLinhas(sanitizarTextoPdf(texto), fonte, TAMANHO_FONTE_TEXTO, larguraUtil),
   ];
@@ -387,12 +567,36 @@ async function adicionarDocumentoAoPdf(pdfFinal, fonteTexto, doc, urlReal) {
   );
 }
 
-async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProcesso, aoProgredir) {
+// Rotulo de uma linha de movimentacao, reaproveitado tanto na secao de
+// movimentacao do MD quanto nas paginas divisorias de evento do PDF
+// unico, para manter os dois formatos consistentes entre si.
+function rotuloEvento(evento) {
+  const numero = evento.numeroEvento != null ? `Evento ${evento.numeroEvento}` : "Evento";
+  return `${numero} — ${evento.dataHora} — ${evento.descricao || "(sem descrição)"}`;
+}
+
+// Lista, uma por linha, o nome e a descricao (a observacao livre que o
+// usuario digita ao anexar o documento - nem todo documento tem uma) de
+// cada documento vinculado a um evento, para a pagina divisoria do PDF
+// unico mostrar de imediato quais arquivos estao ali dentro.
+function listarDocumentosDoEvento(docs) {
+  return docs
+    .map((doc) => `- ${doc.nome}: ${doc.descricao || "Arquivo sem descrição incluída"}`)
+    .join("\n");
+}
+
+// Igual a "agruparDocumentosPorEvento" (definida mais abaixo, junto do MD
+// unico) - agrupa os documentos por evento e devolve tambem os que nao
+// tem evento correspondente, para o PDF unico nao ordenar/juntar tudo
+// numa lista so'.
+async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProcesso, movimentacao, aoProgredir) {
   const pdfFinal = await PDFDocument.create();
   const fonteTexto = await pdfFinal.embedFont(StandardFonts.Helvetica);
 
-  for (let i = 0; i < documentos.length; i += 1) {
-    const doc = documentos[i];
+  const total = documentos.length;
+  let concluidos = 0;
+
+  async function processarDocumento(doc) {
     try {
       const urlReal = await resolverUrl(doc);
       await adicionarDocumentoAoPdf(pdfFinal, fonteTexto, doc, urlReal);
@@ -404,7 +608,36 @@ async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProce
         `Nao foi possivel incorporar o documento "${doc.nome}" ao PDF unico (${String(e)}). Consulte o arquivo individual.`
       );
     }
-    if (aoProgredir) aoProgredir(i + 1, documentos.length);
+    concluidos += 1;
+    if (aoProgredir) aoProgredir(concluidos, total);
+  }
+
+  if (movimentacao && movimentacao.length > 0) {
+    const { porEvento, semEvento } = agruparDocumentosPorEvento(documentos, movimentacao);
+
+    for (const evento of movimentacao) {
+      const docsDoEvento = evento.numeroEvento != null ? porEvento.get(evento.numeroEvento) || [] : [];
+      adicionarTextoComoPaginas(
+        pdfFinal,
+        fonteTexto,
+        rotuloEvento(evento),
+        docsDoEvento.length === 0 ? "Nenhum documento anexado a este evento." : listarDocumentosDoEvento(docsDoEvento)
+      );
+      for (const doc of docsDoEvento) {
+        await processarDocumento(doc);
+      }
+    }
+
+    if (semEvento.length > 0) {
+      adicionarTextoComoPaginas(pdfFinal, fonteTexto, "Documentos sem evento identificado", listarDocumentosDoEvento(semEvento));
+      for (const doc of semEvento) {
+        await processarDocumento(doc);
+      }
+    }
+  } else {
+    for (const doc of documentos) {
+      await processarDocumento(doc);
+    }
   }
 
   const bytesFinais = await pdfFinal.save();
@@ -413,9 +646,483 @@ async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProce
   await baixarUm(nomeArquivo, dataUrl);
 }
 
+// ---- Construcao do MD unico (texto + anonimizacao "melhor esforco") ----
+//
+// Este modo NAO faz OCR (removido por nao ter funcionado de forma
+// confiavel) - so' extrai o texto que ja existe nativamente no
+// documento. A extracao de PDF usa pdf.js (vendorizado em
+// libs/pdf.min.js), mas NAO roda no service worker: pdf.js precisa de
+// "document" (DOM) mesmo so' para ler texto - a tentativa de rodar no
+// service worker falhava com "Setting up fake worker failed: document is
+// not defined", ja' que service workers nao tem DOM. Por isso roda numa
+// ABA OCULTA de verdade (mesmo mecanismo ja' usado para documentos
+// "html"), aberta no proprio dominio do eproc, reaproveitada para todos
+// os PDFs do processo (uma aba so', nao uma por documento). Imagens
+// (jpg/png/etc.) nao tem como ter texto extraido sem OCR, entao entram no
+// MD apenas com uma nota indicando isso, sem precisar de aba nenhuma.
+//
+// Prefixo usado em todos os logs deste modo (console do "Inspect views:
+// service worker" em chrome://extensions, e da propria aba oculta), para
+// facilitar filtrar ("[eproc-md]") quando algo falhar.
+const LOG_MD = "[eproc-md]";
+
+// Impede que uma unica etapa demorada (ex.: um fetch que nunca retorna)
+// trave o processo inteiro para sempre - sem isso, uma promessa que nunca
+// resolve simplesmente pendura a exportacao no meio, sem nenhum erro
+// visivel. Ao estourar, vira um erro tratado normalmente (aparece nos
+// avisos do documento final), em vez de travar.
+function comTimeout(promessa, ms, mensagem) {
+  let idTimeout;
+  const timeout = new Promise((_, reject) => {
+    idTimeout = setTimeout(() => reject(new Error(mensagem)), ms);
+  });
+  return Promise.race([promessa, timeout]).finally(() => clearTimeout(idTimeout));
+}
+
+const MIMETYPES_IMAGEM_SEM_OCR = ["jpg", "jpeg", "png", "gif", "bmp", "webp"];
+
+// Injetada UMA vez por aba (via files: ["libs/pdf.min.js"] + esta
+// funcao). Aponta o worker do pdf.js para o arquivo local e define, no
+// escopo global da PAGINA (window.__eproc*), a funcao que extrai o texto
+// de um PDF - necessario porque cada chamada de executeScript com "func"
+// e' serializada e avaliada isoladamente, sem acesso as demais funcoes
+// deste arquivo (background.js).
+function prepararAmbientePdfNaPagina() {
+  if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("libs/pdf.worker.min.js");
+  }
+
+  window.__eprocExtrairTextoPdf = async function (parametros) {
+    try {
+      const resposta = await fetch(parametros.url, { credentials: "same-origin" });
+      if (!resposta.ok) {
+        throw new Error(`Falha ao baixar o documento (HTTP ${resposta.status}).`);
+      }
+      const buffer = await resposta.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
+
+      const partes = [];
+      for (let i = 1; i <= pdf.numPages; i += 1) {
+        const pagina = await pdf.getPage(i);
+        const conteudoTexto = await pagina.getTextContent();
+
+        // Cada "item" e' um fragmento de texto (nem sempre uma linha
+        // inteira); "item.hasEOL" marca quando aquele fragmento termina
+        // uma linha visual da pagina. Sem usar isso, juntar tudo so' com
+        // espaco faz a pagina inteira virar UMA linha so' - o que e'
+        // ruim tanto para leitura quanto para a anonimizacao (que age por
+        // linha): uma unica palavra de endereco em qualquer parte da
+        // pagina apagaria a pagina inteira. Reconstruir as quebras reais
+        // deixa cada linha do PDF como uma linha de texto de verdade.
+        let linhaAtual = "";
+        const linhas = [];
+        for (const item of conteudoTexto.items) {
+          linhaAtual += item.str || "";
+          if (item.hasEOL) {
+            linhas.push(linhaAtual.replace(/\s+/g, " ").trim());
+            linhaAtual = "";
+          }
+        }
+        if (linhaAtual.trim()) linhas.push(linhaAtual.replace(/\s+/g, " ").trim());
+
+        const texto = linhas.filter(Boolean).join("\n");
+        partes.push(
+          texto || "_(sem texto nesta página - o documento pode ser uma imagem digitalizada, sem OCR nesta versão)_"
+        );
+      }
+
+      return { texto: partes.join("\n\n"), erro: null };
+    } catch (e) {
+      return { texto: "", erro: e && e.message ? e.message : String(e) };
+    }
+  };
+}
+
+// Chamada uma vez por PDF (executeScript so' aceita passar "args" junto
+// de "func", nao junto de "files") - so' repassa para a funcao real ja'
+// definida no escopo da pagina por "prepararAmbientePdfNaPagina".
+function chamarExtrairTextoPdfNaPagina(parametros) {
+  return window.__eprocExtrairTextoPdf(parametros);
+}
+
+async function prepararAbaProcessamentoPdfMd(urlOrigemEproc) {
+  console.log(LOG_MD, "Abrindo aba oculta de processamento de PDF em:", urlOrigemEproc);
+  const aba = await chrome.tabs.create({ url: urlOrigemEproc, active: false });
+  await aguardarCarregamentoAba(aba.id);
+
+  await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    files: ["libs/pdf.min.js"],
+  });
+  await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: prepararAmbientePdfNaPagina,
+  });
+  console.log(LOG_MD, "Aba de processamento de PDF pronta:", aba.id);
+
+  return aba;
+}
+
+async function extrairTextoPdfNaAba(tabId, url, nome) {
+  console.log(LOG_MD, "Extraindo texto do PDF:", nome);
+  try {
+    const [{ result } = {}] = await comTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: chamarExtrairTextoPdfNaPagina,
+        args: [{ url, nome }],
+      }),
+      60000,
+      `Tempo esgotado (60s) extraindo texto de "${nome}" na aba oculta.`
+    );
+    console.log(LOG_MD, "Concluído:", nome, "| erro:", result && result.erro);
+    return result || { texto: "", erro: "Sem resultado retornado pela aba." };
+  } catch (e) {
+    console.error(LOG_MD, "Erro extraindo", nome, ":", e);
+    return { texto: "", erro: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Extrai o texto de um documento (PDF ou imagem) para o MD único.
+// Documentos "html" NAO passam por aqui - continuam usando
+// "obterTextoHtmlReal", ja' existente, que tem seu proprio mecanismo de
+// aba oculta (uma por documento).
+async function extrairTextoDocumentoMd(tabIdPdf, url, mimetype, nome) {
+  if (MIMETYPES_IMAGEM_SEM_OCR.includes(mimetype)) {
+    return {
+      texto: `_Documento do tipo imagem (${mimetype}) - texto não incluído (sem OCR nesta versão). Consulte o arquivo individual para ver a imagem._`,
+      erro: null,
+    };
+  }
+
+  if (mimetype !== "pdf") {
+    return {
+      texto: "",
+      erro: `Tipo "${mimetype}" não suportado para extração de texto no MD único.`,
+    };
+  }
+
+  return extrairTextoPdfNaAba(tabIdPdf, url, nome);
+}
+
+// ---- Anonimizacao "melhor esforco" ----
+//
+// IMPORTANTE: isto e' deteccao por padroes (regex) e uma heuristica de
+// nomes - nao e' NLP nem usa uma lista real das partes do processo. Serve
+// para reduzir a exposicao de dados pessoais mais obvios (CPF/CNPJ,
+// telefone, e-mail, linhas de endereco, nomes em Maiuscula+minuscula), mas
+// NAO e' uma garantia de anonimizacao completa. Nomes escritos em CAIXA
+// ALTA (comuns em petições/certidões) ou formatos atipicos de documento
+// podem passar sem ser detectados. Sempre revise o arquivo gerado antes
+// de compartilhar externamente.
+const REGEX_EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
+const REGEX_CNPJ = /\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g;
+const REGEX_CPF = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
+const REGEX_TELEFONE = /\(?\b\d{2}\)?[\s-]?9?\d{4}-?\d{4}\b/g;
+const REGEX_CEP = /\b\d{5}-?\d{3}\b/g;
+// "\b" nunca da' match logo apos um "." (ponto e o caractere seguinte,
+// tipicamente um espaco, sao os dois "nao-palavra" - no ponto de fronteira
+// de word boundary): "Av\.\b" ou "Apto\.?\b" simplesmente NUNCA batem
+// quando o ponto esta' realmente presente, por mais que pareca que
+// deveriam. Por isso as abreviacoes com ponto ficam sem o ponto no
+// padrao (so' "Av"/"Apto"): o "\b" ja' delimita a palavra corretamente
+// nesse caso (fronteira entre "v"/"o" e o proprio ponto, se houver).
+const REGEX_INICIO_ENDERECO = /\b(Rua|Av|Avenida|Alameda|Rodovia|Travessa|Pra[çc]a|Logradouro|Quadra|Lote|Apto|Apartamento|Condom[íi]nio)\b/gi;
+
+// Termina o trecho de endereco assim que encontrar um CEP, um sufixo
+// "/UF" (ex.: "/PR") ou uma quebra de paragrafo - o que vier primeiro
+// dentro da janela de busca. Pontos e ponto-e-virgula NAO servem de
+// terminador aqui: enderecos brasileiros sao cheios de abreviacoes com
+// ponto ("n.", "nº", "Av.", "R.") que fariam o corte parar quase
+// imediatamente, no meio do proprio inicio do endereco.
+const REGEX_TERMINADOR_ENDERECO = /\d{5}-?\d{3}|\/[A-Z]{2}\b|\n\s*\n/;
+const JANELA_MAXIMA_ENDERECO = 160;
+const LIMITE_SEM_TERMINADOR = 100;
+
+// Substitui so' o TRECHO do endereco (do inicio reconhecido - "Rua",
+// "Av", "CEP", etc. - ate' um terminador razoavel logo em seguida), nao a
+// linha/paragrafo inteiro. Isso e' importante porque o texto extraido de
+// PDF pode ter uma frase inteira numa unica "linha" (ex.: "em face de
+// FULANO, residente na Rua X, nº 123, Centro, Cidade/UF") - apagar a
+// linha toda destruiria a parte que nao e' endereco. Funciona mesmo
+// quando o endereco comeca perto do fim de uma linha e continua na
+// linha seguinte (quebra de linha no meio do endereco, comum em PDF).
+function redigirEnderecos(texto) {
+  let resultado = "";
+  let ultimoIndice = 0;
+  REGEX_INICIO_ENDERECO.lastIndex = 0;
+
+  let match;
+  while ((match = REGEX_INICIO_ENDERECO.exec(texto))) {
+    const inicio = match.index;
+    if (inicio < ultimoIndice) continue;
+
+    const janela = texto.slice(inicio, inicio + JANELA_MAXIMA_ENDERECO);
+    const terminador = janela.match(REGEX_TERMINADOR_ENDERECO);
+    const fim = terminador
+      ? inicio + terminador.index + terminador[0].length
+      : inicio + Math.min(LIMITE_SEM_TERMINADOR, janela.length);
+
+    resultado += texto.slice(ultimoIndice, inicio) + "[endereço removido]";
+    ultimoIndice = fim;
+    REGEX_INICIO_ENDERECO.lastIndex = fim;
+  }
+
+  resultado += texto.slice(ultimoIndice);
+  return resultado;
+}
+
+// Frases institucionais comuns que o heuristico de nomes (Maiuscula +
+// minuscula, 3+ palavras) acertaria por engano - excluidas explicitamente.
+const FRASES_NAO_SAO_NOMES = [
+  "Poder Judiciário",
+  "Tribunal de Justiça",
+  "Ministério Público",
+  "Justiça Federal",
+  "Justiça do Trabalho",
+  "Vara Única",
+  "Juizado Especial",
+  "Diário de Justiça",
+  "Secretaria de Vara",
+  "Termo de Audiência",
+  "Certidão de Publicação",
+  "Ato Ordinatório",
+];
+
+// Nomes de pessoa reais no Brasil quase sempre tem 3+ palavras (incluindo
+// conectivos como "de"/"da"/"dos"). Exigir 3+ (em vez de 2+) reduz bastante
+// falsos positivos com termos institucionais de 2 palavras ("Poder
+// Judiciário", "Vara Única", etc). Blocos em CAIXA ALTA sao ignorados de
+// proposito: no eproc normalmente sao rotulos de evento/situação, nao
+// nomes - o efeito colateral e' que nomes de pessoas escritos em CAIXA
+// ALTA (comum em petições) nao sao abreviados por este heuristico.
+const REGEX_NOME_PROVAVEL =
+  /\b[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+(?:de|d[ao]s?|e)\s+[A-ZÀ-Ý][a-zà-ÿ]+|\s+[A-ZÀ-Ý][a-zà-ÿ]+){2,5}\b/g;
+
+// Nomes de parte em CAIXA ALTA (pessoa ou empresa) NAO sao tocados pelo
+// heuristico acima de proposito (ver comentario dele) - mas peticoes
+// seguem quase sempre um padrao bem especifico logo apos qualificar a
+// parte: "NOME EM CAIXA ALTA, brasileiro/brasileira/pessoa jurídica/
+// portador(a)/inscrito(a)/residente/domiciliado(a)...". Esse padrao e'
+// especifico o suficiente (ao contrario de "CAIXA ALTA" sozinho, que
+// pegaria rotulos de evento/situação por engano) para reconhecer com
+// seguranca tanto nomes de pessoas quanto de empresas nessa posicao
+// especifica, sem exigir uma lista real das partes do processo. Nomes em
+// CAIXA ALTA em outros lugares do documento (sem essa qualificação logo
+// depois) continuam sem deteccao - e' melhor esforço, nao NLP.
+const REGEX_NOME_MAIUSCULO_QUALIFICADO =
+  /\b[A-ZÀ-Ý][A-ZÀ-Ý0-9\s.&–-]{3,120}?(?=,\s*(?:pessoa jurídica|pessoa física|brasileiro|brasileira|portador|portadora|inscrit[oa]|residente|domiciliad[oa]))/g;
+
+function abreviarNome(nomeCompleto) {
+  const CONECTIVOS = new Set(["de", "da", "do", "dos", "das", "e"]);
+  const partes = nomeCompleto.trim().split(/\s+/);
+  if (partes.length <= 2) return nomeCompleto;
+
+  const primeiro = partes[0];
+  const ultimo = partes[partes.length - 1];
+  const meio = partes.slice(1, -1).map((parte) => {
+    if (CONECTIVOS.has(parte.toLowerCase())) return parte.toLowerCase();
+    if (!/[A-Za-zÀ-ÿ]/.test(parte)) return parte; // pontuação solta (ex.: "–"), mantém como está
+    return `${parte[0].toUpperCase()}.`;
+  });
+
+  return [primeiro, ...meio, ultimo].join(" ");
+}
+
+function anonimizarTexto(texto) {
+  let resultado = texto;
+
+  resultado = resultado.replace(REGEX_EMAIL, "[e-mail removido]");
+  resultado = resultado.replace(REGEX_CNPJ, "[CNPJ removido]");
+  resultado = resultado.replace(REGEX_CPF, "[CPF removido]");
+  resultado = resultado.replace(REGEX_TELEFONE, "[telefone removido]");
+
+  // Endereco antes do heuristico de nomes: sem isso, um nome de rua tipo
+  // "Rua Conselheiro Antônio Alves Vieira" sobrevivia parcialmente (por
+  // nao ter CEP/UF logo ali) e depois era confundido pelo heuristico de
+  // nomes, saindo abreviado como se fosse o nome de uma pessoa.
+  resultado = redigirEnderecos(resultado);
+
+  // CEP que sobrar solto (sem um inicio de endereco reconhecido por
+  // perto) ainda e' removido, so' que sozinho - nao a linha inteira.
+  resultado = resultado.replace(REGEX_CEP, "[CEP removido]");
+
+  resultado = resultado.replace(REGEX_NOME_MAIUSCULO_QUALIFICADO, (trecho) => abreviarNome(trecho));
+
+  resultado = resultado.replace(REGEX_NOME_PROVAVEL, (trecho) => {
+    if (FRASES_NAO_SAO_NOMES.some((frase) => trecho.includes(frase))) return trecho;
+    return abreviarNome(trecho);
+  });
+
+  return resultado;
+}
+
+// Monta a secao de movimentacao processual (numero do evento, data/hora e
+// descricao), sempre a PRIMEIRA secao do documento - antes de qualquer
+// anexo, e inclusa mesmo que o processo nao tenha nenhum documento
+// anexado. "movimentacao" vem do "listarMovimentacaoProcessual()" do
+// content.js (deteccao best-effort, ver comentario la').
+// So' usada quando NENHUMA movimentação foi detectada na página (ver
+// "listarMovimentacaoProcessual" em content.js) - nesse caso os
+// documentos, se houver algum, entram todos no grupo "sem evento
+// identificado" de "construirMdUnico".
+function construirSecaoMovimentacao(movimentacao) {
+  if (!movimentacao || movimentacao.length === 0) {
+    return (
+      "### Movimentação processual\n\n" +
+      "_Não foi possível localizar a tabela de movimentação nesta página " +
+      "(ou o processo não possui movimentações registradas)._\n"
+    );
+  }
+
+  const linhas = movimentacao.map((evento) => {
+    const numero = evento.numeroEvento != null ? `Evento ${evento.numeroEvento}` : "Evento";
+    return `- **${evento.dataHora}** — ${numero}: ${evento.descricao || "(sem descrição)"}`;
+  });
+
+  return `### Movimentação processual\n\n${linhas.join("\n\n")}\n`;
+}
+
+// Agrupa os documentos pelo numero do evento a que pertencem (ja'
+// detectado em content.js, mesmo campo usado para a numeracao
+// sequencial). Documentos cujo evento e' desconhecido, OU cujo numero
+// nao bate com nenhum evento realmente detectado na movimentacao (ex.:
+// a deteccao de movimentacao falhou nesse tribunal), caem num grupo
+// avulso - nenhum documento e' descartado silenciosamente.
+function agruparDocumentosPorEvento(documentos, movimentacao) {
+  const porEvento = new Map();
+  for (const doc of documentos) {
+    const chave = doc.evento != null ? doc.evento : null;
+    if (!porEvento.has(chave)) porEvento.set(chave, []);
+    porEvento.get(chave).push(doc);
+  }
+
+  const eventosDetectados = new Set(
+    (movimentacao || []).map((e) => e.numeroEvento).filter((n) => n != null)
+  );
+
+  const semEvento = [];
+  for (const [chave, docs] of Array.from(porEvento.entries())) {
+    if (chave == null || !eventosDetectados.has(chave)) {
+      semEvento.push(...docs);
+      porEvento.delete(chave);
+    }
+  }
+
+  return { porEvento, semEvento };
+}
+
+async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProcesso, movimentacao, aoProgredir) {
+  console.log(LOG_MD, "Iniciando MD único.", documentos.length, "documento(s),", (movimentacao || []).length, "evento(s) de movimentação.");
+
+  const avisos = [];
+  const secoesEventos = [];
+
+  // A aba de processamento de PDF so' e' aberta se houver pelo menos um
+  // PDF entre os documentos - processos so' com HTML/imagens nao
+  // precisam dela.
+  let abaPdf = null;
+  if (documentos.some((doc) => doc.mimetype === "pdf")) {
+    const origemEproc = `${new URL(documentos[0].href).origin}/eproc/controlador.php`;
+    abaPdf = await prepararAbaProcessamentoPdfMd(origemEproc);
+  }
+
+  const total = documentos.length;
+  let concluidos = 0;
+
+  // Processa e devolve o markdown de UM documento (numeracao sequencial
+  // global, na ordem em que os documentos vao sendo processados - a
+  // mesma ordem cronologica de sempre, so' que agora agrupados por
+  // evento em vez de uma lista unica).
+  async function processarUmDocumento(doc) {
+    const numero = String(concluidos + 1).padStart(4, "0");
+    console.log(LOG_MD, `[${concluidos + 1}/${total}]`, doc.nome, `(${doc.mimetype})`);
+    if (aoProgredir) aoProgredir(concluidos, total, doc.nome);
+
+    let corpo;
+    try {
+      const urlReal = await resolverUrl(doc);
+
+      if (doc.mimetype === "html") {
+        const { texto, erro } = await obterTextoHtmlReal(urlReal);
+        if (texto) {
+          corpo = texto;
+        } else {
+          console.warn(LOG_MD, "Falha ao extrair HTML de", doc.nome, ":", erro);
+          corpo = `_Não foi possível extrair o conteúdo deste documento (${erro || "motivo desconhecido"})._`;
+          avisos.push(`${doc.nome}: ${erro || "motivo desconhecido"}`);
+        }
+      } else {
+        const resultado = await extrairTextoDocumentoMd(abaPdf && abaPdf.id, urlReal, doc.mimetype, doc.nome);
+        if (resultado.erro && !resultado.texto) {
+          console.warn(LOG_MD, "Falha ao extrair texto de", doc.nome, ":", resultado.erro);
+          corpo = `_Não foi possível extrair o texto deste documento (${resultado.erro})._`;
+          avisos.push(`${doc.nome}: ${resultado.erro}`);
+        } else {
+          corpo = resultado.texto || "_(sem texto identificado)_";
+        }
+      }
+    } catch (e) {
+      console.error(LOG_MD, "Erro processando", doc.nome, ":", e);
+      corpo = `_Não foi possível processar este documento (${String(e)})._`;
+      avisos.push(`${doc.nome}: ${String(e)}`);
+    }
+
+    concluidos += 1;
+    if (aoProgredir) aoProgredir(concluidos, total, doc.nome);
+    return `#### ${numero} — ${doc.nome}\n\n${corpo.trim()}\n`;
+  }
+
+  try {
+    const { porEvento, semEvento } = agruparDocumentosPorEvento(documentos, movimentacao);
+
+    if (movimentacao && movimentacao.length > 0) {
+      for (const evento of movimentacao) {
+        const linhas = [`### ${rotuloEvento(evento)}`, ""];
+
+        const docsDoEvento = evento.numeroEvento != null ? porEvento.get(evento.numeroEvento) || [] : [];
+        if (docsDoEvento.length === 0) {
+          linhas.push("_Nenhum documento anexado a este evento._");
+        } else {
+          for (const doc of docsDoEvento) {
+            linhas.push(await processarUmDocumento(doc));
+          }
+        }
+        secoesEventos.push(linhas.join("\n"));
+      }
+    } else {
+      secoesEventos.push(construirSecaoMovimentacao(movimentacao));
+    }
+
+    if (semEvento.length > 0) {
+      const linhas = ["### Documentos sem evento identificado", ""];
+      for (const doc of semEvento) {
+        linhas.push(await processarUmDocumento(doc));
+      }
+      secoesEventos.push(linhas.join("\n"));
+    }
+  } finally {
+    if (abaPdf) {
+      console.log(LOG_MD, "Encerrando aba de processamento de PDF", abaPdf.id, "...");
+      chrome.tabs.remove(abaPdf.id).catch(() => {});
+    }
+  }
+
+  console.log(LOG_MD, "Todos os documentos processados. Avisos:", avisos.length);
+
+  const cabecalho = [`# Processo ${numeroProcesso}`, `${new Date().toLocaleString("pt-BR")}`, ""];
+
+  const corpoCompleto = anonimizarTexto([...cabecalho, ...secoesEventos].join("\n\n"));
+
+  const nomeArquivo = `${pastaBase}/${sanitizarNomeArquivo(numeroProcesso)}_completo_anonimizado.md`;
+  console.log(LOG_MD, "Baixando arquivo final:", nomeArquivo, `(${corpoCompleto.length} caractere(s))`);
+  await baixarUm(nomeArquivo, construirDataUrl("text/markdown", corpoCompleto));
+  console.log(LOG_MD, "MD único concluído com sucesso.");
+}
+
 // ---- Orquestracao geral ----
 
-async function processarFila(numeroProcesso, documentos, opcoes) {
+async function processarFila(numeroProcesso, documentos, opcoes, movimentacao) {
   const pastaBase = `eproc/${sanitizarNomeArquivo(numeroProcesso)}`;
   const erros = [];
 
@@ -501,9 +1208,29 @@ async function processarFila(numeroProcesso, documentos, opcoes) {
     };
 
     try {
-      await construirPdfUnico(documentos, obterUrlResolvida, pastaBase, numeroProcesso, enviarProgressoPdf);
+      await construirPdfUnico(documentos, obterUrlResolvida, pastaBase, numeroProcesso, movimentacao, enviarProgressoPdf);
     } catch (e) {
       erros.push({ nome: "PDF unico", mensagem: String(e) });
+    }
+  }
+
+  if (opcoes.mdUnico) {
+    const enviarProgressoMd = (concluidos, total, nomeAtual) => {
+      chrome.runtime.sendMessage({
+        tipo: "PROGRESSO_DOWNLOAD",
+        fase: "md-unico",
+        concluidos,
+        total,
+        nomeAtual,
+        erros,
+      }).catch(() => {});
+    };
+
+    try {
+      await construirMdUnico(documentos, obterUrlResolvida, pastaBase, numeroProcesso, movimentacao, enviarProgressoMd);
+    } catch (e) {
+      console.error(LOG_MD, "Erro fatal no MD único:", e);
+      erros.push({ nome: "MD unico", mensagem: String(e) });
     }
   }
 
@@ -1034,10 +1761,464 @@ async function abrirRelatorioPreenchido(categoria, situacao, filtro, exportarExc
   }
 }
 
+// ---- Localizadores do Órgão (exportar em PDF/Excel) ----
+
+// Igual a "clicarLinkRelatorioGeralNaPagina": o link para a tela de
+// Localizadores do Órgão ja' existe no DOM (menu lateral), mesmo com o
+// submenu "Localizadores" colapsado - o collapse e' so' visual via CSS.
+// Autocontida, executada via chrome.scripting.executeScript.
+function clicarLinkLocalizadoresNaPagina() {
+  const link = document.querySelector('a[href*="acao=localizador_orgao_listar"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Raspa a tabela da pagina ATUAL (colunas confirmadas numa pagina real do
+// eproc: [0] checkbox, [1] Localizador, [2] Nome do Localizador, [3]
+// Descrição do Localizador, [4] Localizador Sistema, [5] Data Inclusão,
+// [6] Total de processos, [7] Ações), o texto da legenda (para detectar
+// quando a pagina seguinte terminou de carregar) e se o botao "Próxima
+// Página" esta' disponivel. Inteiramente SINCRONA de proposito (nada de
+// async/await/clique aqui dentro): clicar em "Próxima Página" pode
+// disparar uma navegacao de verdade (nao so' AJAX), o que destroi o
+// frame no meio d euma execucao assincrona e derruba a chamada inteira
+// com "Frame with ID 0 was removed". Cada etapa (raspar / clicar
+// próximo / raspar de novo) roda como uma chamada de
+// chrome.scripting.executeScript separada e curta, orquestrada pelo
+// background.js - nunca um loop assincrono unico rodando dentro da
+// pagina. Autocontida, executada via chrome.scripting.executeScript.
+function raspaerLocalizadoresNaPagina() {
+  function localizarTabela() {
+    const tabelas = Array.from(document.querySelectorAll("table.infraTable"));
+    return (
+      tabelas.find((t) => {
+        const caption = t.querySelector("caption");
+        return caption && /localizadores/i.test(caption.textContent || "");
+      }) || null
+    );
+  }
+
+  const tabela = localizarTabela();
+  if (!tabela) {
+    return { itens: [], caption: null, temProxima: false, erro: "Tabela de Localizadores do Órgão não encontrada nesta página." };
+  }
+
+  const linhas = Array.from(tabela.querySelectorAll("tr.infraTrClara, tr.infraTrEscura"));
+  const itens = [];
+  for (const tr of linhas) {
+    const celulas = Array.from(tr.querySelectorAll(":scope > td"));
+    if (celulas.length < 8) continue;
+    const nome = (celulas[1].textContent || "").replace(/\s+/g, " ").trim();
+    const descricao = (celulas[3].textContent || "").replace(/\s+/g, " ").trim();
+    const totalTexto = (celulas[6].textContent || "").replace(/\s+/g, " ").trim();
+    const totalMatch = totalTexto.match(/\d+/);
+    itens.push({ nome, descricao, totalProcessos: totalMatch ? Number(totalMatch[0]) : 0 });
+  }
+
+  const caption = tabela.querySelector("caption");
+  const liProxima = document.getElementById("lnkInfraProximaPaginaSuperior");
+  const temProxima = !!(liProxima && !liProxima.classList.contains("disabled"));
+  // O eproc lembra a ultima pagina vista na listagem e reabre a tela
+  // nela (nao sempre na pagina 1) - "Primeira Página" so' fica
+  // desabilitada quando ja' estamos nela, entao serve para detectar isso
+  // e a exportacao precisa voltar para a pagina 1 antes de comecar a
+  // coletar, senao perde os localizadores das paginas anteriores.
+  const liPrimeira = document.getElementById("lnkInfraPrimeiraPaginaSuperior");
+  const estaNaPrimeiraPagina = !!(liPrimeira && liPrimeira.classList.contains("disabled"));
+
+  return {
+    itens,
+    caption: caption ? (caption.textContent || "").trim() : "",
+    temProxima,
+    estaNaPrimeiraPagina,
+    erro: null,
+  };
+}
+
+// So' clica em "Próxima Página" e retorna - nao espera nada aqui dentro
+// (ver comentario de "raspaerLocalizadoresNaPagina" sobre o motivo).
+function clicarProximaPaginaLocalizadores() {
+  const link = document.querySelector("#lnkInfraProximaPaginaSuperior a");
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// So' clica em "Primeira Página" e retorna - mesmo motivo de
+// "clicarProximaPaginaLocalizadores".
+function clicarPrimeiraPaginaLocalizadores() {
+  const link = document.querySelector("#lnkInfraPrimeiraPaginaSuperior a");
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Abre uma aba oculta a partir da URL da aba atual (mesmo padrao ja'
+// usado no Relatório Geral), navega ate' a tela de Localizadores do
+// Órgão e coleta todas as paginas, depois fecha a aba. A paginacao e'
+// conduzida DAQUI (background.js), nao de dentro da pagina: cada
+// raspagem/clique e' uma chamada de executeScript curta e independente,
+// entao se "Próxima Página" navegar a pagina de verdade (em vez de so'
+// atualizar a tabela via AJAX), o pior que acontece e' uma chamada
+// individual falhar (frame destruido no meio dela) e ser re-tentada,
+// nunca o processo inteiro cair com "Frame with ID 0 was removed".
+async function abrirAbaEColetarLocalizadores(urlBase) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkLocalizadoresNaPagina,
+    });
+
+    if (!linkEncontrado) {
+      return {
+        itens: [],
+        erro:
+          'Link "Localizadores do Órgão" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    async function raspaerPaginaAtualComRetentativa() {
+      let ultimoErro;
+      for (let tentativa = 0; tentativa < 5; tentativa += 1) {
+        try {
+          const [{ result } = {}] = await chrome.scripting.executeScript({
+            target: { tabId: aba.id },
+            func: raspaerLocalizadoresNaPagina,
+          });
+          if (result) return result;
+        } catch (e) {
+          ultimoErro = e;
+          // O frame pode estar no meio de uma navegacao disparada pelo
+          // clique em "Próxima Página" - espera um pouco e tenta de novo
+          // em vez de desistir na primeira falha.
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+      }
+      throw ultimoErro || new Error("Sem resultado ao ler a página.");
+    }
+
+    let leituraAtual;
+    try {
+      leituraAtual = await raspaerPaginaAtualComRetentativa();
+    } catch (e) {
+      return { itens: [], erro: `Falha ao ler a página inicial: ${e && e.message ? e.message : String(e)}` };
+    }
+    if (leituraAtual.erro) return { itens: [], erro: leituraAtual.erro };
+
+    // A tela pode ter aberto numa pagina que nao e' a primeira (o eproc
+    // lembra a ultima pagina vista) - volta para a pagina 1 antes de
+    // comecar a coletar, senao os localizadores das paginas anteriores
+    // ficam de fora.
+    if (!leituraAtual.estaNaPrimeiraPagina) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: aba.id },
+          func: clicarPrimeiraPaginaLocalizadores,
+        });
+      } catch (e) {
+        return {
+          itens: [],
+          erro: `Falha ao voltar para a primeira página: ${e && e.message ? e.message : String(e)}`,
+        };
+      }
+
+      await aguardarCarregamentoAba(aba.id).catch(() => {});
+
+      const captionAntes = leituraAtual.caption;
+      let mudou = false;
+      for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        try {
+          leituraAtual = await raspaerPaginaAtualComRetentativa();
+        } catch (e) {
+          continue;
+        }
+        if (leituraAtual && leituraAtual.caption !== captionAntes) {
+          mudou = true;
+          break;
+        }
+      }
+      if (!mudou) {
+        return {
+          itens: [],
+          erro: 'A tela não voltou para a primeira página a tempo (botão "Primeira Página").',
+        };
+      }
+    }
+
+    const todos = [];
+    let pagina = 1;
+    const LIMITE_PAGINAS = 200; // seguranca contra loop infinito
+
+    while (pagina <= LIMITE_PAGINAS) {
+      const leitura = leituraAtual;
+      leituraAtual = null;
+
+      if (leitura.erro) return { itens: todos, erro: leitura.erro };
+      todos.push(...leitura.itens);
+
+      if (!leitura.temProxima) break;
+
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: aba.id },
+          func: clicarProximaPaginaLocalizadores,
+        });
+      } catch (e) {
+        return {
+          itens: todos,
+          erro: `Falha ao clicar em "Próxima Página" (página ${pagina}): ${e && e.message ? e.message : String(e)}`,
+        };
+      }
+
+      // Cobre os dois jeitos possiveis dessa paginacao: se for uma
+      // navegacao de verdade, espera o "complete" da aba; se for so' AJAX
+      // no mesmo documento (a aba nunca sai de "complete"), essa espera
+      // e' praticamente um no-op e o polling abaixo (pela mudanca no
+      // texto da legenda) e' quem realmente detecta o fim do carregamento.
+      await aguardarCarregamentoAba(aba.id).catch(() => {});
+
+      const captionAntes = leitura.caption;
+      let mudou = false;
+      let leituraNova = null;
+      for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        try {
+          const [{ result } = {}] = await chrome.scripting.executeScript({
+            target: { tabId: aba.id },
+            func: raspaerLocalizadoresNaPagina,
+          });
+          leituraNova = result;
+        } catch (e) {
+          continue; // frame ainda se recuperando de uma navegacao - tenta de novo
+        }
+        if (leituraNova && leituraNova.caption !== captionAntes) {
+          mudou = true;
+          break;
+        }
+      }
+
+      if (!mudou) {
+        return {
+          itens: todos,
+          erro: `Parou na página ${pagina} - a página seguinte não terminou de carregar a tempo.`,
+        };
+      }
+
+      leituraAtual = leituraNova;
+      pagina += 1;
+    }
+
+    return { itens: todos, erro: null };
+  } catch (e) {
+    return { itens: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
+}
+
+// Tabela em paginas de PDF (A4 paisagem, para caber a coluna de
+// descricao) com cabecalho repetido em cada pagina - reaproveita
+// "quebrarLinhas" (ja' usado no PDF unico) para cada coluna
+// separadamente, alinhando as colunas por posicao X fixa.
+const PDF_LOCALIZADORES_LARGURA_PAGINA = 841.89; // A4 paisagem
+const PDF_LOCALIZADORES_ALTURA_PAGINA = 595.28;
+const PDF_LOCALIZADORES_MARGEM = 36;
+const PDF_LOCALIZADORES_TAMANHO_FONTE = 9;
+const PDF_LOCALIZADORES_ALTURA_LINHA = PDF_LOCALIZADORES_TAMANHO_FONTE * 1.35;
+
+async function construirPdfLocalizadores(itens, tituloDocumento) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const colunas = [
+    { titulo: "Localizador", largura: larguraUtil * 0.26, campo: "nome" },
+    { titulo: "Descrição", largura: larguraUtil * 0.58, campo: "descricao" },
+    { titulo: "Total de processos", largura: larguraUtil * 0.16, campo: "totalProcessos" },
+  ];
+
+  let pagina = null;
+  let y = 0;
+
+  function desenharCabecalhoColunas() {
+    let x = PDF_LOCALIZADORES_MARGEM;
+    for (const coluna of colunas) {
+      pagina.drawText(sanitizarTextoPdf(coluna.titulo), {
+        x,
+        y,
+        size: PDF_LOCALIZADORES_TAMANHO_FONTE,
+        font: fonteNegrito,
+      });
+      x += coluna.largura;
+    }
+    y -= PDF_LOCALIZADORES_ALTURA_LINHA * 1.6;
+  }
+
+  function novaPagina(comTitulo) {
+    pagina = pdf.addPage([PDF_LOCALIZADORES_LARGURA_PAGINA, PDF_LOCALIZADORES_ALTURA_PAGINA]);
+    y = PDF_LOCALIZADORES_ALTURA_PAGINA - PDF_LOCALIZADORES_MARGEM;
+    if (comTitulo) {
+      pagina.drawText(sanitizarTextoPdf(tituloDocumento), {
+        x: PDF_LOCALIZADORES_MARGEM,
+        y,
+        size: 13,
+        font: fonteNegrito,
+      });
+      y -= PDF_LOCALIZADORES_ALTURA_LINHA * 2.2;
+    }
+    desenharCabecalhoColunas();
+  }
+
+  novaPagina(true);
+
+  for (const item of itens) {
+    const linhasPorColuna = colunas.map((coluna) =>
+      quebrarLinhas(sanitizarTextoPdf(String(item[coluna.campo] ?? "")), fonteNormal, PDF_LOCALIZADORES_TAMANHO_FONTE, coluna.largura - 4)
+    );
+    const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
+
+    if (y - maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA < PDF_LOCALIZADORES_MARGEM) {
+      novaPagina(false);
+    }
+
+    let x = PDF_LOCALIZADORES_MARGEM;
+    for (let i = 0; i < colunas.length; i += 1) {
+      let yColuna = y;
+      for (const linha of linhasPorColuna[i]) {
+        try {
+          pagina.drawText(linha, { x, y: yColuna, size: PDF_LOCALIZADORES_TAMANHO_FONTE, font: fonteNormal });
+        } catch (e) {
+          // Ignora linha que a fonte padrao nao consiga desenhar.
+        }
+        yColuna -= PDF_LOCALIZADORES_ALTURA_LINHA;
+      }
+      x += colunas[i].largura;
+    }
+    y -= maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA + PDF_LOCALIZADORES_ALTURA_LINHA * 0.4;
+  }
+
+  return pdf.save();
+}
+
+// Planilha em formato "Excel XML Spreadsheet" (SpreadsheetML, o mesmo
+// formato de arquivo unico usado pelo Excel 2003-2007 para abrir uma
+// planilha nativa sem precisar gerar um .xlsx de verdade, que e' um zip -
+// nao ha' nenhuma biblioteca de zip vendorizada nesta extensao). E' texto
+// XML puro, salvo com extensao .xls: o Excel reconhece o conteudo pelo
+// cabecalho "mso-application" e abre normalmente, sem aviso de formato
+// incompatível (diferente do truque antigo de salvar uma tabela HTML
+// com extensao .xls, que dispara esse aviso).
+function escaparXml(texto) {
+  return String(texto)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function construirExcelLocalizadores(itens) {
+  const linhaCabecalho = `<Row>
+   <Cell ss:StyleID="Cabecalho"><Data ss:Type="String">Localizador</Data></Cell>
+   <Cell ss:StyleID="Cabecalho"><Data ss:Type="String">Descrição</Data></Cell>
+   <Cell ss:StyleID="Cabecalho"><Data ss:Type="String">Total de processos</Data></Cell>
+  </Row>`;
+
+  const linhasDados = itens
+    .map(
+      (item) => `<Row>
+   <Cell><Data ss:Type="String">${escaparXml(item.nome)}</Data></Cell>
+   <Cell><Data ss:Type="String">${escaparXml(item.descricao)}</Data></Cell>
+   <Cell><Data ss:Type="Number">${Number(item.totalProcessos) || 0}</Data></Cell>
+  </Row>`
+    )
+    .join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Styles>
+  <Style ss:ID="Cabecalho">
+   <Font ss:Bold="1"/>
+  </Style>
+ </Styles>
+ <Worksheet ss:Name="Localizadores">
+  <Table>
+   <Column ss:Width="220"/>
+   <Column ss:Width="420"/>
+   <Column ss:Width="110"/>
+   ${linhaCabecalho}
+${linhasDados}
+  </Table>
+ </Worksheet>
+</Workbook>
+`;
+}
+
+// Orquestra tudo: abre a aba oculta, coleta os localizadores de todas as
+// paginas e gera os formatos marcados (pdf/excel), baixando cada um.
+// Reporta progresso pelo mesmo callback usado no resto da extensao.
+async function exportarLocalizadores(formatos, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  notificar("Abrindo a tela de Localizadores do Órgão...");
+  const { itens, erro } = await abrirAbaEColetarLocalizadores(abaAtual.url);
+
+  if (itens.length === 0) {
+    throw new Error(erro || "Nenhum localizador encontrado.");
+  }
+
+  // Classificado por total de processos (do maior para o menor), para
+  // destacar de imediato os localizadores mais usados - vale tanto para
+  // o PDF quanto para a planilha.
+  const itensOrdenados = [...itens].sort((a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0));
+
+  const tituloDocumento = `Localizadores do Órgão — ${itensOrdenados.length} registro(s) — gerado em ${new Date().toLocaleString("pt-BR")}`;
+  const nomeBase = `eproc/localizadores_orgao_${new Date().toISOString().slice(0, 10)}`;
+
+  if (formatos.pdf) {
+    notificar("Gerando PDF...");
+    const bytes = await construirPdfLocalizadores(itensOrdenados, tituloDocumento);
+    await baixarUm(`${nomeBase}.pdf`, construirDataUrlBinario("application/pdf", bytes));
+  }
+
+  if (formatos.excel) {
+    notificar("Gerando planilha Excel...");
+    const xml = construirExcelLocalizadores(itensOrdenados);
+    await baixarUm(`${nomeBase}.xls`, construirDataUrl("application/vnd.ms-excel", xml));
+  }
+
+  notificar("Finalizando...");
+  return { total: itensOrdenados.length, erroColeta: erro };
+}
+
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "BAIXAR_DOCUMENTOS") {
-    const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false };
-    processarFila(mensagem.numeroProcesso, mensagem.documentos, opcoes);
+    const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false, mdUnico: false };
+    processarFila(mensagem.numeroProcesso, mensagem.documentos, opcoes, mensagem.movimentacao);
     sendResponse({ ok: true });
     return true;
   }
@@ -1117,6 +2298,31 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
       .open({ tabId })
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_LOCALIZADORES") {
+    // Mesmo padrao de GERAR_RELATORIO: a operacao percorre varias paginas
+    // e demora, entao confirma o recebimento na hora e avisa o resultado
+    // final por uma mensagem separada.
+    exportarLocalizadores(mensagem.formatos, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_LOCALIZADORES", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "LOCALIZADORES_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "LOCALIZADORES_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
     return true;
   }
 

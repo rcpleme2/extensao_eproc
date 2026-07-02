@@ -39,6 +39,20 @@
         <input type="radio" name="modo-exportacao" id="radio-pdf-unico" />
         PDF único combinado
       </label>
+      <label class="opcao-radio">
+        <input type="radio" name="modo-exportacao" id="radio-md-unico" />
+        MD único (texto e anonimizado)
+      </label>
+      <div id="aviso-md-unico" class="aviso-md-unico" hidden>
+        Extrai o texto de todos os documentos (PDFs com camada de texto e
+        HTML; imagens e PDFs escaneados sem camada de texto entram só com
+        uma nota, sem OCR nesta versão), inclui a movimentação processual
+        numa seção antes dos anexos, e remove automaticamente CPF, CNPJ,
+        telefone, e-mail, linhas com possível endereço e abrevia nomes.
+        <strong>Isso é um processo de melhor esforço, não uma garantia de
+        anonimização completa</strong> — sempre revise o arquivo gerado
+        antes de compartilhar externamente.
+      </div>
       <button id="btn-baixar" disabled>Baixar</button>
     </div>
 
@@ -144,6 +158,38 @@
     </div>
 
     <div id="area-erros-regras" class="erros" hidden></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card-titulo">
+      <span class="card-icone" aria-hidden="true">🗂️</span>
+      Localizadores do Órgão
+    </h2>
+
+    <div id="area-localizadores-info" class="status">
+      Exporta a lista de Localizadores do Órgão (nome, descrição e total
+      de processos) em PDF e/ou planilha Excel, percorrendo todas as
+      páginas da listagem automaticamente.
+    </div>
+
+    <div class="opcoes">
+      <label class="opcao-radio">
+        <input type="checkbox" id="chk-localizadores-pdf" checked />
+        PDF
+      </label>
+      <label class="opcao-radio">
+        <input type="checkbox" id="chk-localizadores-excel" />
+        Planilha Excel
+      </label>
+      <button id="btn-exportar-localizadores">Exportar</button>
+    </div>
+
+    <div id="area-progresso-localizadores" class="progresso-relatorio" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="texto-progresso-localizadores"></span>
+    </div>
+
+    <div id="area-erros-localizadores" class="erros" hidden></div>
   </section>
 
   <div id="modal-escolha-relatorio" class="modal-overlay" hidden>
