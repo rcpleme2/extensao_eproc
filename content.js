@@ -244,7 +244,21 @@ function adicionarBotaoAbrirPainel() {
   botao.addEventListener("click", (evento) => {
     evento.preventDefault();
     evento.stopPropagation();
-    chrome.runtime.sendMessage({ tipo: "ABRIR_PAINEL_LATERAL" }).catch(() => {});
+    // Se a extensao foi recarregada (chrome://extensions) depois que esta
+    // pagina foi carregada, o content script antigo fica "orfao" e
+    // chrome.runtime.sendMessage lanca uma excecao SINCRONA ("Extension
+    // context invalidated"), que nao seria pega por um .catch() na
+    // Promise - por isso o try/catch aqui. Nesse caso so' da' pra avisar o
+    // usuario a recarregar a pagina; nao ha' como reconectar sem isso.
+    try {
+      if (!chrome.runtime || !chrome.runtime.id) {
+        window.alert("A extensão foi atualizada. Recarregue esta página para usar este botão.");
+        return;
+      }
+      chrome.runtime.sendMessage({ tipo: "ABRIR_PAINEL_LATERAL" }).catch(() => {});
+    } catch (e) {
+      window.alert("A extensão foi atualizada. Recarregue esta página para usar este botão.");
+    }
   });
 
   logo.insertAdjacentElement("afterend", botao);
