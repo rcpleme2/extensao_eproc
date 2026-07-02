@@ -560,12 +560,30 @@ function listarRegrasAutomacaoAtivas() {
   };
 }
 
+// Le' o perfil/unidade atualmente selecionado no seletor de perfil do
+// eproc (select#selInfraUnidades, no cabecalho superior, presente em
+// qualquer pagina logada) - usado para decidir se o botao "Relatório
+// Gerencial da Unidade" deve aparecer no painel (so' quando o perfil
+// ativo for "CORREGEDORIA").
+function lerPerfilAtual() {
+  const select = document.getElementById("selInfraUnidades");
+  if (!select) return { perfil: null, valor: null };
+  const opcaoSelecionada = select.options[select.selectedIndex];
+  return {
+    perfil: opcaoSelecionada ? (opcaoSelecionada.textContent || "").trim() : null,
+    valor: select.value || null,
+  };
+}
+
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "LISTAR_DOCUMENTOS") {
     sendResponse(listarDocumentos());
   }
   if (mensagem && mensagem.tipo === "LISTAR_REGRAS_AUTOMACAO") {
     sendResponse(listarRegrasAutomacaoAtivas());
+  }
+  if (mensagem && mensagem.tipo === "LER_PERFIL_ATUAL") {
+    sendResponse(lerPerfilAtual());
   }
   return true;
 });

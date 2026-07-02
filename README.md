@@ -374,6 +374,24 @@ O botão funciona a partir de qualquer página do eproc que tenha o menu
 lateral visível (não precisa estar na tela de um processo
 especificamente).
 
+### Relatório Gerencial da Unidade (em construção)
+
+Quando o perfil ativo (select de perfil no cabeçalho do eproc,
+`#selInfraUnidades`) é **"CORREGEDORIA"**, aparece um botão adicional
+**"Relatório Gerencial da Unidade"**. Por enquanto ele só faz a primeira
+etapa do que vai virar um relatório mais completo:
+
+1. Navega a aba atual até o Relatório Geral (mesmo mecanismo do botão
+   "↗" já existente).
+2. Lê todas as opções do filtro "Órgão/Juízo" dessa tela (visualmente um
+   dropdown do bootstrap-select, mas a leitura é feita direto no
+   `<select id="selIdOrgaoJuizo">` nativo por trás dele, sem precisar
+   simular a abertura do dropdown visual).
+3. Mostra essas unidades num menu suspenso no painel.
+
+Nenhuma consulta ou exportação a partir dessas unidades foi implementada
+ainda — é só a leitura e exibição da lista, como primeiro passo.
+
 ## Regras de Automação
 
 Na tela **"Automatizar Tramitação Processual"** do eproc

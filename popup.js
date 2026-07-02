@@ -349,6 +349,62 @@ btnAbrirTelaRelatorio.addEventListener("click", async () => {
   }
 });
 
+const areaBtnRelatorioGerencial = document.getElementById("area-btn-relatorio-gerencial");
+const btnRelatorioGerencialUnidade = document.getElementById("btn-relatorio-gerencial-unidade");
+const areaProgressoUnidades = document.getElementById("area-progresso-unidades");
+const textoProgressoUnidades = document.getElementById("texto-progresso-unidades");
+const areaSelectUnidade = document.getElementById("area-select-unidade");
+const selectUnidadeRelatorio = document.getElementById("select-unidade-relatorio");
+
+// O botao "Relatório Gerencial da Unidade" so' aparece quando o perfil
+// ativo da aba atual (select#selInfraUnidades no cabecalho do eproc) e'
+// "CORREGEDORIA" - reavaliado sempre que o usuario troca de aba ou
+// navega, ja' que o painel lateral permanece aberto durante isso.
+async function atualizarBotaoRelatorioGerencial() {
+  try {
+    const aba = await getAbaAtiva();
+    if (!aba || !aba.id) {
+      areaBtnRelatorioGerencial.hidden = true;
+      return;
+    }
+    const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LER_PERFIL_ATUAL" }).catch(() => null);
+    areaBtnRelatorioGerencial.hidden = !(resposta && resposta.perfil === "CORREGEDORIA");
+  } catch (e) {
+    areaBtnRelatorioGerencial.hidden = true;
+  }
+}
+
+btnRelatorioGerencialUnidade.addEventListener("click", async () => {
+  btnRelatorioGerencialUnidade.disabled = true;
+  areaErrosRelatorio.hidden = true;
+  areaSelectUnidade.hidden = true;
+  areaProgressoUnidades.hidden = false;
+  textoProgressoUnidades.textContent = "Iniciando...";
+  setStatusRelatorio("Abrindo o Relatório Geral e lendo as unidades disponíveis (sua aba atual será navegada)...");
+
+  // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
+  // comecou; o resultado final chega pela mensagem
+  // UNIDADES_RELATORIO_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({ tipo: "LISTAR_UNIDADES_RELATORIO_GERAL" });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar o carregamento.");
+    }
+  } catch (e) {
+    setStatusRelatorio("Erro ao carregar as unidades.");
+    areaErrosRelatorio.hidden = false;
+    areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
+    areaProgressoUnidades.hidden = true;
+    btnRelatorioGerencialUnidade.disabled = false;
+  }
+});
+
+chrome.tabs.onActivated.addListener(atualizarBotaoRelatorioGerencial);
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "complete") atualizarBotaoRelatorioGerencial();
+});
+atualizarBotaoRelatorioGerencial();
+
 chrome.runtime.onMessage.addListener((mensagem) => {
   if (!mensagem) return;
 
@@ -438,6 +494,38 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosRelatorio.hidden = false;
       areaErrosRelatorio.textContent =
         mensagem.erro || "Falha desconhecida ao abrir o relatório detalhado.";
+    }
+  }
+
+  if (mensagem.tipo === "PROGRESSO_UNIDADES_RELATORIO") {
+    textoProgressoUnidades.textContent = mensagem.texto || "Processando...";
+    setStatusRelatorio(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "UNIDADES_RELATORIO_FINALIZADO") {
+    areaProgressoUnidades.hidden = true;
+    btnRelatorioGerencialUnidade.disabled = false;
+
+    if (mensagem.ok) {
+      const unidades = (mensagem.resultado && mensagem.resultado.unidades) || [];
+      selectUnidadeRelatorio.innerHTML = '<option value="" selected disabled>Selecione uma unidade...</option>';
+      for (const unidade of unidades) {
+        const opcao = document.createElement("option");
+        opcao.value = unidade.valor;
+        opcao.textContent = unidade.texto;
+        selectUnidadeRelatorio.appendChild(opcao);
+      }
+      areaSelectUnidade.hidden = unidades.length === 0;
+      setStatusRelatorio(
+        unidades.length > 0
+          ? `${unidades.length} unidade(s) encontrada(s) no Relatório Geral.`
+          : "Nenhuma unidade encontrada no filtro Órgão/Juízo."
+      );
+    } else {
+      setStatusRelatorio("Erro ao carregar as unidades.");
+      areaErrosRelatorio.hidden = false;
+      areaErrosRelatorio.textContent =
+        mensagem.erro || "Falha desconhecida ao carregar as unidades.";
     }
   }
 });

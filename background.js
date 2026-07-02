@@ -1632,6 +1632,76 @@ async function abrirTelaRelatorioGeral() {
   }
 }
 
+// Le', na tela do Relatório Geral, todas as opcoes do filtro
+// "Órgão/Juízo" (select#selIdOrgaoJuizo) - visualmente um dropdown do
+// bootstrap-select (o botao com texto "Selecione" e o menu que abre ao
+// clicar), mas o bootstrap-select so' e' uma casca visual em cima do
+// <select> nativo original, que continua existindo no DOM (so' fica
+// escondido) com as mesmas <option> - por isso a leitura e' direto no
+// <select>, sem precisar simular nenhum clique/abertura do dropdown
+// visual. Autocontida, executada via chrome.scripting.executeScript.
+function lerUnidadesRelatorioGeralNaPagina() {
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) {
+    return { unidades: [], erro: 'Campo "Órgão/Juízo" (#selIdOrgaoJuizo) não encontrado nesta página.' };
+  }
+  const unidades = Array.from(select.options)
+    .filter((opcao) => opcao.value && opcao.value !== "null")
+    .map((opcao) => ({
+      valor: opcao.value,
+      texto: (opcao.textContent || opcao.getAttribute("title") || "").trim(),
+    }));
+  return { unidades, erro: null };
+}
+
+// Navega a aba ATUAL (visivel) ate' o Relatório Geral (mesmo mecanismo
+// de "abrirTelaRelatorioGeral") e le' as unidades disponiveis no filtro
+// "Órgão/Juízo" dessa tela - usado pelo botao "Relatório Gerencial da
+// Unidade" (so' aparece no painel quando o perfil ativo e'
+// "CORREGEDORIA"). Por enquanto so' lista as unidades num dropdown no
+// painel; nenhuma consulta/relatorio adicional e' disparado a partir
+// delas ainda.
+async function listarUnidadesRelatorioGeral(aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!aba || !aba.id) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  notificar("Abrindo o Relatório Geral...");
+  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: clicarLinkRelatorioGeralNaPagina,
+  });
+
+  if (!linkEncontrado) {
+    throw new Error(
+      'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
+    );
+  }
+
+  await aguardarCarregamentoAba(aba.id);
+  // Pequena espera extra para os scripts da pagina (bootstrap-select
+  // etc.) terminarem de inicializar apos o carregamento.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  notificar("Lendo as unidades disponíveis...");
+  const [{ result } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: lerUnidadesRelatorioGeralNaPagina,
+  });
+
+  if (!result || result.erro) {
+    throw new Error((result && result.erro) || "Não foi possível ler as unidades disponíveis.");
+  }
+
+  notificar("Finalizando...");
+  return { unidades: result.unidades };
+}
+
 // Traduz os identificadores usados no painel para os parametros que
 // "consultarUmaVezNaPagina" entende. Duas categorias de relatorio:
 // - "situacao" (padrao): situacao "despacho"/"sentenca" + filtro
@@ -2718,6 +2788,32 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     abrirTelaRelatorioGeral()
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "LISTAR_UNIDADES_RELATORIO_GERAL") {
+    // Mesmo padrao das demais operacoes em segundo plano: confirma o
+    // recebimento na hora e avisa o resultado final por uma mensagem
+    // separada, ja' que essa operacao navega a aba e demora alguns
+    // segundos.
+    listarUnidadesRelatorioGeral((texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_UNIDADES_RELATORIO", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "UNIDADES_RELATORIO_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "UNIDADES_RELATORIO_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
     return true;
   }
 
