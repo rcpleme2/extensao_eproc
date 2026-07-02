@@ -747,10 +747,18 @@ async function gerarRelatorioGeral(aoProgredir) {
     // etc.) terminarem de inicializar apos o carregamento.
     await new Promise((resolve) => setTimeout(resolve, 500));
 
+    // world: "MAIN" e' essencial aqui: por padrao o executeScript roda
+    // no "mundo isolado" (mesmo escopo dos content scripts), que tem seu
+    // proprio "window" separado do da pagina - "window.jQuery" so'
+    // existe no mundo principal, onde os scripts da propria pagina
+    // rodam. Sem isso, o acesso ao jQuery (necessario pra manipular o
+    // widget jQuery UI Autocomplete de "Informação complementar") falha
+    // com "jQuery não disponível".
     notificar('Consultando "MOVIMENTO-AGUARDA DESPACHO" (total e urgentes)...');
     const [{ result: resultadoDespacho } = {}] = await chrome.scripting.executeScript({
       target: { tabId: abaOculta.id },
       func: consultarSituacaoComUrgenciaNaPagina,
+      world: "MAIN",
       args: [VALOR_SITUACAO_AGUARDA_DESPACHO],
     });
 
@@ -758,6 +766,7 @@ async function gerarRelatorioGeral(aoProgredir) {
     const [{ result: resultadoSentenca } = {}] = await chrome.scripting.executeScript({
       target: { tabId: abaOculta.id },
       func: consultarSituacaoComUrgenciaNaPagina,
+      world: "MAIN",
       args: [VALOR_SITUACAO_AGUARDA_SENTENCA],
     });
 
