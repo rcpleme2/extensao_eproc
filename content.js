@@ -269,6 +269,15 @@ observadorEventos.observe(document.body, { childList: true, subtree: true });
 // Temporariamente") - so' as regras com esse checkbox marcado entram no
 // resultado, conforme pedido ("considere apenas as regras que estão
 // ativas").
+// Copia o elemento, troca cada <br> por uma quebra de linha real e devolve
+// o texto puro - usado para conseguir separar o conteudo das celulas em
+// "linhas" de forma confiavel (textContent sozinho ignora <br>).
+function textoComQuebras(elemento) {
+  const clone = elemento.cloneNode(true);
+  clone.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
+  return (clone.textContent || "").replace(/[ \t]+/g, " ").trim();
+}
+
 function listarRegrasAutomacaoAtivas() {
   const linhas = Array.from(document.querySelectorAll('tr[id^="trLocalizadorAut_"]'));
   const regras = [];
@@ -289,8 +298,16 @@ function listarRegrasAutomacaoAtivas() {
     const spanNumero = tds[1].querySelector("span > span");
     const numero = spanNumero ? (spanNumero.textContent || "").trim() : "";
 
+    // O select de prioridade tem uma opcao "[ Prioridade ]" (value="0")
+    // usada como placeholder quando a regra nao tem uma ordem de execucao
+    // definida - trocamos esse texto pelo equivalente mais claro pedido,
+    // e guardamos tambem o numero (quando existe, no formato "Executar
+    // Nº") para poder ordenar por prioridade depois.
     const opcaoPrioridade = tds[1].querySelector("select.selPrioridade option[selected]");
-    const prioridade = opcaoPrioridade ? (opcaoPrioridade.textContent || "").trim() : "";
+    const prioridadeBruta = opcaoPrioridade ? (opcaoPrioridade.textContent || "").trim() : "";
+    const matchPrioridade = prioridadeBruta.match(/Executar\s+(\d+)/);
+    const prioridadeNumero = matchPrioridade ? Number(matchPrioridade[1]) : null;
+    const prioridade = prioridadeNumero !== null ? prioridadeBruta : "[Sem prioridade definida]";
 
     const spanGrupo = tds[2].querySelector('span[id^="spnGrupoRegra_"]');
     let grupo = spanGrupo ? (spanGrupo.textContent || "").trim() : "";
@@ -299,7 +316,42 @@ function listarRegrasAutomacaoAtivas() {
     const localizadorOrigem = (tds[3].textContent || "").trim() || "Nenhum";
     const criterioHtml = (tds[4].innerHTML || "").trim();
     const destinoAcaoHtml = (tds[5].innerHTML || "").trim();
-    const outrosCriteriosHtml = (tds[6].innerHTML || "").trim();
+
+    // A coluna "Outros Critérios" tem, quando o conteudo e' longo, DOIS
+    // blocos sobrepostos: "dadosResumidos_{cod}" (truncado, oculto por
+    // padrao) e "dadosCompletos_{cod}" (o texto inteiro, visivel por
+    // padrao, com um link "[ + Expandir ]" dentro do bloco truncado). Sem
+    // filtrar isso, o texto extraido sairia duplicado. Preferimos sempre o
+    // bloco "completo" quando ele existe.
+    const divOutrosCompleto = tds[6].querySelector('[id^="dadosCompletos_"]');
+    const origemOutrosCriterios = divOutrosCompleto || tds[6];
+    const outrosCriteriosHtml = (origemOutrosCriterios.innerHTML || "").trim();
+
+    // Versoes resumidas (texto puro, sem HTML) de cada coluna, usadas so'
+    // para desenhar o fluxograma - o conteudo completo (com toda a
+    // formatacao original) continua disponivel nos campos "*Html" acima.
+    const linhasCriterio = textoComQuebras(tds[4])
+      .split(/\s*OU\s*/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const criterioResumo = linhasCriterio[0] || "Sem critério definido";
+    const criterioAlternativas = Math.max(0, linhasCriterio.length - 1);
+
+    const linhasDestino = textoComQuebras(tds[5])
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const destinoResumo = linhasDestino[0] || "Sem destino definido";
+    const linhaEvento = linhasDestino.find((l) => l.startsWith("Evento:"));
+    const temAcaoProgramada = linhasDestino.some(
+      (l) => l.includes("AUTOMATIZADO") || l.includes("Ação Programada")
+    );
+    const acaoResumo = temAcaoProgramada ? linhaEvento || "Ação automatizada programada" : "";
+
+    const outrosCriteriosResumo = textoComQuebras(origemOutrosCriterios)
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
     const linkEditar = tds[7].querySelector(
       'a[href*="acao=automatizar_localizadores_alterar"]:not([href*="sin_duplicar_regra"])'
@@ -310,17 +362,36 @@ function listarRegrasAutomacaoAtivas() {
       id,
       numero,
       prioridade,
+      prioridadeNumero,
       grupo,
       localizadorOrigem,
       criterioHtml,
       destinoAcaoHtml,
       outrosCriteriosHtml,
+      criterioResumo,
+      criterioAlternativas,
+      destinoResumo,
+      acaoResumo,
+      outrosCriteriosResumo,
       linkEditar: linkEditar ? linkEditar.href : "",
       linkLog: linkLog ? linkLog.href : "",
     });
   }
 
-  regras.sort((a, b) => (Number(a.numero) || 0) - (Number(b.numero) || 0));
+  // Se alguma regra ativa tem prioridade numerica definida, a ordem do
+  // relatorio segue essa prioridade (a ordem real de execucao); so' cai de
+  // volta para o numero da regra quando NENHUMA delas tem prioridade
+  // definida (ordenar por prioridade nesse caso nao faria sentido, ja' que
+  // todas ficariam empatadas).
+  const algumaTemPrioridade = regras.some((r) => r.prioridadeNumero !== null);
+  regras.sort((a, b) => {
+    if (algumaTemPrioridade) {
+      const pa = a.prioridadeNumero === null ? Infinity : a.prioridadeNumero;
+      const pb = b.prioridadeNumero === null ? Infinity : b.prioridadeNumero;
+      if (pa !== pb) return pa - pb;
+    }
+    return (Number(a.numero) || 0) - (Number(b.numero) || 0);
+  });
 
   return {
     regras,

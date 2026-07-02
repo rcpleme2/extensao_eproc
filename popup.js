@@ -440,12 +440,52 @@ function construirDocumentoRegras(regras, tituloPagina) {
       if (r.linkEditar) links.push(`<a href="${escaparHtml(r.linkEditar)}" target="_blank" rel="noopener">Editar regra</a>`);
       if (r.linkLog) links.push(`<a href="${escaparHtml(r.linkLog)}" target="_blank" rel="noopener">Ver histórico</a>`);
 
+      const outros = r.outrosCriteriosResumo || [];
+      const fluxoExtra =
+        outros.length > 0
+          ? `<div class="fluxo-extra">+ ${escaparHtml(outros[0])}${
+              outros.length > 1 ? ` <span class="fluxo-badge">(+${outros.length - 1})</span>` : ""
+            }</div>`
+          : "";
+
+      const fluxo = `
+    <div class="fluxo">
+      <div class="fluxo-caixa fluxo-origem">
+        <div class="fluxo-caixa-titulo">Origem</div>
+        <div>${escaparHtml(r.localizadorOrigem)}</div>
+      </div>
+      <div class="fluxo-seta" aria-hidden="true">&rarr;</div>
+      <div class="fluxo-coluna">
+        <div class="fluxo-caixa fluxo-criterio">
+          <div class="fluxo-caixa-titulo">Critério</div>
+          <div>${escaparHtml(r.criterioResumo)}</div>
+          ${r.criterioAlternativas > 0 ? `<div class="fluxo-badge">+${r.criterioAlternativas} alternativa(s)</div>` : ""}
+        </div>
+        ${fluxoExtra}
+      </div>
+      <div class="fluxo-seta" aria-hidden="true">&rarr;</div>
+      <div class="fluxo-caixa fluxo-destino">
+        <div class="fluxo-caixa-titulo">Destino</div>
+        <div>${escaparHtml(r.destinoResumo)}</div>
+      </div>
+      ${
+        r.acaoResumo
+          ? `<div class="fluxo-seta" aria-hidden="true">&rarr;</div>
+      <div class="fluxo-caixa fluxo-acao">
+        <div class="fluxo-caixa-titulo">Ação automatizada</div>
+        <div>${escaparHtml(r.acaoResumo)}</div>
+      </div>`
+          : ""
+      }
+    </div>`;
+
       return `
     <article class="regra">
       <header class="regra-cabecalho">
         <span class="regra-numero">Regra ${escaparHtml(r.numero || "?")}</span>
         <span class="regra-prioridade">${escaparHtml(r.prioridade || "")}</span>
       </header>
+      ${fluxo}
       <dl>
         <dt>Grupo</dt>
         <dd>${escaparHtml(r.grupo)}</dd>
@@ -476,6 +516,20 @@ function construirDocumentoRegras(regras, tituloPagina) {
   .regra-cabecalho { display:flex; justify-content:space-between; align-items:baseline; border-bottom:2px solid #2c6ea6; padding-bottom:8px; margin-bottom:12px; }
   .regra-numero { font-size:16px; font-weight:700; color:#1c3d5a; }
   .regra-prioridade { font-size:12.5px; color:#2c6ea6; font-weight:600; }
+  .fluxo { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .fluxo-caixa { background:#f4f7fa; border:1px solid #c8d6e0; border-radius:6px; padding:7px 10px; font-size:12px; line-height:1.4; max-width:220px; }
+  .fluxo-caixa-titulo { font-size:9.5px; text-transform:uppercase; letter-spacing:0.03em; font-weight:700; color:#2c6ea6; margin-bottom:2px; }
+  .fluxo-origem { background:#eef1f5; border-color:#c3cdd6; }
+  .fluxo-criterio { background:#fff6e0; border-color:#f0d68a; }
+  .fluxo-criterio .fluxo-caixa-titulo { color:#8a6d00; }
+  .fluxo-destino { background:#e9f7ee; border-color:#a9dcb9; }
+  .fluxo-destino .fluxo-caixa-titulo { color:#1a7f37; }
+  .fluxo-acao { background:#eef1fd; border-color:#c2caf5; }
+  .fluxo-acao .fluxo-caixa-titulo { color:#3d4fc4; }
+  .fluxo-seta { font-size:16px; color:#9aa7b0; }
+  .fluxo-coluna { display:flex; flex-direction:column; gap:4px; }
+  .fluxo-extra { font-size:11px; color:#666; max-width:220px; }
+  .fluxo-badge { font-size:10px; color:#888; margin-top:2px; }
   dl { margin:0; }
   dt { font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; color:#888; font-weight:700; margin-top:10px; }
   dt:first-child { margin-top:0; }

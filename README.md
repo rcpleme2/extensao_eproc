@@ -202,14 +202,24 @@ permanece aberto). Ao clicar:
 
 1. A extensão lê a tabela e filtra **apenas as regras ativas** (ignora as
    marcadas como "** DESATIVADA **").
-2. Gera um documento HTML novo, com um "cartão" por regra ativa, mostrando
-   de forma completa e legível: número/prioridade, grupo, localizador de
-   origem, o critério que dispara a regra, o localizador de destino/ação
-   (incluindo eventos automatizados programados, quando houver) e outros
-   critérios (ex.: juízo do processo, localizador adicional). O conteúdo é
-   o mesmo da página original (nada é resumido ou omitido), só que
+2. Ordena as regras: se **alguma** regra ativa tiver uma prioridade
+   numérica definida (ex.: "Executar 1º"), o relatório segue essa ordem de
+   execução; regras sem prioridade não entram nessa comparação. Quando
+   **nenhuma** regra ativa tem prioridade definida, a ordem cai para o
+   número da regra. Regras sem prioridade aparecem como
+   "[Sem prioridade definida]" em vez do rótulo "[ Prioridade ]" da
+   própria página, que é mais confuso fora de contexto.
+3. Gera um documento HTML novo, com um "cartão" por regra ativa. Cada
+   cartão traz, no topo, um **fluxograma** (Origem → Critério → Destino →
+   Ação automatizada, quando houver) para entender de relance o que
+   aquela regra faz, e logo abaixo o detalhamento completo e legível:
+   número/prioridade, grupo, localizador de origem, o critério que
+   dispara a regra, o localizador de destino/ação (incluindo eventos
+   automatizados programados, quando houver) e outros critérios (ex.:
+   juízo do processo, localizador adicional). O conteúdo detalhado é o
+   mesmo da página original (nada é resumido ou omitido ali), só que
    reorganizado em blocos rotulados em vez da tabela apertada.
-3. Abre esse documento em uma **aba nova**, com um link de atalho em cada
+4. Abre esse documento em uma **aba nova**, com um link de atalho em cada
    cartão para editar aquela regra ou ver seu histórico diretamente no
    eproc.
 
