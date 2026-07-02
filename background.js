@@ -475,7 +475,7 @@ function quebrarLinhas(texto, fonte, tamanhoFonte, larguraMaxima) {
 function adicionarTextoComoPaginas(pdfFinal, fonte, titulo, texto) {
   const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
   const linhas = [
-    sanitizarTextoPdf(titulo),
+    ...quebrarLinhas(sanitizarTextoPdf(titulo), fonte, TAMANHO_FONTE_TEXTO, larguraUtil),
     "",
     ...quebrarLinhas(sanitizarTextoPdf(texto), fonte, TAMANHO_FONTE_TEXTO, larguraUtil),
   ];
