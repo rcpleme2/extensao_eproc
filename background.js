@@ -563,10 +563,25 @@ function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function limparInformacaoComplementar() {
+  // Clica no "x" de cada tag existente e ESPERA a remocao realmente
+  // terminar (Tagify pode ter uma transicao/animacao interna antes do
+  // no da tag sumir do DOM). Sem esse espera, a consulta seguinte podia
+  // comecar a adicionar uma nova tag enquanto a remocao da anterior
+  // ainda estava "em andamento", deixando o campo num estado inconsistente
+  // - e' provavelmente o motivo da falha intermitente ao repetir a
+  // marcacao entre uma situacao e outra na mesma aba.
+  async function limparInformacaoComplementar() {
     const wrapper = document.getElementById("selDadoComplementar-wrapper");
     if (!wrapper) return;
+    const tagsEl = wrapper.querySelector("tags.tagify");
+
     wrapper.querySelectorAll(".tagify__tag__removeBtn").forEach((botao) => botao.click());
+
+    if (!tagsEl) return;
+    for (let tentativa = 0; tentativa < 20; tentativa += 1) {
+      if (tagsEl.querySelectorAll(".tagify__tag").length === 0) return;
+      await aguardar(100);
+    }
   }
 
   // O campo "Informação complementar" e' um Tagify de verdade, com o
@@ -589,7 +604,7 @@ function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
       throw new Error('Estrutura do campo "Informação complementar" não reconhecida.');
     }
 
-    limparInformacaoComplementar();
+    await limparInformacaoComplementar();
     await aguardar(150);
 
     const TEXTO_BUSCA = "Petição Urgente";
@@ -660,7 +675,7 @@ function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
 
   return (async () => {
     selecionarSituacao(valorOpcao);
-    limparInformacaoComplementar();
+    await limparInformacaoComplementar();
     // Da' tempo do bootstrap-select/tagify atualizarem visualmente antes
     // de consultar (nao estritamente necessario, mas mais fiel ao fluxo
     // real de uso e evita clicar antes dos componentes reagirem).
@@ -671,13 +686,24 @@ function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
     let urgentes = null;
     let erroUrgentes = null;
     try {
-      await marcarPeticaoUrgente();
+      try {
+        await marcarPeticaoUrgente();
+      } catch (primeiroErro) {
+        // Uma segunda tentativa cobre casos intermitentes (ex.: o campo
+        // ainda terminando de assentar depois de limpo) sem custar muito
+        // tempo extra quando a primeira ja' funciona.
+        await aguardar(300);
+        await marcarPeticaoUrgente();
+      }
       await aguardar(200);
       urgentes = await clicarConsultarELer();
     } catch (e) {
       erroUrgentes = e && e.message ? e.message : String(e);
     } finally {
-      limparInformacaoComplementar();
+      // Esperar a remocao terminar de verdade aqui e' o que garante que
+      // a proxima chamada (para a outra situacao, na mesma aba) comece
+      // com o campo "Informação complementar" realmente limpo.
+      await limparInformacaoComplementar();
     }
 
     return { total, urgentes, erroUrgentes };
