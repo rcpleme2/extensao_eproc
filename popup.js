@@ -314,7 +314,8 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     barraProgresso.value = mensagem.concluidos;
     barraProgresso.max = mensagem.total;
     const rotulo = ROTULO_FASE[mensagem.fase] || "";
-    textoProgresso.textContent = `${rotulo ? rotulo + ": " : ""}${mensagem.concluidos} / ${mensagem.total}`;
+    const sufixoDocumento = mensagem.nomeAtual ? ` (${mensagem.nomeAtual})` : "";
+    textoProgresso.textContent = `${rotulo ? rotulo + ": " : ""}${mensagem.concluidos} / ${mensagem.total}${sufixoDocumento}`;
     if (rotulo) setStatus(`Gerando ${rotulo.toLowerCase()}...`);
   }
 

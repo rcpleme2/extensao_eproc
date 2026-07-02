@@ -180,6 +180,36 @@ das partes do processo. Em particular:
 externamente** — o aviso já aparece no próprio painel ao escolher esse
 modo e no cabeçalho do arquivo gerado.
 
+### Se o "MD único" travar ou parecer não avançar
+
+Esse modo tem bem mais partes móveis que os outros dois (pdf.js, OCR via
+Tesseract, uma aba oculta separada, download da CDN) — se algo parar no
+meio, os logs abaixo mostram exatamente onde:
+
+1. **Console do service worker**: em `chrome://extensions`, encontre a
+   extensão e clique em **"service worker"** (ou "Inspect views: service
+   worker"). Isso abre o DevTools do processo principal da extensão, com
+   logs prefixados `[eproc-md]` para cada etapa: abertura da aba,
+   injeção das bibliotecas, início/fim de cada documento, downloads, etc.
+2. **Console da aba oculta**: o processamento de PDF/OCR roda numa aba
+   nova, aberta em segundo plano (ela aparece na barra de abas do
+   navegador, só não fica em primeiro plano). Clique nela e abra o
+   DevTools normalmente (F12) para ver os logs `[eproc-md]` específicos
+   dessa aba (carregamento do pdf.js/Tesseract, página sendo lida,
+   progresso do OCR).
+3. Nenhuma etapa demorada fica presa para sempre: download de documento,
+   abertura de PDF, renderização de página e OCR têm limites de tempo
+   (30s a 180s conforme a etapa) — ao estourar, aparece como um erro
+   tratado normalmente (nos avisos do arquivo final), em vez de travar a
+   exportação inteira. Se mesmo assim parecer travado, os logs acima
+   mostram em qual etapa/documento isso está acontecendo.
+4. A causa mais provável de demora/erro é a **conexão com a CDN do
+   Tesseract** (motor + dados de idioma, baixados na primeira vez que o
+   OCR é usado) — se sua rede bloquear `cdn.jsdelivr.net`, o OCR falha
+   com um erro claro nos logs e nos avisos do documento, mas o restante
+   dos documentos (que não precisam de OCR) continua sendo processado
+   normalmente.
+
 ## Relatório Geral (conclusos para despacho/sentença)
 
 O painel também tem um botão **"Relatórios"** que automatiza uma consulta
