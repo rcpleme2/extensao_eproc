@@ -575,6 +575,16 @@ function rotuloEvento(evento) {
   return `${numero} — ${evento.dataHora} — ${evento.descricao || "(sem descrição)"}`;
 }
 
+// Lista, uma por linha, o nome e a descricao (quando disponivel - vem do
+// aria-label do link no eproc, ex.: "Visualizar documento INIC1 do tipo
+// pdf") de cada documento vinculado a um evento, para a pagina divisoria
+// do PDF unico mostrar de imediato quais arquivos estao ali dentro.
+function listarDocumentosDoEvento(docs) {
+  return docs
+    .map((doc) => (doc.descricao ? `- ${doc.nome}: ${doc.descricao}` : `- ${doc.nome}`))
+    .join("\n");
+}
+
 // Igual a "agruparDocumentosPorEvento" (definida mais abaixo, junto do MD
 // unico) - agrupa os documentos por evento e devolve tambem os que nao
 // tem evento correspondente, para o PDF unico nao ordenar/juntar tudo
@@ -611,7 +621,7 @@ async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProce
         pdfFinal,
         fonteTexto,
         rotuloEvento(evento),
-        docsDoEvento.length === 0 ? "Nenhum documento anexado a este evento." : ""
+        docsDoEvento.length === 0 ? "Nenhum documento anexado a este evento." : listarDocumentosDoEvento(docsDoEvento)
       );
       for (const doc of docsDoEvento) {
         await processarDocumento(doc);
@@ -619,7 +629,7 @@ async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProce
     }
 
     if (semEvento.length > 0) {
-      adicionarTextoComoPaginas(pdfFinal, fonteTexto, "Documentos sem evento identificado", "");
+      adicionarTextoComoPaginas(pdfFinal, fonteTexto, "Documentos sem evento identificado", listarDocumentosDoEvento(semEvento));
       for (const doc of semEvento) {
         await processarDocumento(doc);
       }

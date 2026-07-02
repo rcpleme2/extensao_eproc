@@ -94,6 +94,11 @@ function listarDocumentos() {
       idDocumento: idDoc,
       nome: (a.textContent || "").trim() || a.getAttribute("data-nome") || idDoc,
       dataNome: a.getAttribute("data-nome") || "",
+      // O eproc coloca uma descricao curta no aria-label do link (ex.:
+      // "Visualizar documento INIC1 do tipo pdf "), usada aqui so' como
+      // texto complementar nas paginas divisorias de evento do PDF/MD
+      // unico - nao ha' outra descricao mais detalhada disponivel no DOM.
+      descricao: (a.getAttribute("aria-label") || "").trim(),
       mimetype: (a.getAttribute("data-mimetype") || "").toLowerCase(),
       href: a.href,
       evento: extrairNumeroEvento(a),
