@@ -39,7 +39,7 @@
         "libs/tesseract.min.js",
         "libs/tesseract-worker.min.js"
       ],
-      "matches": ["http://*/eproc/*", "https://*/eproc/*"]
+      "matches": ["<all_urls>"]
     }
   ]
 }
