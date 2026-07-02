@@ -110,27 +110,50 @@ function construirDataUrlBinario(mimetype, bytes) {
 
 function aguardarCarregamentoAba(tabId) {
   return new Promise((resolve) => {
+    let resolvido = false;
+    function concluir() {
+      if (resolvido) return;
+      resolvido = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }
     function listener(idAtualizado, changeInfo) {
-      if (idAtualizado === tabId && changeInfo.status === "complete") {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
+      if (idAtualizado === tabId && changeInfo.status === "complete") concluir();
     }
     chrome.tabs.onUpdated.addListener(listener);
+
+    // Corrida rara, mas possivel: se a aba ja tiver terminado de carregar
+    // ANTES desse listener ser registrado (ex.: pagina muito rapida/em
+    // cache), o evento "complete" ja disparou e nunca mais vai disparar -
+    // sem essa checagem extra, a promessa ficaria pendurada para sempre.
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError) return;
+      if (tab && tab.status === "complete") concluir();
+    });
   });
 }
 
-function lerHtmlDivDochtml(tabId) {
+// Le' o estado da div "#divdochtml" na aba: existe ou nao, e o
+// innerHTML atual (pode ser vazio mesmo que a div exista, enquanto o
+// AJAX da pagina ainda nao terminou). Nunca lanca excecao - qualquer erro
+// do proprio executeScript (aba fechada, navegacao no meio, etc.) volta
+// como "erro" em vez de ser silenciosamente engolido, para aparecer nos
+// logs em vez de so' "nao deu certo".
+function lerEstadoDivDochtml(tabId) {
   return chrome.scripting
     .executeScript({
       target: { tabId },
       func: () => {
         const div = document.getElementById("divdochtml");
-        return div ? div.innerHTML : "";
+        return {
+          existe: !!div,
+          conteudo: div ? div.innerHTML : "",
+          urlPagina: window.location.href,
+        };
       },
     })
-    .then((resultados) => (resultados && resultados[0] ? resultados[0].result : ""))
-    .catch(() => "");
+    .then((resultados) => (resultados && resultados[0] ? resultados[0].result : { existe: false, conteudo: "", urlPagina: null }))
+    .catch((e) => ({ existe: false, conteudo: "", urlPagina: null, erro: String(e) }));
 }
 
 // Documentos "html" (certidoes, atos ordinatorios, mandados) sao servidos
@@ -149,52 +172,70 @@ function lerHtmlDivDochtml(tabId) {
 //
 // Retorna sempre { conteudo, erro }, nunca lanca excecao, para o chamador
 // poder relatar o motivo exato de uma falha em vez de so' "nao deu certo".
+//
+// Diagnostico ("[eproc-html]" no console do service worker, em
+// chrome://extensions): loga a URL apos o carregamento, se a div
+// "#divdochtml" chegou a existir no DOM (independente de ter conteudo) e
+// quantas tentativas de poll foram feitas - para descobrir se o problema
+// e' a div nunca aparecer (pagina errada/redirecionada) ou aparecer e so'
+// nunca ser preenchida (AJAX que nao completa).
 async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
   let tab;
-  let abaAnteriorId = null;
   try {
-    // O Chrome desacelera bastante a execucao de script em abas em
-    // segundo plano (timers, requestAnimationFrame, e ate' scripts
-    // condicionados a pagina estar "visivel"), o que pode impedir a
-    // propria pagina do eproc de terminar de preencher a div via AJAX
-    // enquanto a aba nunca fica em primeiro plano. Por isso a aba e'
-    // criada em PRIMEIRO PLANO (active: true) so' durante essa extracao -
-    // guardamos qual aba estava ativa antes para devolver o foco a ela
-    // no final, minimizando a interrupcao visual para quem esta' usando
-    // o navegador.
-    const [abaAnterior] = await chrome.tabs.query({ active: true, currentWindow: true });
-    abaAnteriorId = abaAnterior && abaAnterior.id;
-
     try {
-      tab = await chrome.tabs.create({ url, active: true });
+      tab = await chrome.tabs.create({ url, active: false });
     } catch (e) {
-      return { conteudo: null, erro: `Falha ao abrir aba: ${String(e)}` };
+      return { conteudo: null, erro: `Falha ao abrir aba oculta: ${String(e)}` };
     }
+    console.log("[eproc-html]", "Aba criada", tab.id, "para", url);
 
     await aguardarCarregamentoAba(tab.id);
 
-    let conteudo = "";
+    const abaCarregada = await chrome.tabs.get(tab.id).catch(() => null);
+    console.log("[eproc-html]", "Aba", tab.id, "carregada. URL atual:", abaCarregada && abaCarregada.url);
+
+    let ultimoEstado = { existe: false, conteudo: "" };
     for (let tentativa = 0; tentativa < 60; tentativa += 1) {
-      conteudo = await lerHtmlDivDochtml(tab.id);
-      if (conteudo && conteudo.trim()) break;
+      ultimoEstado = await lerEstadoDivDochtml(tab.id);
+      if (tentativa === 0) {
+        console.log(
+          "[eproc-html]",
+          "Primeira leitura - div existe?",
+          ultimoEstado.existe,
+          "| URL da página:",
+          ultimoEstado.urlPagina,
+          "| erro:",
+          ultimoEstado.erro
+        );
+      }
+      if (ultimoEstado.conteudo && ultimoEstado.conteudo.trim()) break;
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
-    if (!conteudo || !conteudo.trim()) {
+    if (!ultimoEstado.conteudo || !ultimoEstado.conteudo.trim()) {
+      console.warn(
+        "[eproc-html]",
+        "Div não preencheu a tempo. Existia?",
+        ultimoEstado.existe,
+        "| URL final:",
+        ultimoEstado.urlPagina,
+        "| erro:",
+        ultimoEstado.erro
+      );
+      const motivo = !ultimoEstado.existe
+        ? 'a div "#divdochtml" nem chegou a existir nesta página - pode ter sido redirecionada para outro lugar'
+        : 'a div "#divdochtml" existe mas continuou vazia (o AJAX da página não terminou a tempo)';
       return {
         conteudo: null,
-        erro: 'Conteúdo não carregou a tempo (div "#divdochtml" continuou vazia).',
+        erro: `Conteúdo não carregou a tempo (${motivo}).`,
       };
     }
-    return { conteudo, erro: null };
+    return { conteudo: ultimoEstado.conteudo, erro: null };
   } catch (e) {
     return { conteudo: null, erro: String(e) };
   } finally {
     if (tab && tab.id) {
       chrome.tabs.remove(tab.id).catch(() => {});
-    }
-    if (abaAnteriorId) {
-      chrome.tabs.update(abaAnteriorId, { active: true }).catch(() => {});
     }
   }
 }
@@ -913,24 +954,7 @@ async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProces
 
   console.log(LOG_MD, "Todos os documentos processados. Avisos:", avisos.length);
 
-  const cabecalho = [
-    `# Processo ${numeroProcesso} — documentos combinados (anonimizado)`,
-    "",
-    `> Gerado automaticamente em ${new Date().toLocaleString("pt-BR")}. Passou por uma anonimização` +
-      " automática (nomes em Maiúscula+minúscula abreviados, CPF/CNPJ/telefone/e-mail e linhas com" +
-      " possível endereço removidos) que é **melhor esforço, não uma garantia de anonimização completa**" +
-      " — revise o conteúdo antes de compartilhar externamente.",
-    "",
-  ];
-
-  if (avisos.length > 0) {
-    cabecalho.push(
-      `> **Avisos:** ${avisos.length} documento(s) com problema na extração de texto: ${avisos.join(" | ")}`,
-      ""
-    );
-  }
-
-  cabecalho.push("## Movimentação e documentos", "");
+  const cabecalho = [`# Processo ${numeroProcesso}`, `${new Date().toLocaleString("pt-BR")}`, ""];
 
   const corpoCompleto = anonimizarTexto([...cabecalho, ...secoesEventos].join("\n\n"));
 

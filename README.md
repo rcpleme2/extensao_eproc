@@ -122,10 +122,12 @@ foram juntados naquele evento (na mesma numeração sequencial global de
 sempre: `#### 0001 — INIC1`, `#### 0002 — OUT2`, ...). Eventos sem nenhum
 documento anexado aparecem só com a descrição. Isso é incluído mesmo que
 o processo não tenha nenhum documento anexado (nesse caso, o arquivo sai
-só com a movimentação).
+só com a movimentação). O cabeçalho do arquivo traz só o número do
+processo e a data/hora da exportação, sem nenhum outro comentário.
 
 ```
-## Movimentação e documentos
+# Processo 6000101-75.2026.8.16.0171
+02/07/2026 14:32:10
 
 ### Evento 1 — 02/07/2026 09:50:47 — Distribuído por sorteio (TOMUN01)
 
@@ -189,14 +191,13 @@ completa") permite ajustar a detecção com precisão.
 - **HTML** (certidões, atos ordinatórios, mandados): reaproveita o mesmo
   mecanismo de aba oculta já usado nos outros modos para ler o texto real
   do documento (uma aba própria por documento, separada da aba
-  compartilhada dos PDFs). Essa aba precisa ficar **em primeiro plano**
-  brevemente durante a extração — o Chrome desacelera bastante a
-  execução de script em abas mantidas em segundo plano, o que podia
-  impedir a própria página do eproc de terminar de preencher o
-  documento via AJAX; o foco volta para a aba em que você estava assim
-  que a extração termina. Se ainda assim a primeira tentativa não
-  conseguir ler o conteúdo a tempo, uma segunda tentativa é feita
-  automaticamente, com uma aba nova.
+  compartilhada dos PDFs). Se a primeira tentativa não conseguir ler o
+  conteúdo a tempo, uma segunda tentativa é feita automaticamente, com
+  uma aba nova. Se mesmo assim continuar falhando com "div não
+  preencheu a tempo", veja a seção de diagnóstico abaixo — o log agora
+  diz se a div chegou a existir na página ou não, o que ajuda a
+  descobrir se o problema é a página não ser a esperada (redirecionada
+  para outro lugar) ou realmente o carregamento via AJAX não terminar.
 
 ### Anonimização (melhor esforço)
 
@@ -241,9 +242,11 @@ das partes do processo. Em particular:
 
 **Sempre revise o arquivo `.md` gerado antes de compartilhar
 externamente** — o aviso já aparece no próprio painel ao escolher esse
-modo e no cabeçalho do arquivo gerado.
+modo (o arquivo em si não traz mais esse aviso no cabeçalho, a pedido:
+o cabeçalho do arquivo só tem o número do processo e a data/hora da
+exportação).
 
-### Se o "MD único" travar ou parecer não avançar
+### Se o "MD único" travar, falhar ou parecer não avançar
 
 1. Abra o console do service worker em `chrome://extensions` (clique em
    **"service worker"** / "Inspect views: service worker" na extensão).
@@ -254,7 +257,10 @@ modo e no cabeçalho do arquivo gerado.
    primeiro plano) — clique nela e abra o DevTools (F12) para ver logs
    `[eproc-md]` específicos de dentro dela.
 3. Documentos "html" usam sua própria aba oculta separada (mesmo
-   mecanismo já usado no modo "Arquivos individuais"/"PDF único").
+   mecanismo já usado no modo "Arquivos individuais"/"PDF único"), com
+   logs prefixados `[eproc-html]` no console do service worker: URL da
+   página depois de carregar, se a div "#divdochtml" chegou a existir, e
+   se o preenchimento por AJAX terminou a tempo.
 4. Nenhuma etapa demorada fica presa para sempre: download de documento
    tem limite de 30s, e a extração de texto de cada PDF tem limite de
    60s — ao estourar, vira um erro tratado normalmente (nos avisos do
