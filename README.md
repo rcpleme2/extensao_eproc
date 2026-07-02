@@ -152,6 +152,16 @@ principal, navega a **aba atual e visível** direto para a tela do
 Relatório Geral (sem consultar nada) — um atalho para quem prefere
 conferir manualmente.
 
+Cada um dos 6 números da tabela (Total/Urgentes/+30 dias × Despacho/
+Sentença) é clicável: ao clicar, a **aba atual e visível** navega até o
+Relatório Geral já com a mesma situação e o mesmo filtro daquele número
+selecionados e a consulta já executada, mostrando a lista de processos por
+trás dele — útil para conferir exatamente quais processos compõem aquela
+contagem. Diferente da geração do relatório (que roda em abas ocultas
+descartáveis para não incomodar quem está navegando), aqui o objetivo é
+justamente mostrar o resultado na tela, então a aba usada é a que já está
+aberta e visível, e ela permanece aberta com o resultado ao final.
+
 O botão funciona a partir de qualquer página do eproc que tenha o menu
 lateral visível (não precisa estar na tela de um processo
 especificamente).

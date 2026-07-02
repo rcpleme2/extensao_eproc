@@ -249,4 +249,29 @@ progress {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   color: #1c3d5a;
+  padding: 0;
+}
+
+.valor-link {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #1c3d5a;
+  cursor: pointer;
+}
+
+.valor-link:hover:not(:disabled) {
+  background: #eaf1f8;
+  color: #1a5fb4;
+  text-decoration: underline;
+}
+
+.valor-link:disabled {
+  cursor: default;
+  opacity: 0.6;
 }

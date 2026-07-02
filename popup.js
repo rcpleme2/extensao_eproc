@@ -138,6 +138,60 @@ function formatarContagem(valor) {
   return valor === null || valor === undefined ? "?" : String(valor);
 }
 
+const botoesValorRelatorio = [
+  valorDespachoEl,
+  valorSentencaEl,
+  valorDespachoUrgentesEl,
+  valorSentencaUrgentesEl,
+  valorDespachoMais30DiasEl,
+  valorSentencaMais30DiasEl,
+];
+
+function definirBotoesValorHabilitados(habilitado) {
+  for (const botao of botoesValorRelatorio) {
+    botao.disabled = !habilitado || !botao.textContent || botao.textContent === "?";
+  }
+}
+
+// Clicar num numero do relatorio (ex.: "+30 dias" da Sentença) navega a
+// aba atual/visivel ate' o Relatório Geral ja' consultado com o mesmo
+// filtro daquele numero, para o usuario conferir a lista de processos por
+// tras dele. So' um clique por vez: os 6 botoes ficam desabilitados
+// durante a navegacao/consulta.
+for (const botao of botoesValorRelatorio) {
+  botao.addEventListener("click", async () => {
+    const situacao = botao.dataset.situacao;
+    const filtro = botao.dataset.filtro;
+
+    definirBotoesValorHabilitados(false);
+    btnRelatorios.disabled = true;
+    btnAbrirTelaRelatorio.disabled = true;
+    areaErrosRelatorio.hidden = true;
+    setStatusRelatorio("Abrindo o relatório detalhado nesta aba...");
+
+    try {
+      const resposta = await chrome.runtime.sendMessage({
+        tipo: "ABRIR_RELATORIO_PREENCHIDO",
+        situacao,
+        filtro,
+      });
+      if (!resposta || !resposta.ok) {
+        throw new Error((resposta && resposta.erro) || "Falha ao abrir o relatório detalhado.");
+      }
+    } catch (e) {
+      setStatusRelatorio("Erro ao abrir o relatório detalhado.");
+      areaErrosRelatorio.hidden = false;
+      areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
+      definirBotoesValorHabilitados(true);
+      btnRelatorios.disabled = false;
+      btnAbrirTelaRelatorio.disabled = false;
+    }
+    // Em caso de sucesso, os botoes sao reabilitados quando chegar a
+    // mensagem RELATORIO_PREENCHIDO_FINALIZADO (o fluxo demora alguns
+    // segundos, envolvendo navegacao de pagina).
+  });
+}
+
 btnRelatorios.addEventListener("click", async () => {
   btnRelatorios.disabled = true;
   btnAbrirTelaRelatorio.disabled = true;
@@ -238,6 +292,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       valorSentencaMais30DiasEl.textContent = formatarContagem(sentenca.mais30Dias);
 
       areaRelatorio.hidden = false;
+      definirBotoesValorHabilitados(true);
 
       const avisos = [...(despacho.erros || []), ...(sentenca.erros || [])];
       if (avisos.length > 0) {
@@ -252,6 +307,21 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       setStatusRelatorio("Erro ao gerar o relatório.");
       areaErrosRelatorio.hidden = false;
       areaErrosRelatorio.textContent = mensagem.erro || "Falha desconhecida ao gerar o relatório.";
+    }
+  }
+
+  if (mensagem.tipo === "RELATORIO_PREENCHIDO_FINALIZADO") {
+    definirBotoesValorHabilitados(true);
+    btnRelatorios.disabled = false;
+    btnAbrirTelaRelatorio.disabled = false;
+
+    if (mensagem.ok) {
+      setStatusRelatorio("Relatório detalhado aberto nesta aba.");
+    } else {
+      setStatusRelatorio("Erro ao abrir o relatório detalhado.");
+      areaErrosRelatorio.hidden = false;
+      areaErrosRelatorio.textContent =
+        mensagem.erro || "Falha desconhecida ao abrir o relatório detalhado.";
     }
   }
 });

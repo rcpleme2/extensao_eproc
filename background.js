@@ -815,6 +815,64 @@ async function abrirTelaRelatorioGeral() {
   }
 }
 
+// Traduz os identificadores usados no painel ("despacho"/"sentenca" +
+// "total"/"urgentes"/"mais30Dias") para os parametros que
+// "consultarUmaVezNaPagina" entende.
+function resolverParametrosConsulta(situacao, filtro) {
+  const valorSituacao =
+    situacao === "sentenca" ? VALOR_SITUACAO_AGUARDA_SENTENCA : VALOR_SITUACAO_AGUARDA_DESPACHO;
+
+  if (filtro === "urgentes") {
+    return { valorSituacao, urgente: true, diasSituacao: null };
+  }
+  if (filtro === "mais30Dias") {
+    return { valorSituacao, urgente: false, diasSituacao: DIAS_LIMITE_ATRASO };
+  }
+  return { valorSituacao, urgente: false, diasSituacao: null };
+}
+
+// Clicando num numero do relatorio (ex.: "Conclusos para despacho: 11"):
+// navega a aba ATUAL e visivel ate' o Relatório Geral e deixa ele ja'
+// consultado com o mesmo filtro daquele numero, para o usuario conferir
+// a lista de processos por tras dele. Diferente de "gerarRelatorioGeral"
+// (que roda tudo em abas ocultas descartaveis), aqui o objetivo e'
+// exatamente mostrar o resultado na tela, entao usa a aba visivel e nao
+// a fecha no final.
+async function abrirRelatorioPreenchido(situacao, filtro) {
+  const parametros = resolverParametrosConsulta(situacao, filtro);
+
+  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!aba || !aba.id) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: clicarLinkRelatorioGeralNaPagina,
+  });
+
+  if (!linkEncontrado) {
+    throw new Error(
+      'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
+    );
+  }
+
+  await aguardarCarregamentoAba(aba.id);
+  // Pequena espera extra para os scripts da pagina (bootstrap-select,
+  // tagify etc.) terminarem de inicializar apos o carregamento.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  const [{ result } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: consultarUmaVezNaPagina,
+    args: [parametros],
+  });
+
+  if (result && result.erro) {
+    throw new Error(result.erro);
+  }
+}
+
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "BAIXAR_DOCUMENTOS") {
     const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false };
@@ -855,6 +913,30 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     abrirTelaRelatorioGeral()
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "ABRIR_RELATORIO_PREENCHIDO") {
+    // Mesmo padrao de GERAR_RELATORIO: essa operacao tambem navega a aba e
+    // espera o carregamento/consulta terminar (alguns segundos), entao usa
+    // confirmacao imediata + mensagem separada de conclusao em vez de um
+    // unico sendResponse pendurado.
+    abrirRelatorioPreenchido(mensagem.situacao, mensagem.filtro)
+      .then(() => {
+        chrome.runtime
+          .sendMessage({ tipo: "RELATORIO_PREENCHIDO_FINALIZADO", ok: true })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_PREENCHIDO_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
     return true;
   }
 
