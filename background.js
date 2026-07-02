@@ -324,10 +324,11 @@ async function tentarFallbackFetchHtml(url) {
 }
 
 function escaparHtml(texto) {
-  return texto
+  return String(texto)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 async function obterConteudoHtmlReal(url, nomeDocumento) {
@@ -2215,6 +2216,218 @@ async function exportarLocalizadores(formatos, aoProgredir) {
   return { total: itensOrdenados.length, erroColeta: erro };
 }
 
+// ---- Regras de Automação (exportar sem precisar estar na página) ----
+
+// O link para "Automatizar Localizadores do Órgão" (menu Localizadores >
+// Automatizar Localizadores do Órgão) ja' existe no DOM mesmo com o
+// submenu colapsado - mesmo padrao ja' usado para "Localizadores do
+// Órgão"/"Relatório Geral". O "&" no final evita casar por engano com
+// outras acoes que comecam com o mesmo prefixo (ex.:
+// "automatizar_localizadores_alterar" dos links de editar regra).
+// Autocontida, executada via chrome.scripting.executeScript.
+function clicarLinkAutomatizarLocalizadoresNaPagina() {
+  const link = document.querySelector('a[href*="acao=automatizar_localizadores&"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Abre uma aba oculta a partir da URL da aba atual, navega ate' a tela
+// "Automatizar Tramitação Processual" e pede ao content script (ja'
+// injetado automaticamente nela, por ser controlador.php) a lista de
+// regras ativas via LISTAR_REGRAS_AUTOMACAO - reaproveitando a mesma
+// logica de raspagem ja' usada quando o usuario estava manualmente
+// nessa tela, so' que agora rodando numa aba que a propria extensao
+// controla, sem exigir navegacao manual.
+async function abrirAbaEListarRegrasAutomacao(urlBase) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkAutomatizarLocalizadoresNaPagina,
+    });
+
+    if (!linkEncontrado) {
+      return {
+        regras: [],
+        tituloPagina: "",
+        erro:
+          'Link "Automatizar Localizadores do Órgão" não encontrado na página atual (menu lateral: Localizadores > Automatizar Localizadores do Órgão). Abra uma página do eproc com o menu lateral e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    // Pequena espera extra para os switches "Ativa"/"Inativar" e os
+    // selects de prioridade da tabela terminarem de inicializar apos o
+    // carregamento (mesmo padrao usado no Relatório Geral).
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_REGRAS_AUTOMACAO" });
+    return {
+      regras: (resposta && resposta.regras) || [],
+      tituloPagina: (resposta && resposta.tituloPagina) || "",
+      erro: null,
+    };
+  } catch (e) {
+    return { regras: [], tituloPagina: "", erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
+}
+
+// Monta um documento HTML autocontido, um "cartao" por regra ativa,
+// reaproveitando o HTML original das colunas "Tipo de Controle/Critério",
+// "Localizador DESTINO/Ação" e "Outros Critérios" (que ja' contem negrito
+// e quebras de linha da propria pagina do eproc) para mostrar de forma
+// completa o que cada regra faz, so' que num layout bem mais legivel que
+// a tabela apertada original.
+function construirDocumentoRegras(regras, tituloPagina) {
+  const cartoes = regras
+    .map((r) => {
+      const links = [];
+      if (r.linkEditar) links.push(`<a href="${escaparHtml(r.linkEditar)}" target="_blank" rel="noopener">Editar regra</a>`);
+      if (r.linkLog) links.push(`<a href="${escaparHtml(r.linkLog)}" target="_blank" rel="noopener">Ver histórico</a>`);
+
+      const outros = r.outrosCriteriosResumo || [];
+      const fluxoExtra =
+        outros.length > 0
+          ? `<div class="fluxo-extra">+ ${escaparHtml(outros[0])}${
+              outros.length > 1 ? ` <span class="fluxo-badge">(+${outros.length - 1})</span>` : ""
+            }</div>`
+          : "";
+
+      const fluxo = `
+    <div class="fluxo">
+      <div class="fluxo-caixa fluxo-origem">
+        <div class="fluxo-caixa-titulo">Origem</div>
+        <div>${escaparHtml(r.localizadorOrigem)}</div>
+      </div>
+      <div class="fluxo-seta" aria-hidden="true">&rarr;</div>
+      <div class="fluxo-coluna">
+        <div class="fluxo-caixa fluxo-criterio">
+          <div class="fluxo-caixa-titulo">Critério</div>
+          <div>${escaparHtml(r.criterioResumo)}</div>
+          ${r.criterioAlternativas > 0 ? `<div class="fluxo-badge">+${r.criterioAlternativas} alternativa(s)</div>` : ""}
+        </div>
+        ${fluxoExtra}
+      </div>
+      <div class="fluxo-seta" aria-hidden="true">&rarr;</div>
+      <div class="fluxo-caixa fluxo-destino">
+        <div class="fluxo-caixa-titulo">Destino</div>
+        <div>${escaparHtml(r.destinoResumo)}</div>
+      </div>
+      ${
+        r.acaoResumo
+          ? `<div class="fluxo-seta" aria-hidden="true">&rarr;</div>
+      <div class="fluxo-caixa fluxo-acao">
+        <div class="fluxo-caixa-titulo">Ação automatizada</div>
+        <div>${escaparHtml(r.acaoResumo)}</div>
+      </div>`
+          : ""
+      }
+    </div>`;
+
+      return `
+    <article class="regra">
+      <header class="regra-cabecalho">
+        <span class="regra-numero">Regra ${escaparHtml(r.numero || "?")}</span>
+        <span class="regra-prioridade">${escaparHtml(r.prioridade || "")}</span>
+      </header>
+      ${fluxo}
+      <dl>
+        <dt>Grupo</dt>
+        <dd>${escaparHtml(r.grupo)}</dd>
+        <dt>Localizador ORIGEM</dt>
+        <dd>${escaparHtml(r.localizadorOrigem)}</dd>
+        <dt>Tipo de Controle / Critério</dt>
+        <dd>${r.criterioHtml || "<em>-</em>"}</dd>
+        <dt>Localizador DESTINO / Ação</dt>
+        <dd>${r.destinoAcaoHtml || "<em>-</em>"}</dd>
+        <dt>Outros Critérios</dt>
+        <dd>${r.outrosCriteriosHtml || "<em>Nenhum</em>"}</dd>
+      </dl>
+      ${links.length > 0 ? `<footer class="regra-links">${links.join("")}</footer>` : ""}
+    </article>`;
+    })
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8" />
+<title>Regras de automação ativas</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background:#f4f6f8; color:#222; margin:0; padding:24px; }
+  h1 { font-size:20px; color:#1c3d5a; margin:0 0 4px; }
+  .subtitulo { color:#666; font-size:13px; margin-bottom:20px; }
+  .regra { background:#fff; border:1px solid #d8dee4; border-radius:8px; padding:16px 20px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06); max-width:760px; }
+  .regra-cabecalho { display:flex; justify-content:space-between; align-items:baseline; border-bottom:2px solid #2c6ea6; padding-bottom:8px; margin-bottom:12px; }
+  .regra-numero { font-size:16px; font-weight:700; color:#1c3d5a; }
+  .regra-prioridade { font-size:12.5px; color:#2c6ea6; font-weight:600; }
+  .fluxo { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .fluxo-caixa { background:#f4f7fa; border:1px solid #c8d6e0; border-radius:6px; padding:7px 10px; font-size:12px; line-height:1.4; max-width:220px; }
+  .fluxo-caixa-titulo { font-size:9.5px; text-transform:uppercase; letter-spacing:0.03em; font-weight:700; color:#2c6ea6; margin-bottom:2px; }
+  .fluxo-origem { background:#eef1f5; border-color:#c3cdd6; }
+  .fluxo-criterio { background:#fff6e0; border-color:#f0d68a; }
+  .fluxo-criterio .fluxo-caixa-titulo { color:#8a6d00; }
+  .fluxo-destino { background:#e9f7ee; border-color:#a9dcb9; }
+  .fluxo-destino .fluxo-caixa-titulo { color:#1a7f37; }
+  .fluxo-acao { background:#eef1fd; border-color:#c2caf5; }
+  .fluxo-acao .fluxo-caixa-titulo { color:#3d4fc4; }
+  .fluxo-seta { font-size:16px; color:#9aa7b0; }
+  .fluxo-coluna { display:flex; flex-direction:column; gap:4px; }
+  .fluxo-extra { font-size:11px; color:#666; max-width:220px; }
+  .fluxo-badge { font-size:10px; color:#888; margin-top:2px; }
+  dl { margin:0; }
+  dt { font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; color:#888; font-weight:700; margin-top:10px; }
+  dt:first-child { margin-top:0; }
+  dd { margin:2px 0 0; font-size:13.5px; line-height:1.5; }
+  .regra-links { margin-top:12px; padding-top:10px; border-top:1px solid #eee; display:flex; gap:16px; }
+  .regra-links a { font-size:12.5px; color:#1a5fb4; text-decoration:none; }
+  .regra-links a:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+  <h1>Regras de automação ativas</h1>
+  <div class="subtitulo">${escaparHtml(tituloPagina)} — ${regras.length} regra(s) ativa(s) — gerado em ${new Date().toLocaleString("pt-BR")}</div>
+  ${cartoes}
+</body>
+</html>`;
+}
+
+// Orquestra tudo: abre a aba oculta, coleta as regras ativas e abre o
+// documento HTML numa aba nova. Reporta progresso pelo mesmo callback
+// usado no resto da extensao.
+async function exportarRegrasAutomacao(aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  notificar("Abrindo a tela de Automatizar Tramitação Processual...");
+  const { regras, tituloPagina, erro } = await abrirAbaEListarRegrasAutomacao(abaAtual.url);
+
+  if (erro) throw new Error(erro);
+  if (regras.length === 0) throw new Error("Nenhuma regra ativa encontrada.");
+
+  notificar("Gerando documento...");
+  const html = construirDocumentoRegras(regras, tituloPagina);
+  await chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(html) });
+
+  notificar("Finalizando...");
+  return { total: regras.length };
+}
+
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "BAIXAR_DOCUMENTOS") {
     const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false, mdUnico: false };
@@ -2317,6 +2530,29 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({
             tipo: "LOCALIZADORES_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_REGRAS_AUTOMACAO") {
+    // Mesmo padrao de EXPORTAR_LOCALIZADORES/GERAR_RELATORIO: navega uma
+    // aba oculta e demora alguns segundos, entao confirma o recebimento
+    // na hora e avisa o resultado final por uma mensagem separada.
+    exportarRegrasAutomacao((texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_REGRAS", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime.sendMessage({ tipo: "REGRAS_FINALIZADO", ok: true, resultado }).catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "REGRAS_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })
