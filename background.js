@@ -1836,8 +1836,14 @@ function raspaerLocalizadoresNaPagina() {
   // desabilitada quando ja' estamos nela, entao serve para detectar isso
   // e a exportacao precisa voltar para a pagina 1 antes de comecar a
   // coletar, senao perde os localizadores das paginas anteriores.
+  // Quando ha' poucos itens (menos que o tamanho de uma pagina), o eproc
+  // nem chega a desenhar os controles de paginacao - "Primeira Página"
+  // simplesmente nao existe no DOM. Sem essa lista nula, ela contava
+  // como "nao esta' na primeira pagina" (por engano) e a extensao ficava
+  // tentando clicar num link inexistente e esperando por uma mudanca de
+  // legenda que nunca acontece, ate' estourar o tempo.
   const liPrimeira = document.getElementById("lnkInfraPrimeiraPaginaSuperior");
-  const estaNaPrimeiraPagina = !!(liPrimeira && liPrimeira.classList.contains("disabled"));
+  const estaNaPrimeiraPagina = !liPrimeira || liPrimeira.classList.contains("disabled");
 
   return {
     itens,
@@ -1894,8 +1900,14 @@ function raspaerProcessosDoLocalizadorNaPagina() {
   const caption = tabela.querySelector("caption");
   const liProxima = document.getElementById("lnkInfraProximaPaginaSuperior");
   const temProxima = !!(liProxima && !liProxima.classList.contains("disabled"));
+  // Quando ha' poucos itens (menos que o tamanho de uma pagina), o eproc
+  // nem chega a desenhar os controles de paginacao - "Primeira Página"
+  // simplesmente nao existe no DOM. Sem essa lista nula, ela contava
+  // como "nao esta' na primeira pagina" (por engano) e a extensao ficava
+  // tentando clicar num link inexistente e esperando por uma mudanca de
+  // legenda que nunca acontece, ate' estourar o tempo.
   const liPrimeira = document.getElementById("lnkInfraPrimeiraPaginaSuperior");
-  const estaNaPrimeiraPagina = !!(liPrimeira && liPrimeira.classList.contains("disabled"));
+  const estaNaPrimeiraPagina = !liPrimeira || liPrimeira.classList.contains("disabled");
 
   return {
     itens,
