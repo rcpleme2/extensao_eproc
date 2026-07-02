@@ -149,15 +149,47 @@
     </h2>
 
     <div id="area-regras-info" class="status">
-      Abra a tela "Automatizar Tramitação Processual" do eproc para
-      habilitar a exportação.
+      Exporta as regras ativas de "Automatizar Tramitação Processual" em
+      segundo plano, sem precisar estar nessa tela.
     </div>
 
     <div class="botoes">
-      <button id="btn-exportar-regras" disabled>Exportar regras ativas</button>
+      <button id="btn-exportar-regras">Exportar regras ativas</button>
     </div>
 
     <div id="area-erros-regras" class="erros" hidden></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card-titulo">
+      <span class="card-icone" aria-hidden="true">🗂️</span>
+      Localizadores do Órgão
+    </h2>
+
+    <div id="area-localizadores-info" class="status">
+      Exporta a lista de Localizadores do Órgão (nome, descrição e total
+      de processos) em PDF e/ou planilha Excel, percorrendo todas as
+      páginas da listagem automaticamente.
+    </div>
+
+    <div class="opcoes">
+      <label class="opcao-radio">
+        <input type="checkbox" id="chk-localizadores-pdf" checked />
+        PDF
+      </label>
+      <label class="opcao-radio">
+        <input type="checkbox" id="chk-localizadores-excel" />
+        Planilha Excel
+      </label>
+      <button id="btn-exportar-localizadores">Exportar</button>
+    </div>
+
+    <div id="area-progresso-localizadores" class="progresso-relatorio" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="texto-progresso-localizadores"></span>
+    </div>
+
+    <div id="area-erros-localizadores" class="erros" hidden></div>
   </section>
 
   <div id="modal-escolha-relatorio" class="modal-overlay" hidden>

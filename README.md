@@ -384,20 +384,23 @@ relance: as colunas são estreitas e cada regra mistura critério, ação e
 outros filtros num texto corrido.
 
 O cartão **"Regras de Automação"** tem um botão **"Exportar regras
-ativas"**, habilitado automaticamente sempre que a aba ativa está nessa
-tela (reavaliado a cada troca de aba/navegação, já que o painel lateral
-permanece aberto). Ao clicar:
+ativas"**, sempre habilitado — não é preciso estar (nem navegar
+manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
 
-1. A extensão lê a tabela e filtra **apenas as regras ativas** (ignora as
-   marcadas como "** DESATIVADA **").
-2. Ordena as regras: se **alguma** regra ativa tiver uma prioridade
+1. A extensão abre uma aba oculta a partir da URL da aba atual e clica no
+   link "Automatizar Localizadores do Órgão" do menu lateral (menu
+   "Localizadores" → "Automatizar Localizadores do Órgão"), do mesmo jeito
+   já usado para "Localizadores do Órgão"/"Relatório Geral".
+2. Lê a tabela dessa aba oculta e filtra **apenas as regras ativas**
+   (ignora as marcadas como "** DESATIVADA **").
+3. Ordena as regras: se **alguma** regra ativa tiver uma prioridade
    numérica definida (ex.: "Executar 1º"), o relatório segue essa ordem de
    execução; regras sem prioridade não entram nessa comparação. Quando
    **nenhuma** regra ativa tem prioridade definida, a ordem cai para o
    número da regra. Regras sem prioridade aparecem como
    "[Sem prioridade definida]" em vez do rótulo "[ Prioridade ]" da
    própria página, que é mais confuso fora de contexto.
-3. Gera um documento HTML novo, com um "cartão" por regra ativa. Cada
+4. Gera um documento HTML novo, com um "cartão" por regra ativa. Cada
    cartão traz, no topo, um **fluxograma** (Origem → Critério → Destino →
    Ação automatizada, quando houver) para entender de relance o que
    aquela regra faz, e logo abaixo o detalhamento completo e legível:
@@ -407,9 +410,54 @@ permanece aberto). Ao clicar:
    juízo do processo, localizador adicional). O conteúdo detalhado é o
    mesmo da página original (nada é resumido ou omitido ali), só que
    reorganizado em blocos rotulados em vez da tabela apertada.
-4. Abre esse documento em uma **aba nova**, com um link de atalho em cada
-   cartão para editar aquela regra ou ver seu histórico diretamente no
-   eproc.
+5. Fecha a aba oculta e abre o documento em uma **aba nova visível**, com
+   um link de atalho em cada cartão para editar aquela regra ou ver seu
+   histórico diretamente no eproc.
+
+Se o link "Automatizar Localizadores do Órgão" não for encontrado na aba
+oculta (ex.: o rótulo do menu mudou), a extensão avisa exatamente qual
+link procurou — nesse caso, pode ser preciso regravar o script de acesso
+para confirmar o caminho atual do menu.
+
+## Localizadores do Órgão (exportar em PDF/Excel)
+
+O cartão **"Localizadores do Órgão"** exporta a lista completa de
+Localizadores do Órgão (tela `acao=localizador_orgao_listar` do eproc) em
+PDF e/ou planilha Excel, com três colunas: **Localizador** (nome), a
+**Descrição do Localizador** e o **Total de processos**.
+
+Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
+
+1. A extensão abre uma aba oculta a partir da URL da aba atual e clica no
+   link "Localizadores do Órgão" do menu lateral (funciona mesmo com o
+   submenu colapsado, já que o link já existe no DOM independente do
+   estado visual do menu).
+2. O eproc lembra a última página vista nessa listagem e reabre a tela
+   nela (não sempre na página 1) — antes de coletar, a extensão confere
+   se o botão "Primeira Página" está desabilitado (sinal de que já está
+   na página 1); se não estiver, clica nele e espera voltar, para nunca
+   perder os localizadores das páginas anteriores.
+3. Raspa a tabela da página atual e, enquanto o botão "Próxima Página"
+   estiver habilitado, clica nele e espera a página seguinte terminar de
+   carregar (detectado pela mudança no texto da legenda da tabela, ex.:
+   "1 a 50" → "51 a 100") antes de raspar a página seguinte — cobrindo
+   listas com qualquer quantidade de páginas. Cada raspagem/clique roda
+   como uma chamada independente e curta (nunca um laço assíncrono
+   contínuo dentro da própria página), para não quebrar com "Frame with
+   ID 0 was removed" caso a paginação dispare uma navegação de verdade em
+   vez de só atualizar a tabela via AJAX.
+4. Ordena os localizadores pelo **Total de processos** (do maior para o
+   menor) e gera os arquivos marcados em `Downloads/eproc/`:
+   - **PDF**: tabela paginada (A4 paisagem), com cabeçalho repetido em
+     cada página e as colunas de nome/descrição quebradas em várias
+     linhas quando o texto for longo, para nunca cortar conteúdo.
+   - **Excel**: arquivo `.xls` no formato nativo "Excel XML Spreadsheet"
+     (texto XML puro, sem precisar de nenhuma biblioteca de compressão
+     ZIP) — abre diretamente no Excel/LibreOffice como uma planilha
+     comum, sem aviso de formato incompatível.
+
+A aba oculta usada para navegar e coletar os dados é fechada
+automaticamente ao final, sem interferir na aba que você está usando.
 
 ## Abrir o painel a partir da própria página
 
