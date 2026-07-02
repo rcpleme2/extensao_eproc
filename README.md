@@ -115,31 +115,42 @@ elemento não encontrado), para facilitar o diagnóstico.
 ## MD único (texto e anonimizado)
 
 Ao escolher o modo "MD único", a extensão monta um único arquivo
-`<numero_do_processo>_completo_anonimizado.md` com:
+`<numero_do_processo>_completo_anonimizado.md` com a **movimentação
+processual e os documentos organizados juntos, evento por evento** — cada
+evento aparece com sua data/hora e descrição, seguido dos documentos que
+foram juntados naquele evento (na mesma numeração sequencial global de
+sempre: `#### 0001 — INIC1`, `#### 0002 — OUT2`, ...). Eventos sem nenhum
+documento anexado aparecem só com a descrição. Isso é incluído mesmo que
+o processo não tenha nenhum documento anexado (nesse caso, o arquivo sai
+só com a movimentação).
 
-1. A **movimentação processual** (data/hora e descrição de cada evento),
-   sempre a primeira seção do arquivo — incluída mesmo que o processo não
-   tenha nenhum documento anexado.
-2. O **texto** de cada documento do processo, na mesma ordem cronológica
-   da numeração sequencial, cada um em uma seção própria (`## 0001 —
-   INIC1`, `## 0002 — OUT2`, ...).
+```
+## Movimentação e documentos
+
+### Evento 1 — 02/07/2026 09:50:47 — Distribuído por sorteio (TOMUN01)
+
+#### 0001 — INIC1
+
+(texto do documento...)
+
+#### 0002 — BOC2
+
+(texto do documento...)
+
+### Evento 2 — 02/07/2026 09:50:47 — Autos incluídos no Juízo 100% Digital
+
+_Nenhum documento anexado a este evento._
+```
+
+Documentos cujo evento não pôde ser determinado (ou que não batem com
+nenhum evento realmente detectado na movimentação) aparecem por último,
+numa seção **"Documentos sem evento identificado"** — nenhum documento é
+descartado silenciosamente.
 
 Esse modo roda inteiramente **offline, sem OCR e sem nenhuma chamada de
 rede** além do próprio eproc.
 
 ### Movimentação processual
-
-A extensão lê a tabela de movimentação da própria página (número do
-evento, data/hora, descrição) e monta uma lista cronológica no topo do
-arquivo, com uma linha em branco entre cada movimento, por exemplo:
-
-```
-## Movimentação processual
-
-- **02/07/2026 09:50:47** — Evento 1: Distribuído por sorteio (TOMUN01)
-
-- **02/07/2026 09:50:47** — Evento 2: Autos incluídos no Juízo 100% Digital
-```
 
 A tabela de eventos é identificada pela estrutura confirmada numa página
 real do eproc: a tabela `#tblEventos`, com uma linha `<tr
@@ -178,7 +189,9 @@ completa") permite ajustar a detecção com precisão.
 - **HTML** (certidões, atos ordinatórios, mandados): reaproveita o mesmo
   mecanismo de aba oculta já usado nos outros modos para ler o texto real
   do documento (uma aba própria por documento, separada da aba
-  compartilhada dos PDFs).
+  compartilhada dos PDFs). Se a primeira tentativa não conseguir ler o
+  conteúdo a tempo (a página do eproc demora a preencher o documento via
+  AJAX), uma segunda tentativa é feita automaticamente, com uma aba nova.
 
 ### Anonimização (melhor esforço)
 
@@ -187,12 +200,14 @@ uma anonimização automática:
 
 - **CPF, CNPJ, telefone e e-mail**: identificados por padrão (regex) e
   substituídos por `[CPF removido]`, `[CNPJ removido]`, etc.
-- **Linhas com possível endereço**: qualquer *linha* contendo palavras
-  como "Rua", "Av.", "CEP", "Bairro" etc. é removida por inteiro e
-  substituída por `[linha com possível endereço removida]` - o texto de
-  PDF é reconstruído linha a linha (usando as quebras de linha reais do
-  próprio PDF), então isso afeta só a linha específica do endereço, não o
-  documento inteiro nem o parágrafo ao redor.
+- **Endereços**: ao encontrar uma palavra típica de endereço ("Rua", "Av",
+  "Rodovia", "Bairro", "CEP", ...), só o **trecho do endereço** é
+  substituído por `[endereço removido]` — do início reconhecido até um
+  CEP, um sufixo "/UF" (ex.: "/PR") ou uma quebra de parágrafo logo em
+  seguida, o que vier primeiro. O resto da frase/linha ao redor (nome de
+  quem mora lá, contexto, etc.) permanece intacto — diferente de versões
+  anteriores, que apagavam a linha inteira (e, em documentos PDF sem
+  quebras de linha bem definidas, chegavam a apagar a página toda).
 - **Nomes de pessoas**: sequências de 3 ou mais palavras em
   Maiúscula+minúscula (ex.: "Maria Aparecida Santos") são detectadas e
   abreviadas (ex.: "Maria A. Santos"), preservando primeiro e último

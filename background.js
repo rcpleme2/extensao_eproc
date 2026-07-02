@@ -149,7 +149,7 @@ function lerHtmlDivDochtml(tabId) {
 //
 // Retorna sempre { conteudo, erro }, nunca lanca excecao, para o chamador
 // poder relatar o motivo exato de uma falha em vez de so' "nao deu certo".
-async function abrirAbaEExtrairHtmlDivDochtml(url) {
+async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
   let tab;
   try {
     try {
@@ -181,6 +181,23 @@ async function abrirAbaEExtrairHtmlDivDochtml(url) {
       chrome.tabs.remove(tab.id).catch(() => {});
     }
   }
+}
+
+// Envolve "tentarAbrirAbaEExtrairHtmlDivDochtml" com uma segunda
+// tentativa (aba nova do zero) se a primeira falhar por timeout - um
+// documento especifico (ex.: um ato ordinatorio) as vezes demora mais
+// para a pagina do eproc preencher a div via AJAX do que os 18s da
+// primeira tentativa, mas funciona numa segunda tentativa.
+async function abrirAbaEExtrairHtmlDivDochtml(url) {
+  const primeira = await tentarAbrirAbaEExtrairHtmlDivDochtml(url);
+  if (primeira.conteudo) return primeira;
+
+  console.warn(
+    "[eproc-html]",
+    "Primeira tentativa falhou, tentando novamente com uma aba nova:",
+    primeira.erro
+  );
+  return tentarAbrirAbaEExtrairHtmlDivDochtml(url);
 }
 
 async function obterConteudoHtmlReal(url, nomeDocumento) {
@@ -588,7 +605,7 @@ const REGEX_EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
 const REGEX_CNPJ = /\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g;
 const REGEX_CPF = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
 const REGEX_TELEFONE = /\(?\b\d{2}\)?[\s-]?9?\d{4}-?\d{4}\b/g;
-const REGEX_CEP = /\b\d{5}-?\d{3}\b/;
+const REGEX_CEP = /\b\d{5}-?\d{3}\b/g;
 // "\b" nunca da' match logo apos um "." (ponto e o caractere seguinte,
 // tipicamente um espaco, sao os dois "nao-palavra" - no ponto de fronteira
 // de word boundary): "Av\.\b" ou "Apto\.?\b" simplesmente NUNCA batem
@@ -596,7 +613,50 @@ const REGEX_CEP = /\b\d{5}-?\d{3}\b/;
 // deveriam. Por isso as abreviacoes com ponto ficam sem o ponto no
 // padrao (so' "Av"/"Apto"): o "\b" ja' delimita a palavra corretamente
 // nesse caso (fronteira entre "v"/"o" e o proprio ponto, se houver).
-const REGEX_PALAVRA_ENDERECO = /\b(Rua|Av|Avenida|Alameda|Rodovia|Travessa|Pra[çc]a|Bairro|CEP|Logradouro|Quadra|Lote|Apto|Apartamento|Condom[íi]nio)\b/i;
+const REGEX_INICIO_ENDERECO = /\b(Rua|Av|Avenida|Alameda|Rodovia|Travessa|Pra[çc]a|Logradouro|Quadra|Lote|Apto|Apartamento|Condom[íi]nio)\b/gi;
+
+// Termina o trecho de endereco assim que encontrar um CEP, um sufixo
+// "/UF" (ex.: "/PR") ou uma quebra de paragrafo - o que vier primeiro
+// dentro da janela de busca. Pontos e ponto-e-virgula NAO servem de
+// terminador aqui: enderecos brasileiros sao cheios de abreviacoes com
+// ponto ("n.", "nº", "Av.", "R.") que fariam o corte parar quase
+// imediatamente, no meio do proprio inicio do endereco.
+const REGEX_TERMINADOR_ENDERECO = /\d{5}-?\d{3}|\/[A-Z]{2}\b|\n\s*\n/;
+const JANELA_MAXIMA_ENDERECO = 160;
+const LIMITE_SEM_TERMINADOR = 100;
+
+// Substitui so' o TRECHO do endereco (do inicio reconhecido - "Rua",
+// "Av", "CEP", etc. - ate' um terminador razoavel logo em seguida), nao a
+// linha/paragrafo inteiro. Isso e' importante porque o texto extraido de
+// PDF pode ter uma frase inteira numa unica "linha" (ex.: "em face de
+// FULANO, residente na Rua X, nº 123, Centro, Cidade/UF") - apagar a
+// linha toda destruiria a parte que nao e' endereco. Funciona mesmo
+// quando o endereco comeca perto do fim de uma linha e continua na
+// linha seguinte (quebra de linha no meio do endereco, comum em PDF).
+function redigirEnderecos(texto) {
+  let resultado = "";
+  let ultimoIndice = 0;
+  REGEX_INICIO_ENDERECO.lastIndex = 0;
+
+  let match;
+  while ((match = REGEX_INICIO_ENDERECO.exec(texto))) {
+    const inicio = match.index;
+    if (inicio < ultimoIndice) continue;
+
+    const janela = texto.slice(inicio, inicio + JANELA_MAXIMA_ENDERECO);
+    const terminador = janela.match(REGEX_TERMINADOR_ENDERECO);
+    const fim = terminador
+      ? inicio + terminador.index + terminador[0].length
+      : inicio + Math.min(LIMITE_SEM_TERMINADOR, janela.length);
+
+    resultado += texto.slice(ultimoIndice, inicio) + "[endereço removido]";
+    ultimoIndice = fim;
+    REGEX_INICIO_ENDERECO.lastIndex = fim;
+  }
+
+  resultado += texto.slice(ultimoIndice);
+  return resultado;
+}
 
 // Frases institucionais comuns que o heuristico de nomes (Maiuscula +
 // minuscula, 3+ palavras) acertaria por engano - excluidas explicitamente.
@@ -648,15 +708,15 @@ function anonimizarTexto(texto) {
   resultado = resultado.replace(REGEX_CPF, "[CPF removido]");
   resultado = resultado.replace(REGEX_TELEFONE, "[telefone removido]");
 
-  resultado = resultado
-    .split("\n")
-    .map((linha) => {
-      if (REGEX_PALAVRA_ENDERECO.test(linha) || REGEX_CEP.test(linha)) {
-        return "[linha com possível endereço removida]";
-      }
-      return linha;
-    })
-    .join("\n");
+  // Endereco antes do heuristico de nomes: sem isso, um nome de rua tipo
+  // "Rua Conselheiro Antônio Alves Vieira" sobrevivia parcialmente (por
+  // nao ter CEP/UF logo ali) e depois era confundido pelo heuristico de
+  // nomes, saindo abreviado como se fosse o nome de uma pessoa.
+  resultado = redigirEnderecos(resultado);
+
+  // CEP que sobrar solto (sem um inicio de endereco reconhecido por
+  // perto) ainda e' removido, so' que sozinho - nao a linha inteira.
+  resultado = resultado.replace(REGEX_CEP, "[CEP removido]");
 
   resultado = resultado.replace(REGEX_NOME_PROVAVEL, (trecho) => {
     if (FRASES_NAO_SAO_NOMES.some((frase) => trecho.includes(frase))) return trecho;
@@ -671,10 +731,14 @@ function anonimizarTexto(texto) {
 // anexo, e inclusa mesmo que o processo nao tenha nenhum documento
 // anexado. "movimentacao" vem do "listarMovimentacaoProcessual()" do
 // content.js (deteccao best-effort, ver comentario la').
+// So' usada quando NENHUMA movimentação foi detectada na página (ver
+// "listarMovimentacaoProcessual" em content.js) - nesse caso os
+// documentos, se houver algum, entram todos no grupo "sem evento
+// identificado" de "construirMdUnico".
 function construirSecaoMovimentacao(movimentacao) {
   if (!movimentacao || movimentacao.length === 0) {
     return (
-      "## Movimentação processual\n\n" +
+      "### Movimentação processual\n\n" +
       "_Não foi possível localizar a tabela de movimentação nesta página " +
       "(ou o processo não possui movimentações registradas)._\n"
     );
@@ -686,17 +750,46 @@ function construirSecaoMovimentacao(movimentacao) {
   });
 
   return (
-    "## Movimentação processual\n\n" +
+    "### Movimentação processual\n\n" +
     "> Detecção automática (melhor esforço) da tabela de movimentação da página - confira contra a tela do eproc.\n\n" +
     `${linhas.join("\n\n")}\n`
   );
 }
 
+// Agrupa os documentos pelo numero do evento a que pertencem (ja'
+// detectado em content.js, mesmo campo usado para a numeracao
+// sequencial). Documentos cujo evento e' desconhecido, OU cujo numero
+// nao bate com nenhum evento realmente detectado na movimentacao (ex.:
+// a deteccao de movimentacao falhou nesse tribunal), caem num grupo
+// avulso - nenhum documento e' descartado silenciosamente.
+function agruparDocumentosPorEvento(documentos, movimentacao) {
+  const porEvento = new Map();
+  for (const doc of documentos) {
+    const chave = doc.evento != null ? doc.evento : null;
+    if (!porEvento.has(chave)) porEvento.set(chave, []);
+    porEvento.get(chave).push(doc);
+  }
+
+  const eventosDetectados = new Set(
+    (movimentacao || []).map((e) => e.numeroEvento).filter((n) => n != null)
+  );
+
+  const semEvento = [];
+  for (const [chave, docs] of Array.from(porEvento.entries())) {
+    if (chave == null || !eventosDetectados.has(chave)) {
+      semEvento.push(...docs);
+      porEvento.delete(chave);
+    }
+  }
+
+  return { porEvento, semEvento };
+}
+
 async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProcesso, movimentacao, aoProgredir) {
   console.log(LOG_MD, "Iniciando MD único.", documentos.length, "documento(s),", (movimentacao || []).length, "evento(s) de movimentação.");
 
-  const secoes = [construirSecaoMovimentacao(movimentacao)];
   const avisos = [];
+  const secoesEventos = [];
 
   // A aba de processamento de PDF so' e' aberta se houver pelo menos um
   // PDF entre os documentos - processos so' com HTML/imagens nao
@@ -707,44 +800,80 @@ async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProces
     abaPdf = await prepararAbaProcessamentoPdfMd(origemEproc);
   }
 
-  try {
-    for (let i = 0; i < documentos.length; i += 1) {
-      const doc = documentos[i];
-      const numero = String(i + 1).padStart(4, "0");
-      let corpo;
-      console.log(LOG_MD, `[${i + 1}/${documentos.length}]`, doc.nome, `(${doc.mimetype})`);
-      if (aoProgredir) aoProgredir(i, documentos.length, doc.nome);
+  const total = documentos.length;
+  let concluidos = 0;
 
-      try {
-        const urlReal = await resolverUrl(doc);
+  // Processa e devolve o markdown de UM documento (numeracao sequencial
+  // global, na ordem em que os documentos vao sendo processados - a
+  // mesma ordem cronologica de sempre, so' que agora agrupados por
+  // evento em vez de uma lista unica).
+  async function processarUmDocumento(doc) {
+    const numero = String(concluidos + 1).padStart(4, "0");
+    console.log(LOG_MD, `[${concluidos + 1}/${total}]`, doc.nome, `(${doc.mimetype})`);
+    if (aoProgredir) aoProgredir(concluidos, total, doc.nome);
 
-        if (doc.mimetype === "html") {
-          const { texto, erro } = await obterTextoHtmlReal(urlReal);
-          if (texto) {
-            corpo = texto;
-          } else {
-            console.warn(LOG_MD, "Falha ao extrair HTML de", doc.nome, ":", erro);
-            corpo = `_Não foi possível extrair o conteúdo deste documento (${erro || "motivo desconhecido"})._`;
-            avisos.push(`${doc.nome}: ${erro || "motivo desconhecido"}`);
-          }
+    let corpo;
+    try {
+      const urlReal = await resolverUrl(doc);
+
+      if (doc.mimetype === "html") {
+        const { texto, erro } = await obterTextoHtmlReal(urlReal);
+        if (texto) {
+          corpo = texto;
         } else {
-          const resultado = await extrairTextoDocumentoMd(abaPdf && abaPdf.id, urlReal, doc.mimetype, doc.nome);
-          if (resultado.erro && !resultado.texto) {
-            console.warn(LOG_MD, "Falha ao extrair texto de", doc.nome, ":", resultado.erro);
-            corpo = `_Não foi possível extrair o texto deste documento (${resultado.erro})._`;
-            avisos.push(`${doc.nome}: ${resultado.erro}`);
-          } else {
-            corpo = resultado.texto || "_(sem texto identificado)_";
+          console.warn(LOG_MD, "Falha ao extrair HTML de", doc.nome, ":", erro);
+          corpo = `_Não foi possível extrair o conteúdo deste documento (${erro || "motivo desconhecido"})._`;
+          avisos.push(`${doc.nome}: ${erro || "motivo desconhecido"}`);
+        }
+      } else {
+        const resultado = await extrairTextoDocumentoMd(abaPdf && abaPdf.id, urlReal, doc.mimetype, doc.nome);
+        if (resultado.erro && !resultado.texto) {
+          console.warn(LOG_MD, "Falha ao extrair texto de", doc.nome, ":", resultado.erro);
+          corpo = `_Não foi possível extrair o texto deste documento (${resultado.erro})._`;
+          avisos.push(`${doc.nome}: ${resultado.erro}`);
+        } else {
+          corpo = resultado.texto || "_(sem texto identificado)_";
+        }
+      }
+    } catch (e) {
+      console.error(LOG_MD, "Erro processando", doc.nome, ":", e);
+      corpo = `_Não foi possível processar este documento (${String(e)})._`;
+      avisos.push(`${doc.nome}: ${String(e)}`);
+    }
+
+    concluidos += 1;
+    if (aoProgredir) aoProgredir(concluidos, total, doc.nome);
+    return `#### ${numero} — ${doc.nome}\n\n${corpo.trim()}\n`;
+  }
+
+  try {
+    const { porEvento, semEvento } = agruparDocumentosPorEvento(documentos, movimentacao);
+
+    if (movimentacao && movimentacao.length > 0) {
+      for (const evento of movimentacao) {
+        const rotuloEvento = evento.numeroEvento != null ? `Evento ${evento.numeroEvento}` : "Evento";
+        const linhas = [`### ${rotuloEvento} — ${evento.dataHora} — ${evento.descricao || "(sem descrição)"}`, ""];
+
+        const docsDoEvento = evento.numeroEvento != null ? porEvento.get(evento.numeroEvento) || [] : [];
+        if (docsDoEvento.length === 0) {
+          linhas.push("_Nenhum documento anexado a este evento._");
+        } else {
+          for (const doc of docsDoEvento) {
+            linhas.push(await processarUmDocumento(doc));
           }
         }
-      } catch (e) {
-        console.error(LOG_MD, "Erro processando", doc.nome, ":", e);
-        corpo = `_Não foi possível processar este documento (${String(e)})._`;
-        avisos.push(`${doc.nome}: ${String(e)}`);
+        secoesEventos.push(linhas.join("\n"));
       }
+    } else {
+      secoesEventos.push(construirSecaoMovimentacao(movimentacao));
+    }
 
-      secoes.push(`## ${numero} — ${doc.nome}\n\n${corpo.trim()}\n`);
-      if (aoProgredir) aoProgredir(i + 1, documentos.length, doc.nome);
+    if (semEvento.length > 0) {
+      const linhas = ["### Documentos sem evento identificado", ""];
+      for (const doc of semEvento) {
+        linhas.push(await processarUmDocumento(doc));
+      }
+      secoesEventos.push(linhas.join("\n"));
     }
   } finally {
     if (abaPdf) {
@@ -772,7 +901,9 @@ async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProces
     );
   }
 
-  const corpoCompleto = anonimizarTexto([...cabecalho, ...secoes].join("\n"));
+  cabecalho.push("## Movimentação e documentos", "");
+
+  const corpoCompleto = anonimizarTexto([...cabecalho, ...secoesEventos].join("\n\n"));
 
   const nomeArquivo = `${pastaBase}/${sanitizarNomeArquivo(numeroProcesso)}_completo_anonimizado.md`;
   console.log(LOG_MD, "Baixando arquivo final:", nomeArquivo, `(${corpoCompleto.length} caractere(s))`);
