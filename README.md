@@ -1,10 +1,11 @@
-# eproc - Exportador de Documentos
+# Extensão Auxiliar eProc
 
-Extensão para Chrome/Edge que identifica e baixa em lote todos os documentos
-de um processo no sistema **eproc** (usado por diversos tribunais brasileiros:
-TJPR, TJSC, TJAL, Justiça Federal, etc.).
+Extensão para Chrome/Edge com duas funcionalidades para o sistema **eproc**
+(usado por diversos tribunais brasileiros: TJPR, TJSC, TJAL, Justiça Federal,
+etc.), organizadas em dois cartões separados no painel: **Exportar
+Documentos** e **Relatórios**.
 
-## O que ela faz
+## Exportar Documentos
 
 Na página de detalhes de um processo no eproc, cada documento (`INIC1`,
 `CALC3`, `OUT2`, `ATOORD1`, `CERT1`, `MANDCITACAO1`, ...) é um link que hoje

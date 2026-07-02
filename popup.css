@@ -12,16 +12,57 @@
 
 body {
   font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  min-width: 280px;
+  min-width: 300px;
   padding: 12px;
   font-size: 13px;
   color: #222;
+  background: #f4f6f8;
   box-sizing: border-box;
 }
 
-h1 {
-  font-size: 14px;
+.cabecalho-app {
+  margin-bottom: 12px;
+}
+
+.cabecalho-app h1 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  color: #1c3d5a;
+}
+
+/* Cada secao principal (Exportar Documentos / Relatorios) fica dentro de
+   um cartao proprio, com cabecalho destacado, para deixar clara a
+   separacao entre as duas funcionalidades da extensao. */
+.card {
+  background: #fff;
+  border: 1px solid #dfe4e8;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.card:last-child {
+  margin-bottom: 0;
+}
+
+.card-titulo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #2c6ea6;
   margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eaeef1;
+}
+
+.card-icone {
+  font-size: 15px;
 }
 
 .status {
@@ -126,26 +167,12 @@ progress {
   color: #a33;
 }
 
-.separador {
-  border: none;
-  border-top: 1px solid #e0e0e0;
-  margin: 16px 0;
-}
-
 .relatorio {
   margin-top: 10px;
-  background: #f0f8f2;
-  border: 1px solid #cfe8d6;
-  border-radius: 4px;
-  padding: 8px;
-}
-
-.relatorio div {
-  padding: 2px 0;
 }
 
 .aviso-urgencia {
-  margin-top: 6px;
+  margin-top: 8px;
   padding: 6px;
   background: #fff8e1;
   border: 1px solid #f0d98c;
@@ -187,4 +214,39 @@ progress {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Tabela de resultados do relatorio: uma linha por situacao, uma coluna
+   por metrica - bem mais facil de ler de relance do que a frase corrida
+   usada antes ("Conclusos para despacho: N (urgentes: N, +30 dias: N)"). */
+.tabela-relatorio {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.tabela-relatorio th,
+.tabela-relatorio td {
+  padding: 6px 8px;
+  text-align: center;
+  border: 1px solid #e0e0e0;
+}
+
+.tabela-relatorio thead th {
+  background: #eef3f7;
+  color: #45596b;
+  font-weight: 600;
+}
+
+.tabela-relatorio tbody th {
+  text-align: left;
+  background: #f9fafb;
+  font-weight: 600;
+  color: #333;
+}
+
+.tabela-relatorio tbody td {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #1c3d5a;
 }

@@ -2,79 +2,111 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8" />
-  <title>eproc - Exportador de Documentos</title>
+  <title>Extensão Auxiliar eProc</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <h1>Exportador de Documentos - eproc</h1>
+  <header class="cabecalho-app">
+    <h1>Extensão Auxiliar eProc</h1>
+  </header>
 
-  <div id="area-status" class="status">
-    Abra a pagina de detalhes de um processo no eproc e clique em
-    "Detectar documentos".
-  </div>
+  <section class="card">
+    <h2 class="card-titulo">
+      <span class="card-icone" aria-hidden="true">📄</span>
+      Exportar Documentos
+    </h2>
 
-  <div class="botoes">
-    <button id="btn-detectar">Detectar documentos</button>
-  </div>
-
-  <div id="area-processo" class="processo" hidden>
-    Processo: <strong id="numero-processo"></strong>
-    (<span id="total-documentos"></span> documento(s))
-  </div>
-
-  <div id="area-opcoes" class="opcoes" hidden>
-    <label class="opcao-radio">
-      <input type="radio" name="modo-exportacao" id="radio-individuais" checked />
-      Arquivos individuais
-    </label>
-    <label class="opcao-radio">
-      <input type="radio" name="modo-exportacao" id="radio-pdf-unico" />
-      PDF único combinado
-    </label>
-    <button id="btn-baixar" disabled>Baixar</button>
-  </div>
-
-  <div id="area-progresso" class="progresso" hidden>
-    <progress id="barra-progresso" value="0" max="100"></progress>
-    <span id="texto-progresso"></span>
-  </div>
-
-  <ul id="lista-documentos" class="lista-documentos"></ul>
-
-  <div id="area-erros" class="erros" hidden></div>
-
-  <hr class="separador" />
-
-  <h1>Relatório Geral</h1>
-  <div class="botoes">
-    <button id="btn-relatorios">Relatórios</button>
-    <button
-      id="btn-abrir-tela-relatorio"
-      class="btn-icone"
-      title="Abrir a tela do Relatório Geral nesta aba"
-      aria-label="Abrir a tela do Relatório Geral nesta aba"
-    >↗</button>
-  </div>
-  <div id="area-relatorio-info" class="status">
-    Aperte o botão para gerar relatórios pré-configurados.
-  </div>
-  <div id="area-progresso-relatorio" class="progresso-relatorio" hidden>
-    <span class="spinner" aria-hidden="true"></span>
-    <span id="texto-progresso-relatorio"></span>
-  </div>
-  <div id="area-relatorio" class="relatorio" hidden>
-    <div>
-      Conclusos para despacho: <strong id="valor-despacho"></strong>
-      (urgentes: <strong id="valor-despacho-urgentes"></strong>,
-      +30 dias: <strong id="valor-despacho-mais30dias"></strong>)
+    <div id="area-status" class="status">
+      Abra a página de detalhes de um processo no eproc e clique em
+      "Detectar documentos".
     </div>
-    <div>
-      Conclusos para sentença: <strong id="valor-sentenca"></strong>
-      (urgentes: <strong id="valor-sentenca-urgentes"></strong>,
-      +30 dias: <strong id="valor-sentenca-mais30dias"></strong>)
+
+    <div class="botoes">
+      <button id="btn-detectar">Detectar documentos</button>
     </div>
-    <div id="aviso-urgencia" class="aviso-urgencia" hidden></div>
-  </div>
+
+    <div id="area-processo" class="processo" hidden>
+      Processo: <strong id="numero-processo"></strong>
+      (<span id="total-documentos"></span> documento(s))
+    </div>
+
+    <div id="area-opcoes" class="opcoes" hidden>
+      <label class="opcao-radio">
+        <input type="radio" name="modo-exportacao" id="radio-individuais" checked />
+        Arquivos individuais
+      </label>
+      <label class="opcao-radio">
+        <input type="radio" name="modo-exportacao" id="radio-pdf-unico" />
+        PDF único combinado
+      </label>
+      <button id="btn-baixar" disabled>Baixar</button>
+    </div>
+
+    <div id="area-progresso" class="progresso" hidden>
+      <progress id="barra-progresso" value="0" max="100"></progress>
+      <span id="texto-progresso"></span>
+    </div>
+
+    <ul id="lista-documentos" class="lista-documentos" hidden></ul>
+
+    <div id="area-erros" class="erros" hidden></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card-titulo">
+      <span class="card-icone" aria-hidden="true">📊</span>
+      Relatórios
+    </h2>
+
+    <div id="area-relatorio-info" class="status">
+      Aperte o botão para gerar relatórios pré-configurados.
+    </div>
+
+    <div class="botoes">
+      <button id="btn-relatorios">Gerar relatório</button>
+      <button
+        id="btn-abrir-tela-relatorio"
+        class="btn-icone"
+        title="Abrir a tela do Relatório Geral nesta aba"
+        aria-label="Abrir a tela do Relatório Geral nesta aba"
+      >↗</button>
+    </div>
+
+    <div id="area-progresso-relatorio" class="progresso-relatorio" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="texto-progresso-relatorio"></span>
+    </div>
+
+    <div id="area-relatorio" class="relatorio" hidden>
+      <table class="tabela-relatorio">
+        <thead>
+          <tr>
+            <th scope="col">Situação</th>
+            <th scope="col">Total</th>
+            <th scope="col">Urgentes</th>
+            <th scope="col">+30 dias</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Despacho</th>
+            <td id="valor-despacho"></td>
+            <td id="valor-despacho-urgentes"></td>
+            <td id="valor-despacho-mais30dias"></td>
+          </tr>
+          <tr>
+            <th scope="row">Sentença</th>
+            <td id="valor-sentenca"></td>
+            <td id="valor-sentenca-urgentes"></td>
+            <td id="valor-sentenca-mais30dias"></td>
+          </tr>
+        </tbody>
+      </table>
+      <div id="aviso-urgencia" class="aviso-urgencia" hidden></div>
+    </div>
+
+    <div id="area-erros-relatorio" class="erros" hidden></div>
+  </section>
 
   <script src="popup.js"></script>
 </body>

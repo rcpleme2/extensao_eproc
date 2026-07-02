@@ -65,6 +65,7 @@ btnDetectar.addEventListener("click", async () => {
       atualizarEstadoBotaoBaixar();
       areaProcesso.hidden = true;
       areaOpcoes.hidden = true;
+      listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
       return;
     }
@@ -74,6 +75,7 @@ btnDetectar.addEventListener("click", async () => {
     totalDocumentosEl.textContent = String(resposta.documentos.length);
     areaProcesso.hidden = false;
     areaOpcoes.hidden = false;
+    listaDocumentosEl.hidden = false;
     renderizarLista(resposta.documentos);
     atualizarEstadoBotaoBaixar();
     setStatus("Documentos detectados. Escolha o que baixar e clique em \"Baixar\".");
@@ -110,6 +112,7 @@ btnBaixar.addEventListener("click", async () => {
   });
 });
 
+const areaRelatorioInfo = document.getElementById("area-relatorio-info");
 const btnRelatorios = document.getElementById("btn-relatorios");
 const btnAbrirTelaRelatorio = document.getElementById("btn-abrir-tela-relatorio");
 const areaRelatorio = document.getElementById("area-relatorio");
@@ -122,6 +125,14 @@ const valorSentencaMais30DiasEl = document.getElementById("valor-sentenca-mais30
 const avisoUrgenciaEl = document.getElementById("aviso-urgencia");
 const areaProgressoRelatorio = document.getElementById("area-progresso-relatorio");
 const textoProgressoRelatorio = document.getElementById("texto-progresso-relatorio");
+const areaErrosRelatorio = document.getElementById("area-erros-relatorio");
+
+// Cada cartao (Exportar Documentos / Relatórios) tem sua propria area de
+// status e de erros - mante-los separados evita que uma acao numa secao
+// sobrescreva a mensagem que o usuario estava vendo na outra.
+function setStatusRelatorio(texto) {
+  areaRelatorioInfo.textContent = texto;
+}
 
 function formatarContagem(valor) {
   return valor === null || valor === undefined ? "?" : String(valor);
@@ -130,11 +141,11 @@ function formatarContagem(valor) {
 btnRelatorios.addEventListener("click", async () => {
   btnRelatorios.disabled = true;
   btnAbrirTelaRelatorio.disabled = true;
-  areaErros.hidden = true;
+  areaErrosRelatorio.hidden = true;
   areaRelatorio.hidden = true;
   areaProgressoRelatorio.hidden = false;
   textoProgressoRelatorio.textContent = "Iniciando...";
-  setStatus("Gerando relatório em segundo plano (sua aba atual não é alterada)...");
+  setStatusRelatorio("Gerando relatório em segundo plano (sua aba atual não é alterada)...");
 
   // So' confirma que o processamento comecou (resposta imediata do
   // background); o resultado final chega depois via a mensagem
@@ -148,9 +159,9 @@ btnRelatorios.addEventListener("click", async () => {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar o relatório.");
     }
   } catch (e) {
-    setStatus("Erro ao iniciar o relatório.");
-    areaErros.hidden = false;
-    areaErros.textContent = e && e.message ? e.message : String(e);
+    setStatusRelatorio("Erro ao iniciar o relatório.");
+    areaErrosRelatorio.hidden = false;
+    areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
     areaProgressoRelatorio.hidden = true;
     btnRelatorios.disabled = false;
     btnAbrirTelaRelatorio.disabled = false;
@@ -159,19 +170,19 @@ btnRelatorios.addEventListener("click", async () => {
 
 btnAbrirTelaRelatorio.addEventListener("click", async () => {
   btnAbrirTelaRelatorio.disabled = true;
-  areaErros.hidden = true;
-  setStatus("Abrindo a tela do Relatório Geral nesta aba...");
+  areaErrosRelatorio.hidden = true;
+  setStatusRelatorio("Abrindo a tela do Relatório Geral nesta aba...");
 
   try {
     const resposta = await chrome.runtime.sendMessage({ tipo: "ABRIR_TELA_RELATORIO" });
     if (!resposta || !resposta.ok) {
       throw new Error((resposta && resposta.erro) || "Falha ao abrir a tela do relatório.");
     }
-    setStatus("Tela do Relatório Geral aberta nesta aba.");
+    setStatusRelatorio("Tela do Relatório Geral aberta nesta aba.");
   } catch (e) {
-    setStatus("Erro ao abrir a tela do relatório.");
-    areaErros.hidden = false;
-    areaErros.textContent = e && e.message ? e.message : String(e);
+    setStatusRelatorio("Erro ao abrir a tela do relatório.");
+    areaErrosRelatorio.hidden = false;
+    areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
   } finally {
     btnAbrirTelaRelatorio.disabled = false;
   }
@@ -205,7 +216,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
   if (mensagem.tipo === "PROGRESSO_RELATORIO") {
     textoProgressoRelatorio.textContent = mensagem.texto || "Processando...";
-    setStatus(mensagem.texto || "Processando...");
+    setStatusRelatorio(mensagem.texto || "Processando...");
   }
 
   if (mensagem.tipo === "RELATORIO_FINALIZADO") {
@@ -236,11 +247,11 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         avisoUrgenciaEl.hidden = true;
       }
 
-      setStatus("Relatório gerado com sucesso.");
+      setStatusRelatorio("Relatório gerado com sucesso.");
     } else {
-      setStatus("Erro ao gerar o relatório.");
-      areaErros.hidden = false;
-      areaErros.textContent = mensagem.erro || "Falha desconhecida ao gerar o relatório.";
+      setStatusRelatorio("Erro ao gerar o relatório.");
+      areaErrosRelatorio.hidden = false;
+      areaErrosRelatorio.textContent = mensagem.erro || "Falha desconhecida ao gerar o relatório.";
     }
   }
 });
