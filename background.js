@@ -932,20 +932,64 @@ function resolverParametrosConsulta(categoria, situacao, filtro) {
   return { valorSituacao, urgente: false, diasSituacao: null };
 }
 
+// Nome amigavel do arquivo Excel exportado, baseado na categoria/situacao/
+// filtro escolhidos, para o download sair identificado (em vez do nome
+// generico que o DataTables Buttons usa por padrao).
+function nomeArquivoRelatorio(categoria, situacao, filtro) {
+  if (categoria === "semMovimentacao") {
+    return `relatorio_sem_movimentacao_${filtro}dias`;
+  }
+  const nomeSituacao = situacao === "sentenca" ? "sentenca" : "despacho";
+  const nomeFiltro =
+    filtro === "urgentes" ? "urgentes" : filtro === "mais30Dias" ? "mais30dias" : "total";
+  return `relatorio_${nomeSituacao}_${nomeFiltro}`;
+}
+
+// Renomeia o PROXIMO download que comecar (dentro de um prazo curto) para
+// "eproc/<nomeArquivo><extensao original>", preservando a extensao que o
+// eproc gerou (normalmente .xlsx). Usado logo antes de disparar a
+// exportacao Excel, ja que o nome que o DataTables Buttons da ao arquivo
+// nao identifica qual relatorio/filtro gerou aquela planilha.
+function aguardarERenomearProximoDownload(nomeArquivo) {
+  return new Promise((resolve) => {
+    let finalizado = false;
+    const finalizar = (sucesso) => {
+      if (finalizado) return;
+      finalizado = true;
+      chrome.downloads.onDeterminingFilename.removeListener(listener);
+      resolve(sucesso);
+    };
+    const timeoutId = setTimeout(() => finalizar(false), 15000);
+    function listener(downloadItem, suggest) {
+      clearTimeout(timeoutId);
+      const extensaoOriginal = (downloadItem.filename.match(/\.[^.]+$/) || [".xlsx"])[0];
+      suggest({ filename: `eproc/${nomeArquivo}${extensaoOriginal}` });
+      finalizar(true);
+    }
+    chrome.downloads.onDeterminingFilename.addListener(listener);
+  });
+}
+
 // Clicando num numero do relatorio (ex.: "Conclusos para despacho: 11"):
-// navega a aba ATUAL e visivel ate' o Relatório Geral e deixa ele ja'
-// consultado com o mesmo filtro daquele numero, para o usuario conferir
-// a lista de processos por tras dele. Diferente de "gerarRelatorioGeral"
-// (que roda tudo em abas ocultas descartaveis), aqui o objetivo e'
-// exatamente mostrar o resultado na tela, entao usa a aba visivel e nao
-// a fecha no final.
+// abre uma aba NOVA (em primeiro plano, para o usuario poder acompanhar),
+// navega ate' o Relatório Geral e deixa ele ja' consultado com o mesmo
+// filtro daquele numero, para o usuario conferir a lista de processos por
+// tras dele - opcionalmente exportando a planilha Excel tambem. A aba
+// ATUAL/principal (de onde o clique partiu) nunca e' navegada nem
+// alterada: so' serve para saber a URL base do eproc a reabrir na aba
+// nova. Essa aba nova permanece aberta ao final (nao e' fechada), ja que
+// o objetivo e' mostrar o resultado (ou o download) para o usuario.
 async function abrirRelatorioPreenchido(categoria, situacao, filtro, exportarExcel) {
   const parametros = resolverParametrosConsulta(categoria, situacao, filtro);
 
-  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!aba || !aba.id) {
+  const [abaOrigem] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaOrigem || !abaOrigem.url) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
+
+  const aba = await chrome.tabs.create({ url: abaOrigem.url, active: true });
+  await aguardarCarregamentoAba(aba.id);
+  await new Promise((resolve) => setTimeout(resolve, 500));
 
   const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
     target: { tabId: aba.id },
@@ -974,6 +1018,9 @@ async function abrirRelatorioPreenchido(categoria, situacao, filtro, exportarExc
   }
 
   if (exportarExcel) {
+    const nomeArquivo = nomeArquivoRelatorio(categoria, situacao, filtro);
+    const promessaRenomeio = aguardarERenomearProximoDownload(nomeArquivo);
+
     const [{ result: resultadoExcel } = {}] = await chrome.scripting.executeScript({
       target: { tabId: aba.id },
       func: exportarExcelNaPagina,
@@ -982,6 +1029,8 @@ async function abrirRelatorioPreenchido(categoria, situacao, filtro, exportarExc
     if (resultadoExcel && resultadoExcel.erro) {
       throw new Error(resultadoExcel.erro);
     }
+
+    await promessaRenomeio;
   }
 }
 

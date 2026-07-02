@@ -162,20 +162,25 @@ Todos os números das duas tabelas — os 6 de Total/Urgentes/+30 dias ×
 Despacho/Sentença e os 3 do demonstrativo de sem movimentação (30/90/120
 dias) — são clicáveis. Ao clicar, a extensão pergunta o que fazer:
 
-- **Abrir relatório**: a **aba atual e visível** navega até o Relatório
-  Geral já com a mesma situação (ou, no caso de "sem movimentação", sem
-  nenhuma situação) e o mesmo filtro daquele número selecionados, e a
-  consulta já executada, mostrando a lista de processos por trás dele —
-  útil para conferir exatamente quais processos compõem aquela contagem.
-- **Exportar planilha (Excel)**: faz a mesma navegação/consulta acima e,
-  em seguida, clica automaticamente no botão "Exportar" da tabela de
-  resultados e na opção "Excel", disparando o download da planilha que o
-  próprio eproc gera para aquele filtro exato.
+- **Abrir relatório**: abre uma **aba nova**, em primeiro plano, que
+  navega até o Relatório Geral já com a mesma situação (ou, no caso de
+  "sem movimentação", sem nenhuma situação) e o mesmo filtro daquele
+  número selecionados, e a consulta já executada, mostrando a lista de
+  processos por trás dele — útil para conferir exatamente quais processos
+  compõem aquela contagem.
+- **Exportar planilha (Excel)**: faz a mesma navegação/consulta acima
+  (também numa aba nova) e, em seguida, clica automaticamente no botão
+  "Exportar" da tabela de resultados e na opção "Excel", disparando o
+  download da planilha que o próprio eproc gera para aquele filtro exato.
+  O arquivo baixado é renomeado automaticamente para identificar o
+  relatório de origem, ex.: `relatorio_despacho_urgentes.xlsx`,
+  `relatorio_sentenca_mais30dias.xlsx`,
+  `relatorio_sem_movimentacao_90dias.xlsx`.
 
-Diferente da geração do relatório (que roda em abas ocultas descartáveis
-para não incomodar quem está navegando), aqui o objetivo é justamente
-mostrar o resultado (ou gerar a planilha) na tela, então a aba usada é a
-que já está aberta e visível, e ela permanece aberta ao final.
+A aba onde você estava trabalhando **nunca é navegada nem alterada** —
+essa aba nova é aberta à parte (usando a mesma URL base do eproc só para
+saber onde entrar) e permanece aberta ao final, para você ver o resultado
+ou conferir o download.
 
 O botão funciona a partir de qualquer página do eproc que tenha o menu
 lateral visível (não precisa estar na tela de um processo

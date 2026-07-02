@@ -199,8 +199,8 @@ async function executarAberturaRelatorio(pedido, exportarExcel) {
   areaErrosRelatorio.hidden = true;
   setStatusRelatorio(
     exportarExcel
-      ? "Abrindo o relatório e exportando a planilha nesta aba..."
-      : "Abrindo o relatório detalhado nesta aba..."
+      ? "Abrindo o relatório e exportando a planilha em uma nova aba (sua aba atual não é alterada)..."
+      : "Abrindo o relatório detalhado em uma nova aba (sua aba atual não é alterada)..."
   );
 
   try {
@@ -376,7 +376,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     btnAbrirTelaRelatorio.disabled = false;
 
     if (mensagem.ok) {
-      setStatusRelatorio("Relatório detalhado aberto nesta aba.");
+      setStatusRelatorio("Relatório detalhado aberto em uma nova aba.");
     } else {
       setStatusRelatorio("Erro ao abrir o relatório detalhado.");
       areaErrosRelatorio.hidden = false;
