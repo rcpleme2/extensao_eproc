@@ -149,11 +149,16 @@ function lerEstadoDivDochtml(tabId) {
           existe: !!div,
           conteudo: div ? div.innerHTML : "",
           urlPagina: window.location.href,
+          // Se a div nao existir, um pedaco do body ajuda a ver o que a
+          // pagina realmente carregou (pagina de erro/login, outra
+          // estrutura, etc.) - so' os primeiros 500 caracteres para nao
+          // poluir o log.
+          amostraBody: !div && document.body ? (document.body.innerText || "").slice(0, 500) : null,
         };
       },
     })
     .then((resultados) => (resultados && resultados[0] ? resultados[0].result : { existe: false, conteudo: "", urlPagina: null }))
-    .catch((e) => ({ existe: false, conteudo: "", urlPagina: null, erro: String(e) }));
+    .catch((e) => ({ existe: false, conteudo: "", urlPagina: null, erro: String(e), abaSumiu: /no tab with id/i.test(String(e)) }));
 }
 
 // Documentos "html" (certidoes, atos ordinatorios, mandados) sao servidos
@@ -204,11 +209,21 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
           ultimoEstado.existe,
           "| URL da página:",
           ultimoEstado.urlPagina,
+          "| amostra do body:",
+          ultimoEstado.amostraBody,
           "| erro:",
           ultimoEstado.erro
         );
       }
       if (ultimoEstado.conteudo && ultimoEstado.conteudo.trim()) break;
+      // Se a aba fechou sozinha (ex.: a propria pagina se fecha por nao
+      // estar dentro do iframe que ela espera), nao adianta continuar
+      // tentando ler uma aba que nao existe mais pelos proximos segundos
+      // - para na hora e relata isso especificamente.
+      if (ultimoEstado.abaSumiu) {
+        console.warn("[eproc-html]", "A aba fechou sozinha antes de terminar (tentativa", tentativa, ").");
+        break;
+      }
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
@@ -219,10 +234,14 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
         ultimoEstado.existe,
         "| URL final:",
         ultimoEstado.urlPagina,
+        "| amostra do body:",
+        ultimoEstado.amostraBody,
         "| erro:",
         ultimoEstado.erro
       );
-      const motivo = !ultimoEstado.existe
+      const motivo = ultimoEstado.abaSumiu
+        ? "a aba fechou sozinha antes de terminar (a própria página do eproc pode estar se fechando)"
+        : !ultimoEstado.existe
         ? 'a div "#divdochtml" nem chegou a existir nesta página - pode ter sido redirecionada para outro lugar'
         : 'a div "#divdochtml" existe mas continuou vazia (o AJAX da página não terminou a tempo)';
       return {
@@ -257,13 +276,51 @@ async function abrirAbaEExtrairHtmlDivDochtml(url) {
   return tentarAbrirAbaEExtrairHtmlDivDochtml(url);
 }
 
+// Ultimo recurso quando a aba oculta falha por completo (ex.: a propria
+// pagina fecha a aba sozinha antes de terminar - visto em alguns
+// documentos gerados automaticamente, como atos ordinatorios ligados a
+// publicacao no DJEN, cuja URL pode nao seguir o fluxo classico de
+// "casca + AJAX"). So' um fetch bruto da URL: se vier HTML, tenta
+// aproveitar o que vier; se vier um PDF de verdade, avisa claramente em
+// vez de devolver bytes binarios como se fossem texto.
+async function tentarFallbackFetchHtml(url) {
+  try {
+    const resposta = await fetch(url, { credentials: "same-origin" });
+    if (!resposta.ok) {
+      return { html: null, erro: `Falha ao baixar via fetch (HTTP ${resposta.status}).` };
+    }
+    const tipoConteudo = (resposta.headers.get("content-type") || "").toLowerCase();
+    if (tipoConteudo.includes("pdf")) {
+      return {
+        html: null,
+        erro:
+          'O documento parece ser um PDF servido diretamente (não uma página HTML do eproc) - use o modo "Arquivos individuais" para baixá-lo corretamente.',
+      };
+    }
+    const html = await resposta.text();
+    if (!html || !html.trim()) {
+      return { html: null, erro: "O download direto (fetch) voltou vazio." };
+    }
+    return { html, erro: null };
+  } catch (e) {
+    return { html: null, erro: `Falha no download direto: ${e && e.message ? e.message : String(e)}` };
+  }
+}
+
 async function obterConteudoHtmlReal(url, nomeDocumento) {
   const { conteudo, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
-  if (!conteudo) return { html: null, erro };
-  return {
-    html: `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`,
-    erro: null,
-  };
+  if (conteudo) {
+    return {
+      html: `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`,
+      erro: null,
+    };
+  }
+
+  console.warn("[eproc-html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
+  const fallback = await tentarFallbackFetchHtml(url);
+  if (fallback.html) return fallback;
+
+  return { html: null, erro: erro || fallback.erro };
 }
 
 // Converte o HTML do documento para texto simples, preservando quebras de
@@ -286,8 +343,22 @@ function converterHtmlParaTextoSimples(html) {
 
 async function obterTextoHtmlReal(url) {
   const { conteudo, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
-  if (!conteudo) return { texto: null, erro };
-  const texto = converterHtmlParaTextoSimples(conteudo);
+  let html = conteudo;
+  let erroFinal = erro;
+
+  if (!html) {
+    console.warn("[eproc-html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
+    const fallback = await tentarFallbackFetchHtml(url);
+    if (fallback.html) {
+      html = fallback.html;
+    } else {
+      erroFinal = erro || fallback.erro;
+    }
+  }
+
+  if (!html) return { texto: null, erro: erroFinal };
+
+  const texto = converterHtmlParaTextoSimples(html);
   if (!texto) {
     return {
       texto: null,

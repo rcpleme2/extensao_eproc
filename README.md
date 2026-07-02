@@ -193,11 +193,14 @@ completa") permite ajustar a detecção com precisão.
   do documento (uma aba própria por documento, separada da aba
   compartilhada dos PDFs). Se a primeira tentativa não conseguir ler o
   conteúdo a tempo, uma segunda tentativa é feita automaticamente, com
-  uma aba nova. Se mesmo assim continuar falhando com "div não
-  preencheu a tempo", veja a seção de diagnóstico abaixo — o log agora
-  diz se a div chegou a existir na página ou não, o que ajuda a
-  descobrir se o problema é a página não ser a esperada (redirecionada
-  para outro lugar) ou realmente o carregamento via AJAX não terminar.
+  uma aba nova. Se as duas tentativas com aba oculta falharem (por
+  exemplo, quando a própria aba se fecha sozinha antes de terminar — visto
+  em alguns atos ordinatórios ligados à publicação no DJEN, cuja página
+  não segue o fluxo clássico de "casca + AJAX"), a extensão tenta como
+  último recurso um download direto (`fetch` autenticado da mesma URL) e
+  usa o HTML retornado, se houver. Só quando isso também falha o documento
+  entra no arquivo final com uma nota de erro. Veja a seção de
+  diagnóstico abaixo para os detalhes de cada tentativa.
 
 ### Anonimização (melhor esforço)
 
@@ -259,8 +262,13 @@ exportação).
 3. Documentos "html" usam sua própria aba oculta separada (mesmo
    mecanismo já usado no modo "Arquivos individuais"/"PDF único"), com
    logs prefixados `[eproc-html]` no console do service worker: URL da
-   página depois de carregar, se a div "#divdochtml" chegou a existir, e
-   se o preenchimento por AJAX terminou a tempo.
+   página depois de carregar, se a div "#divdochtml" chegou a existir, uma
+   amostra do texto da página quando a div não existe (útil para
+   descobrir para onde a página foi redirecionada) e se a aba se fechou
+   sozinha antes de terminar. Se as duas tentativas com aba oculta
+   falharem, um aviso `"tentando baixar bruto via fetch como último
+   recurso"` indica que a extensão está tentando o fallback de download
+   direto antes de desistir do documento.
 4. Nenhuma etapa demorada fica presa para sempre: download de documento
    tem limite de 30s, e a extração de texto de cada PDF tem limite de
    60s — ao estourar, vira um erro tratado normalmente (nos avisos do
