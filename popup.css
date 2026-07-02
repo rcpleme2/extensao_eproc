@@ -1,3 +1,15 @@
+/* Varias classes abaixo (.opcoes, .progresso, .progresso-relatorio, ...)
+   definem "display" explicitamente para virar flexbox quando visiveis.
+   Isso tem a mesma especificidade que a regra padrao do navegador para
+   o atributo "hidden" ([hidden] { display: none }), e como regra de
+   autor sempre vence regra de user-agent, o "display: flex" ganhava e o
+   elemento nunca ficava realmente escondido, so' o atributo mudava sem
+   efeito visual. Essa regra com !important garante que "hidden" sempre
+   prevalece, independente de qualquer outra regra de display. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   min-width: 280px;
