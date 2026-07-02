@@ -572,6 +572,8 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
       const localizadores = resultado.localizadores || [];
+      localizadoresCarregados = localizadores;
+      areaExportarProcessosLocalizador.hidden = true;
 
       selectLocalizadorProcessos.innerHTML =
         '<option value="" selected disabled>Selecione um localizador...</option>';
@@ -585,7 +587,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
       setStatusNavLocalizadores(
         localizadores.length > 0
-          ? `${localizadores.length} localizador(es) com processos - selecione um para navegar até ele.`
+          ? `${localizadores.length} localizador(es) com processos - selecione um para navegar até ele ou exportar um relatório.`
           : "Nenhum localizador com processos foi encontrado."
       );
       if (resultado.erroColeta) {
@@ -599,6 +601,29 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         mensagem.erro || "Falha desconhecida ao carregar os localizadores.";
     }
   }
+
+  if (mensagem.tipo === "PROGRESSO_PROCESSOS_LOCALIZADOR") {
+    textoProgressoProcessosLocalizador.textContent = mensagem.texto || "Processando...";
+    setStatusNavLocalizadores(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "PROCESSOS_LOCALIZADOR_FINALIZADO") {
+    areaProgressoProcessosLocalizador.hidden = true;
+    btnExportarProcessosLocalizador.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      setStatusNavLocalizadores(
+        `Concluído! ${resultado.total || 0} processo(s) exportado(s) para Downloads/eproc/.` +
+          (resultado.erroColeta ? ` Aviso: ${resultado.erroColeta}` : "")
+      );
+    } else {
+      setStatusNavLocalizadores("Erro ao exportar os processos do localizador.");
+      areaErrosNavLocalizadores.hidden = false;
+      areaErrosNavLocalizadores.textContent =
+        mensagem.erro || "Falha desconhecida ao exportar os processos do localizador.";
+    }
+  }
 });
 
 const areaNavLocalizadoresInfo = document.getElementById("area-nav-localizadores-info");
@@ -608,6 +633,17 @@ const textoProgressoNavLocalizadores = document.getElementById("texto-progresso-
 const areaSelectLocalizador = document.getElementById("area-select-localizador");
 const selectLocalizadorProcessos = document.getElementById("select-localizador-processos");
 const areaErrosNavLocalizadores = document.getElementById("area-erros-nav-localizadores");
+const areaExportarProcessosLocalizador = document.getElementById("area-exportar-processos-localizador");
+const chkProcessosLocalizadorPdf = document.getElementById("chk-processos-localizador-pdf");
+const chkProcessosLocalizadorExcel = document.getElementById("chk-processos-localizador-excel");
+const btnExportarProcessosLocalizador = document.getElementById("btn-exportar-processos-localizador");
+const areaProgressoProcessosLocalizador = document.getElementById("area-progresso-processos-localizador");
+const textoProgressoProcessosLocalizador = document.getElementById("texto-progresso-processos-localizador");
+
+// Guarda a ultima lista carregada (nome + urlProcessos de cada
+// localizador) para poder identificar qual localizador esta' selecionado
+// no dropdown na hora de exportar o relatorio de processos dele.
+let localizadoresCarregados = [];
 
 function setStatusNavLocalizadores(texto) {
   areaNavLocalizadoresInfo.textContent = texto;
@@ -617,6 +653,7 @@ btnCarregarLocalizadores.addEventListener("click", async () => {
   btnCarregarLocalizadores.disabled = true;
   areaErrosNavLocalizadores.hidden = true;
   areaSelectLocalizador.hidden = true;
+  areaExportarProcessosLocalizador.hidden = true;
   areaProgressoNavLocalizadores.hidden = false;
   textoProgressoNavLocalizadores.textContent = "Iniciando...";
   setStatusNavLocalizadores(
@@ -639,15 +676,19 @@ btnCarregarLocalizadores.addEventListener("click", async () => {
   }
 });
 
-// Ao escolher um localizador no dropdown, navega a aba ATUAL (a mesma de
-// onde o painel foi aberto) direto para a lista de processos daquele
+// Ao escolher um localizador no dropdown: a) navega a aba ATUAL (a mesma
+// de onde o painel foi aberto) direto para a lista de processos daquele
 // localizador - a URL ja' vem absoluta e pronta (com hash/sessao
-// inclusos) da propria raspagem feita na aba oculta.
+// inclusos) da propria raspagem feita na aba oculta; e b) libera a opcao
+// de exportar um relatorio (PDF/Excel) so' com os processos desse
+// localizador.
 selectLocalizadorProcessos.addEventListener("change", async () => {
   const url = selectLocalizadorProcessos.value;
   if (!url) return;
 
   areaErrosNavLocalizadores.hidden = true;
+  areaExportarProcessosLocalizador.hidden = !localizadoresCarregados.some((loc) => loc.urlProcessos === url);
+
   try {
     const aba = await getAbaAtiva();
     if (!aba || !aba.id) {
@@ -658,5 +699,49 @@ selectLocalizadorProcessos.addEventListener("change", async () => {
   } catch (e) {
     areaErrosNavLocalizadores.hidden = false;
     areaErrosNavLocalizadores.textContent = e && e.message ? e.message : String(e);
+  }
+});
+
+btnExportarProcessosLocalizador.addEventListener("click", async () => {
+  const url = selectLocalizadorProcessos.value;
+  const localizador = localizadoresCarregados.find((loc) => loc.urlProcessos === url);
+  if (!localizador) return;
+
+  const formatos = {
+    pdf: chkProcessosLocalizadorPdf.checked,
+    excel: chkProcessosLocalizadorExcel.checked,
+  };
+  if (!formatos.pdf && !formatos.excel) {
+    areaErrosNavLocalizadores.hidden = false;
+    areaErrosNavLocalizadores.textContent = "Marque ao menos um formato (PDF ou Excel).";
+    return;
+  }
+
+  btnExportarProcessosLocalizador.disabled = true;
+  areaErrosNavLocalizadores.hidden = true;
+  areaProgressoProcessosLocalizador.hidden = false;
+  textoProgressoProcessosLocalizador.textContent = "Iniciando...";
+  setStatusNavLocalizadores(
+    `Exportando os processos de "${localizador.nome}" em segundo plano...`
+  );
+
+  // Mesmo padrao das demais exportacoes: so' confirma que comecou; o
+  // resultado final chega pela mensagem PROCESSOS_LOCALIZADOR_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "EXPORTAR_PROCESSOS_LOCALIZADOR",
+      nomeLocalizador: localizador.nome,
+      urlProcessos: localizador.urlProcessos,
+      formatos,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
+    }
+  } catch (e) {
+    setStatusNavLocalizadores("Erro ao iniciar a exportação.");
+    areaErrosNavLocalizadores.hidden = false;
+    areaErrosNavLocalizadores.textContent = e && e.message ? e.message : String(e);
+    areaProgressoProcessosLocalizador.hidden = true;
+    btnExportarProcessosLocalizador.disabled = false;
   }
 });

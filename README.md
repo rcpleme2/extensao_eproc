@@ -476,13 +476,25 @@ Ao clicar em **"Carregar localizadores"**:
 3. Preenche um menu suspenso com esses localizadores (nome e total de
    processos entre parênteses), ordenados alfabeticamente.
 
-Ao **escolher um localizador** no menu, a aba em que o painel foi aberto
-navega diretamente para `acao=localizador_processos_lista` daquele
-localizador — a mesma página que abriria clicando no número da coluna
-"Total de processos" na listagem (URL já capturada, com sessão/hash
-inclusos, durante a coleta). Se precisar carregar a lista de novo (por
-exemplo, depois que os números mudarem), basta clicar em "Carregar
-localizadores" novamente.
+Ao **escolher um localizador** no menu, duas coisas acontecem:
+
+a. A aba em que o painel foi aberto navega diretamente para
+   `acao=localizador_processos_lista` daquele localizador — a mesma
+   página que abriria clicando no número da coluna "Total de processos"
+   na listagem (URL já capturada, com sessão/hash inclusos, durante a
+   coleta).
+b. Aparecem as opções de **exportar um relatório** (PDF e/ou planilha
+   Excel) só com os processos desse localizador, com três colunas:
+   **Número Processo**, **Classe** e **Inclusão no localizador**. O
+   relatório é gerado em segundo plano (percorrendo todas as páginas da
+   listagem de processos, com a mesma correção de "volta pra página 1"
+   já usada na exportação de Localizadores) e ordenado pela **Inclusão
+   no localizador da data mais antiga para a mais nova**. Os arquivos
+   saem em `Downloads/eproc/` como
+   `processos_localizador_<nome_do_localizador>_<data>.pdf`/`.xls`.
+
+Se precisar carregar a lista de novo (por exemplo, depois que os números
+mudarem), basta clicar em "Carregar localizadores" novamente.
 
 ## Abrir o painel a partir da própria página
 

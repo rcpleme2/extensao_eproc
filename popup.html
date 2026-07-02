@@ -200,8 +200,9 @@
 
     <div id="area-nav-localizadores-info" class="status">
       Carrega os Localizadores do Órgão que têm pelo menos um processo
-      atribuído e navega direto até a lista de processos do localizador
-      escolhido.
+      atribuído. Ao escolher um, a aba atual navega direto até a lista de
+      processos dele - e fica disponível a opção de exportar esses
+      mesmos processos em PDF/Excel.
     </div>
 
     <div class="botoes">
@@ -217,6 +218,23 @@
       <select id="select-localizador-processos">
         <option value="" selected disabled>Selecione um localizador...</option>
       </select>
+    </div>
+
+    <div class="opcoes" id="area-exportar-processos-localizador" hidden>
+      <label class="opcao-radio">
+        <input type="checkbox" id="chk-processos-localizador-pdf" checked />
+        PDF
+      </label>
+      <label class="opcao-radio">
+        <input type="checkbox" id="chk-processos-localizador-excel" />
+        Planilha Excel
+      </label>
+      <button id="btn-exportar-processos-localizador">Exportar processos deste localizador</button>
+    </div>
+
+    <div id="area-progresso-processos-localizador" class="progresso-relatorio" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="texto-progresso-processos-localizador"></span>
     </div>
 
     <div id="area-erros-nav-localizadores" class="erros" hidden></div>

@@ -1848,9 +1848,71 @@ function raspaerLocalizadoresNaPagina() {
   };
 }
 
+// Raspa a tabela da tela "Processos por Localizador"
+// (acao=localizador_processos_lista), aberta ao navegar direto pela URL
+// que ja' vem da coluna "Total de processos" da listagem de
+// Localizadores. Colunas confirmadas numa pagina real do eproc: [0]
+// checkbox, [1] Número Processo (link + "Sem Sigilo..."), [2] Classe
+// (span "span-classe-judicial-contraste", isolado para nao misturar com
+// avisos extras tipo "Doença Grave" que aparecem na mesma celula), [3]
+// Autores Principais, [4] Réus Principais, [5] Localizadores, [6]
+// Último Evento, [7] Inclusão no localizador (data pura, sem link).
+// Mesmo formato de retorno de "raspaerLocalizadoresNaPagina", para
+// reaproveitar "coletarTodasPaginasInfraTable".
+function raspaerProcessosDoLocalizadorNaPagina() {
+  const tabela = document.getElementById("tabelaLocalizadores");
+  if (!tabela) {
+    return {
+      itens: [],
+      caption: null,
+      temProxima: false,
+      erro: "Tabela de processos do localizador não encontrada nesta página.",
+    };
+  }
+
+  const linhas = Array.from(tabela.querySelectorAll("tr.infraTrClara, tr.infraTrEscura"));
+  const itens = [];
+  for (const tr of linhas) {
+    const celulas = Array.from(tr.querySelectorAll(":scope > td"));
+    if (celulas.length < 8) continue;
+
+    const linkProcesso = celulas[1].querySelector("a");
+    const numeroProcesso = (linkProcesso ? linkProcesso.textContent : celulas[1].textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const spanClasse = celulas[2].querySelector(".span-classe-judicial-contraste");
+    const classe = (spanClasse ? spanClasse.textContent : celulas[2].textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const inclusao = (celulas[7].textContent || "").replace(/\s+/g, " ").trim();
+
+    itens.push({ numeroProcesso, classe, inclusao });
+  }
+
+  const caption = tabela.querySelector("caption");
+  const liProxima = document.getElementById("lnkInfraProximaPaginaSuperior");
+  const temProxima = !!(liProxima && !liProxima.classList.contains("disabled"));
+  const liPrimeira = document.getElementById("lnkInfraPrimeiraPaginaSuperior");
+  const estaNaPrimeiraPagina = !!(liPrimeira && liPrimeira.classList.contains("disabled"));
+
+  return {
+    itens,
+    caption: caption ? (caption.textContent || "").trim() : "",
+    temProxima,
+    estaNaPrimeiraPagina,
+    erro: null,
+  };
+}
+
 // So' clica em "Próxima Página" e retorna - nao espera nada aqui dentro
 // (ver comentario de "raspaerLocalizadoresNaPagina" sobre o motivo).
-function clicarProximaPaginaLocalizadores() {
+// Generica: reaproveitada por qualquer listagem baseada no mesmo widget
+// de paginacao do eproc (ids "lnkInfraProximaPaginaSuperior"/
+// "lnkInfraPrimeiraPaginaSuperior" - o mesmo em "Localizadores do Órgão"
+// e em "Processos por Localizador", entre outras telas).
+function clicarProximaPaginaInfra() {
   const link = document.querySelector("#lnkInfraProximaPaginaSuperior a");
   if (!link) return false;
   link.click();
@@ -1858,8 +1920,8 @@ function clicarProximaPaginaLocalizadores() {
 }
 
 // So' clica em "Primeira Página" e retorna - mesmo motivo de
-// "clicarProximaPaginaLocalizadores".
-function clicarPrimeiraPaginaLocalizadores() {
+// "clicarProximaPaginaInfra".
+function clicarPrimeiraPaginaInfra() {
   const link = document.querySelector("#lnkInfraPrimeiraPaginaSuperior a");
   if (!link) return false;
   link.click();
@@ -1875,6 +1937,146 @@ function clicarPrimeiraPaginaLocalizadores() {
 // atualizar a tabela via AJAX), o pior que acontece e' uma chamada
 // individual falhar (frame destruido no meio dela) e ser re-tentada,
 // nunca o processo inteiro cair com "Frame with ID 0 was removed".
+// Coleta generica de todas as paginas de uma listagem baseada no mesmo
+// widget de paginacao do eproc (usado tanto em "Localizadores do Órgão"
+// quanto em "Processos por Localizador"): recebe uma aba ja' carregada
+// na tela da listagem e a funcao de raspagem especifica daquela tabela
+// (mesmo formato de retorno de "raspaerLocalizadoresNaPagina": { itens,
+// caption, temProxima, estaNaPrimeiraPagina, erro }). Corrige sozinha o
+// caso do eproc reabrir a listagem numa pagina que nao e' a primeira
+// (ele lembra a ultima pagina vista), voltando para a pagina 1 antes de
+// comecar a coletar. Cada raspagem/clique roda como uma chamada de
+// executeScript curta e independente (nunca um loop assincrono unico
+// dentro da propria pagina), para nao quebrar com "Frame with ID 0 was
+// removed" caso a paginacao dispare uma navegacao de verdade em vez de
+// so' atualizar a tabela via AJAX.
+async function coletarTodasPaginasInfraTable(tabId, funcRaspar) {
+  async function raspaerPaginaAtualComRetentativa() {
+    let ultimoErro;
+    for (let tentativa = 0; tentativa < 5; tentativa += 1) {
+      try {
+        const [{ result } = {}] = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: funcRaspar,
+        });
+        if (result) return result;
+      } catch (e) {
+        ultimoErro = e;
+        // O frame pode estar no meio de uma navegacao disparada pelo
+        // clique em "Próxima Página" - espera um pouco e tenta de novo
+        // em vez de desistir na primeira falha.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    }
+    throw ultimoErro || new Error("Sem resultado ao ler a página.");
+  }
+
+  let leituraAtual;
+  try {
+    leituraAtual = await raspaerPaginaAtualComRetentativa();
+  } catch (e) {
+    return { itens: [], erro: `Falha ao ler a página inicial: ${e && e.message ? e.message : String(e)}` };
+  }
+  if (leituraAtual.erro) return { itens: [], erro: leituraAtual.erro };
+
+  // A tela pode ter aberto numa pagina que nao e' a primeira (o eproc
+  // lembra a ultima pagina vista) - volta para a pagina 1 antes de
+  // comecar a coletar, senao os itens das paginas anteriores ficam de
+  // fora.
+  if (!leituraAtual.estaNaPrimeiraPagina) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, func: clicarPrimeiraPaginaInfra });
+    } catch (e) {
+      return {
+        itens: [],
+        erro: `Falha ao voltar para a primeira página: ${e && e.message ? e.message : String(e)}`,
+      };
+    }
+
+    await aguardarCarregamentoAba(tabId).catch(() => {});
+
+    const captionAntes = leituraAtual.caption;
+    let mudou = false;
+    for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      try {
+        leituraAtual = await raspaerPaginaAtualComRetentativa();
+      } catch (e) {
+        continue;
+      }
+      if (leituraAtual && leituraAtual.caption !== captionAntes) {
+        mudou = true;
+        break;
+      }
+    }
+    if (!mudou) {
+      return {
+        itens: [],
+        erro: 'A tela não voltou para a primeira página a tempo (botão "Primeira Página").',
+      };
+    }
+  }
+
+  const todos = [];
+  let pagina = 1;
+  const LIMITE_PAGINAS = 200; // seguranca contra loop infinito
+
+  while (pagina <= LIMITE_PAGINAS) {
+    const leitura = leituraAtual;
+    leituraAtual = null;
+
+    if (leitura.erro) return { itens: todos, erro: leitura.erro };
+    todos.push(...leitura.itens);
+
+    if (!leitura.temProxima) break;
+
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, func: clicarProximaPaginaInfra });
+    } catch (e) {
+      return {
+        itens: todos,
+        erro: `Falha ao clicar em "Próxima Página" (página ${pagina}): ${e && e.message ? e.message : String(e)}`,
+      };
+    }
+
+    // Cobre os dois jeitos possiveis dessa paginacao: se for uma
+    // navegacao de verdade, espera o "complete" da aba; se for so' AJAX
+    // no mesmo documento (a aba nunca sai de "complete"), essa espera
+    // e' praticamente um no-op e o polling abaixo (pela mudanca no
+    // texto da legenda) e' quem realmente detecta o fim do carregamento.
+    await aguardarCarregamentoAba(tabId).catch(() => {});
+
+    const captionAntes = leitura.caption;
+    let mudou = false;
+    let leituraNova = null;
+    for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      try {
+        const [{ result } = {}] = await chrome.scripting.executeScript({ target: { tabId }, func: funcRaspar });
+        leituraNova = result;
+      } catch (e) {
+        continue; // frame ainda se recuperando de uma navegacao - tenta de novo
+      }
+      if (leituraNova && leituraNova.caption !== captionAntes) {
+        mudou = true;
+        break;
+      }
+    }
+
+    if (!mudou) {
+      return {
+        itens: todos,
+        erro: `Parou na página ${pagina} - a página seguinte não terminou de carregar a tempo.`,
+      };
+    }
+
+    leituraAtual = leituraNova;
+    pagina += 1;
+  }
+
+  return { itens: todos, erro: null };
+}
+
 async function abrirAbaEColetarLocalizadores(urlBase) {
   let aba;
   try {
@@ -1898,139 +2100,30 @@ async function abrirAbaEColetarLocalizadores(urlBase) {
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    async function raspaerPaginaAtualComRetentativa() {
-      let ultimoErro;
-      for (let tentativa = 0; tentativa < 5; tentativa += 1) {
-        try {
-          const [{ result } = {}] = await chrome.scripting.executeScript({
-            target: { tabId: aba.id },
-            func: raspaerLocalizadoresNaPagina,
-          });
-          if (result) return result;
-        } catch (e) {
-          ultimoErro = e;
-          // O frame pode estar no meio de uma navegacao disparada pelo
-          // clique em "Próxima Página" - espera um pouco e tenta de novo
-          // em vez de desistir na primeira falha.
-          await new Promise((resolve) => setTimeout(resolve, 400));
-        }
-      }
-      throw ultimoErro || new Error("Sem resultado ao ler a página.");
+    return await coletarTodasPaginasInfraTable(aba.id, raspaerLocalizadoresNaPagina);
+  } catch (e) {
+    return { itens: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
     }
+  }
+}
 
-    let leituraAtual;
-    try {
-      leituraAtual = await raspaerPaginaAtualComRetentativa();
-    } catch (e) {
-      return { itens: [], erro: `Falha ao ler a página inicial: ${e && e.message ? e.message : String(e)}` };
-    }
-    if (leituraAtual.erro) return { itens: [], erro: leituraAtual.erro };
+// Abre uma aba oculta direto na URL de "Processos por Localizador" (ja'
+// capturada durante a raspagem de "Localizadores do Órgão" - vem pronta
+// da coluna "Total de processos", com sessao/hash inclusos), coleta
+// todas as paginas e fecha a aba. Mais simples que
+// "abrirAbaEColetarLocalizadores": nao precisa clicar em nenhum link do
+// menu, ja' que a URL de destino e' conhecida de antemao.
+async function abrirAbaEColetarProcessosDoLocalizador(urlProcessos) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlProcessos, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // A tela pode ter aberto numa pagina que nao e' a primeira (o eproc
-    // lembra a ultima pagina vista) - volta para a pagina 1 antes de
-    // comecar a coletar, senao os localizadores das paginas anteriores
-    // ficam de fora.
-    if (!leituraAtual.estaNaPrimeiraPagina) {
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: aba.id },
-          func: clicarPrimeiraPaginaLocalizadores,
-        });
-      } catch (e) {
-        return {
-          itens: [],
-          erro: `Falha ao voltar para a primeira página: ${e && e.message ? e.message : String(e)}`,
-        };
-      }
-
-      await aguardarCarregamentoAba(aba.id).catch(() => {});
-
-      const captionAntes = leituraAtual.caption;
-      let mudou = false;
-      for (let tentativa = 0; tentativa < 40; tentativa += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        try {
-          leituraAtual = await raspaerPaginaAtualComRetentativa();
-        } catch (e) {
-          continue;
-        }
-        if (leituraAtual && leituraAtual.caption !== captionAntes) {
-          mudou = true;
-          break;
-        }
-      }
-      if (!mudou) {
-        return {
-          itens: [],
-          erro: 'A tela não voltou para a primeira página a tempo (botão "Primeira Página").',
-        };
-      }
-    }
-
-    const todos = [];
-    let pagina = 1;
-    const LIMITE_PAGINAS = 200; // seguranca contra loop infinito
-
-    while (pagina <= LIMITE_PAGINAS) {
-      const leitura = leituraAtual;
-      leituraAtual = null;
-
-      if (leitura.erro) return { itens: todos, erro: leitura.erro };
-      todos.push(...leitura.itens);
-
-      if (!leitura.temProxima) break;
-
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: aba.id },
-          func: clicarProximaPaginaLocalizadores,
-        });
-      } catch (e) {
-        return {
-          itens: todos,
-          erro: `Falha ao clicar em "Próxima Página" (página ${pagina}): ${e && e.message ? e.message : String(e)}`,
-        };
-      }
-
-      // Cobre os dois jeitos possiveis dessa paginacao: se for uma
-      // navegacao de verdade, espera o "complete" da aba; se for so' AJAX
-      // no mesmo documento (a aba nunca sai de "complete"), essa espera
-      // e' praticamente um no-op e o polling abaixo (pela mudanca no
-      // texto da legenda) e' quem realmente detecta o fim do carregamento.
-      await aguardarCarregamentoAba(aba.id).catch(() => {});
-
-      const captionAntes = leitura.caption;
-      let mudou = false;
-      let leituraNova = null;
-      for (let tentativa = 0; tentativa < 40; tentativa += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        try {
-          const [{ result } = {}] = await chrome.scripting.executeScript({
-            target: { tabId: aba.id },
-            func: raspaerLocalizadoresNaPagina,
-          });
-          leituraNova = result;
-        } catch (e) {
-          continue; // frame ainda se recuperando de uma navegacao - tenta de novo
-        }
-        if (leituraNova && leituraNova.caption !== captionAntes) {
-          mudou = true;
-          break;
-        }
-      }
-
-      if (!mudou) {
-        return {
-          itens: todos,
-          erro: `Parou na página ${pagina} - a página seguinte não terminou de carregar a tempo.`,
-        };
-      }
-
-      leituraAtual = leituraNova;
-      pagina += 1;
-    }
-
-    return { itens: todos, erro: null };
+    return await coletarTodasPaginasInfraTable(aba.id, raspaerProcessosDoLocalizadorNaPagina);
   } catch (e) {
     return { itens: [], erro: e && e.message ? e.message : String(e) };
   } finally {
@@ -2050,17 +2143,14 @@ const PDF_LOCALIZADORES_MARGEM = 36;
 const PDF_LOCALIZADORES_TAMANHO_FONTE = 9;
 const PDF_LOCALIZADORES_ALTURA_LINHA = PDF_LOCALIZADORES_TAMANHO_FONTE * 1.35;
 
-async function construirPdfLocalizadores(itens, tituloDocumento) {
+// Gerador generico de PDF-tabela reaproveitado tanto pelos Localizadores
+// do Órgão quanto pelos Processos por Localizador: recebe as colunas ja'
+// com a largura em pontos (nao fracao) para poder ser reaproveitado com
+// qualquer numero/tamanho de colunas.
+async function construirPdfTabela(itens, colunas, tituloDocumento) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
   const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
-
-  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
-  const colunas = [
-    { titulo: "Localizador", largura: larguraUtil * 0.26, campo: "nome" },
-    { titulo: "Descrição", largura: larguraUtil * 0.58, campo: "descricao" },
-    { titulo: "Total de processos", largura: larguraUtil * 0.16, campo: "totalProcessos" },
-  ];
 
   let pagina = null;
   let y = 0;
@@ -2125,6 +2215,26 @@ async function construirPdfLocalizadores(itens, tituloDocumento) {
   return pdf.save();
 }
 
+function construirPdfLocalizadores(itens, tituloDocumento) {
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const colunas = [
+    { titulo: "Localizador", largura: larguraUtil * 0.26, campo: "nome" },
+    { titulo: "Descrição", largura: larguraUtil * 0.58, campo: "descricao" },
+    { titulo: "Total de processos", largura: larguraUtil * 0.16, campo: "totalProcessos" },
+  ];
+  return construirPdfTabela(itens, colunas, tituloDocumento);
+}
+
+function construirPdfProcessosLocalizador(itens, tituloDocumento) {
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const colunas = [
+    { titulo: "Número Processo", largura: larguraUtil * 0.28, campo: "numeroProcesso" },
+    { titulo: "Classe", largura: larguraUtil * 0.52, campo: "classe" },
+    { titulo: "Inclusão no localizador", largura: larguraUtil * 0.2, campo: "inclusao" },
+  ];
+  return construirPdfTabela(itens, colunas, tituloDocumento);
+}
+
 // Planilha em formato "Excel XML Spreadsheet" (SpreadsheetML, o mesmo
 // formato de arquivo unico usado pelo Excel 2003-2007 para abrir uma
 // planilha nativa sem precisar gerar um .xlsx de verdade, que e' um zip -
@@ -2142,22 +2252,29 @@ function escaparXml(texto) {
     .replace(/'/g, "&apos;");
 }
 
-function construirExcelLocalizadores(itens) {
+// Gerador generico de planilha-tabela reaproveitado tanto pelos
+// Localizadores do Órgão quanto pelos Processos por Localizador. Cada
+// coluna: { titulo, largura (em pontos, mesma unidade do SpreadsheetML),
+// campo, tipo: "String" (padrao) ou "Number" }.
+function construirExcelTabela(nomeAba, colunas, itens) {
   const linhaCabecalho = `<Row>
-   <Cell ss:StyleID="Cabecalho"><Data ss:Type="String">Localizador</Data></Cell>
-   <Cell ss:StyleID="Cabecalho"><Data ss:Type="String">Descrição</Data></Cell>
-   <Cell ss:StyleID="Cabecalho"><Data ss:Type="String">Total de processos</Data></Cell>
+${colunas.map((c) => `   <Cell ss:StyleID="Cabecalho"><Data ss:Type="String">${escaparXml(c.titulo)}</Data></Cell>`).join("\n")}
   </Row>`;
 
   const linhasDados = itens
-    .map(
-      (item) => `<Row>
-   <Cell><Data ss:Type="String">${escaparXml(item.nome)}</Data></Cell>
-   <Cell><Data ss:Type="String">${escaparXml(item.descricao)}</Data></Cell>
-   <Cell><Data ss:Type="Number">${Number(item.totalProcessos) || 0}</Data></Cell>
-  </Row>`
-    )
+    .map((item) => {
+      const celulas = colunas
+        .map((c) => {
+          const tipo = c.tipo || "String";
+          const valor = tipo === "Number" ? Number(item[c.campo]) || 0 : escaparXml(item[c.campo]);
+          return `   <Cell><Data ss:Type="${tipo}">${valor}</Data></Cell>`;
+        })
+        .join("\n");
+      return `<Row>\n${celulas}\n  </Row>`;
+    })
     .join("\n");
+
+  const colunasXml = colunas.map((c) => `   <Column ss:Width="${c.largura}"/>`).join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <?mso-application progid="Excel.Sheet"?>
@@ -2170,17 +2287,33 @@ function construirExcelLocalizadores(itens) {
    <Font ss:Bold="1"/>
   </Style>
  </Styles>
- <Worksheet ss:Name="Localizadores">
+ <Worksheet ss:Name="${escaparXml(nomeAba)}">
   <Table>
-   <Column ss:Width="220"/>
-   <Column ss:Width="420"/>
-   <Column ss:Width="110"/>
+${colunasXml}
    ${linhaCabecalho}
 ${linhasDados}
   </Table>
  </Worksheet>
 </Workbook>
 `;
+}
+
+function construirExcelLocalizadores(itens) {
+  const colunas = [
+    { titulo: "Localizador", largura: 220, campo: "nome" },
+    { titulo: "Descrição", largura: 420, campo: "descricao" },
+    { titulo: "Total de processos", largura: 110, campo: "totalProcessos", tipo: "Number" },
+  ];
+  return construirExcelTabela("Localizadores", colunas, itens);
+}
+
+function construirExcelProcessosLocalizador(itens) {
+  const colunas = [
+    { titulo: "Número Processo", largura: 160, campo: "numeroProcesso" },
+    { titulo: "Classe", largura: 340, campo: "classe" },
+    { titulo: "Inclusão no localizador", largura: 160, campo: "inclusao" },
+  ];
+  return construirExcelTabela("Processos", colunas, itens);
 }
 
 // Orquestra tudo: abre a aba oculta, coleta os localizadores de todas as
@@ -2255,6 +2388,70 @@ async function listarLocalizadoresComProcessos(aoProgredir) {
 
   notificar("Finalizando...");
   return { localizadores: comProcessos, erroColeta: erro };
+}
+
+// Converte "dd/mm/aaaa HH:MM:SS" (formato usado na coluna "Inclusão no
+// localizador") num timestamp para poder ordenar - retorna null se o
+// texto nao bater com o formato esperado (nunca deveria acontecer, mas
+// evita quebrar a ordenacao caso a pagina mude).
+function parseDataHoraBr(texto) {
+  const m = (texto || "").match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
+  if (!m) return null;
+  const [, dia, mes, ano, hora, min, seg] = m;
+  return new Date(Number(ano), Number(mes) - 1, Number(dia), Number(hora), Number(min), Number(seg)).getTime();
+}
+
+// Abre uma aba oculta direto na URL de processos de UM localizador
+// (recebida do painel, ja' capturada durante a listagem de
+// Localizadores do Órgão), coleta todas as paginas e gera os arquivos
+// marcados (pdf/excel), ordenados por "Inclusão no localizador" da data
+// mais antiga para a mais nova.
+async function exportarProcessosDoLocalizador(nomeLocalizador, urlProcessos, formatos, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  if (!urlProcessos) {
+    throw new Error("URL do localizador não informada.");
+  }
+
+  notificar(`Abrindo a lista de processos de "${nomeLocalizador}"...`);
+  const { itens, erro } = await abrirAbaEColetarProcessosDoLocalizador(urlProcessos);
+
+  if (itens.length === 0) {
+    throw new Error(erro || "Nenhum processo encontrado para esse localizador.");
+  }
+
+  // Da data mais antiga para a mais nova; processos sem data reconhecida
+  // (nunca deveria acontecer) vao para o final, sem embaralhar os demais.
+  const itensOrdenados = [...itens].sort((a, b) => {
+    const ta = parseDataHoraBr(a.inclusao);
+    const tb = parseDataHoraBr(b.inclusao);
+    if (ta == null && tb == null) return 0;
+    if (ta == null) return 1;
+    if (tb == null) return -1;
+    return ta - tb;
+  });
+
+  const tituloDocumento = `Processos do Localizador "${nomeLocalizador}" — ${itensOrdenados.length} processo(s) — gerado em ${new Date().toLocaleString("pt-BR")}`;
+  const nomeBase = `eproc/processos_localizador_${sanitizarNomeArquivo(nomeLocalizador)}_${new Date()
+    .toISOString()
+    .slice(0, 10)}`;
+
+  if (formatos.pdf) {
+    notificar("Gerando PDF...");
+    const bytes = await construirPdfProcessosLocalizador(itensOrdenados, tituloDocumento);
+    await baixarUm(`${nomeBase}.pdf`, construirDataUrlBinario("application/pdf", bytes));
+  }
+
+  if (formatos.excel) {
+    notificar("Gerando planilha Excel...");
+    const xml = construirExcelProcessosLocalizador(itensOrdenados);
+    await baixarUm(`${nomeBase}.xls`, construirDataUrl("application/vnd.ms-excel", xml));
+  }
+
+  notificar("Finalizando...");
+  return { total: itensOrdenados.length, erroColeta: erro };
 }
 
 // ---- Regras de Automação (exportar sem precisar estar na página) ----
@@ -2596,6 +2793,29 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({
             tipo: "LISTAR_LOCALIZADORES_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_PROCESSOS_LOCALIZADOR") {
+    // Mesmo padrao das demais exportacoes em segundo plano.
+    exportarProcessosDoLocalizador(mensagem.nomeLocalizador, mensagem.urlProcessos, mensagem.formatos, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_PROCESSOS_LOCALIZADOR", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "PROCESSOS_LOCALIZADOR_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "PROCESSOS_LOCALIZADOR_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })
