@@ -569,15 +569,27 @@ function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
     wrapper.querySelectorAll(".tagify__tag__removeBtn").forEach((botao) => botao.click());
   }
 
+  // O campo "Informação complementar" combina Tagify (exibição das tags)
+  // com o widget jQuery UI Autocomplete (busca/sugestoes) - confirmado
+  // pelas classes "ui-autocomplete-wrapper"/"ui-autocomplete-input" no
+  // HTML da pagina. Em vez de tentar simular digitação + clique numa
+  // lista suspensa cuja marcação exata é gerada dinamicamente (tentativa
+  // anterior, que não encontrou a sugestão), usamos a API pública do
+  // proprio widget jQuery UI (".autocomplete('search', ...)" e
+  // "._trigger('select', ...)"), que é estável e não depende de acertar
+  // classes CSS de um menu que só existe enquanto a busca está ativa.
   async function marcarPeticaoUrgente() {
-    const wrapper = document.getElementById("selDadoComplementar-wrapper");
-    if (!wrapper) {
-      throw new Error('Campo "Informação complementar" não encontrado nesta página.');
+    const $ = window.jQuery || window.$;
+    if (!$) throw new Error("jQuery não disponível nesta página.");
+
+    const $input = $("#selDadoComplementar");
+    if ($input.length === 0) {
+      throw new Error('Campo "Informação complementar" (#selDadoComplementar) não encontrado.');
     }
-    const inputSpan = wrapper.querySelector(".tagify__input");
-    const tagsEl = wrapper.querySelector("tags.tagify");
-    if (!inputSpan || !tagsEl) {
-      throw new Error('Estrutura do campo "Informação complementar" não reconhecida.');
+
+    const autocomplete = $input.autocomplete("instance");
+    if (!autocomplete) {
+      throw new Error('Widget jQuery UI Autocomplete não inicializado em "Informação complementar".');
     }
 
     limparInformacaoComplementar();
@@ -586,38 +598,45 @@ function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
     const TEXTO_BUSCA = "Petição Urgente";
     const TEXTO_ALVO = "Petição Urgente - Sim";
 
-    inputSpan.focus();
-    inputSpan.textContent = TEXTO_BUSCA;
-    inputSpan.dispatchEvent(new InputEvent("input", { bubbles: true, data: TEXTO_BUSCA }));
+    $input.val(TEXTO_BUSCA);
+    $input.autocomplete("search", TEXTO_BUSCA);
 
-    let itemAlvo = null;
-    for (let tentativa = 0; tentativa < 20; tentativa += 1) {
+    let itemDados = null;
+    for (let tentativa = 0; tentativa < 25; tentativa += 1) {
       await aguardar(200);
-      const itens = Array.from(
-        document.querySelectorAll("ul.ui-autocomplete li, .ui-autocomplete .ui-menu-item")
-      );
-      itemAlvo =
-        itens.find((li) => (li.textContent || "").trim() === TEXTO_ALVO) ||
-        itens.find((li) => (li.textContent || "").trim().includes(TEXTO_ALVO)) ||
-        itens.find((li) => (li.textContent || "").trim().includes(TEXTO_BUSCA));
-      if (itemAlvo) break;
+      const menu = autocomplete.menu;
+      const $itens = menu && menu.element ? menu.element.find("li") : $();
+      for (let i = 0; i < $itens.length; i += 1) {
+        const $li = $itens.eq(i);
+        const dados = $li.data("ui-autocomplete-item") || $li.data("item.autocomplete");
+        const texto = (dados && (dados.label || dados.value)) || $li.text();
+        if ((texto || "").trim() === TEXTO_ALVO) {
+          itemDados = dados || { value: texto, label: texto };
+          break;
+        }
+      }
+      if (itemDados) break;
     }
 
-    if (!itemAlvo) {
+    if (!itemDados) {
       throw new Error(
-        `Sugestão "${TEXTO_ALVO}" não encontrada na lista de autocomplete do campo "Informação complementar".`
+        `Sugestão "${TEXTO_ALVO}" não encontrada no autocomplete de "Informação complementar" (via widget jQuery UI).`
       );
     }
 
-    const alvoClicavel = itemAlvo.querySelector("a, div") || itemAlvo;
-    alvoClicavel.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    alvoClicavel.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    alvoClicavel.click();
+    // Dispara o proprio evento "select" do widget, que e' o que o
+    // handler customizado do eproc escuta para adicionar a tag - o mesmo
+    // que aconteceria com um clique real na sugestão.
+    autocomplete._trigger("select", null, { item: itemDados });
+    autocomplete.close();
 
     await aguardar(200);
 
-    if (tagsEl.querySelectorAll(".tagify__tag").length === 0) {
-      throw new Error('A tag "Petição Urgente - Sim" não foi adicionada ao campo.');
+    const tagsEl = document.querySelector("#selDadoComplementar-wrapper tags.tagify");
+    if (!tagsEl || tagsEl.querySelectorAll(".tagify__tag").length === 0) {
+      throw new Error(
+        'A tag "Petição Urgente - Sim" não foi adicionada após a seleção via jQuery UI Autocomplete.'
+      );
     }
   }
 

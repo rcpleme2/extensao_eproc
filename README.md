@@ -127,14 +127,17 @@ está vendo**:
    para despacho: N (urgentes: N)" e "Conclusos para sentença: N
    (urgentes: N)".
 
-O campo "Informação complementar" usa um componente de tags
-(Tagify + autocomplete) cuja lista de sugestões é gerada dinamicamente
-pelo eproc — não dá para garantir com 100% de certeza que os seletores
-usados para escolher "Petição Urgente - Sim" na lista vão bater em todas
-as versões da página. Se a extensão não conseguir marcar essa tag, o
-total de conclusos continua aparecendo normalmente; só o número de
-urgentes fica com um aviso explicando o motivo (visível no painel), sem
-travar o resto do relatório.
+O campo "Informação complementar" combina Tagify (exibição das tags) com
+o widget jQuery UI Autocomplete (busca/sugestões) — em vez de tentar
+simular digitação e clique numa lista suspensa cuja marcação exata é
+gerada dinamicamente, a extensão usa a API pública do próprio widget
+jQuery UI (`autocomplete('search', ...)` e o evento `select` do widget)
+para selecionar "Petição Urgente - Sim" de forma equivalente a um clique
+real, sem depender de acertar classes CSS de um menu efêmero. Se, ainda
+assim, o jQuery/o widget não estiverem disponíveis ou a sugestão não for
+encontrada, o total de conclusos continua aparecendo normalmente; só o
+número de urgentes fica com um aviso explicando o motivo (visível no
+painel), sem travar o resto do relatório.
 
 Como a aba oculta é criada com `active: false`, ela não rouba o foco nem
 troca o que aparece na tela — só pode aparecer brevemente na barra de
