@@ -159,47 +159,89 @@ function definirBotoesValorHabilitados(habilitado) {
   }
 }
 
+const modalEscolhaRelatorio = document.getElementById("modal-escolha-relatorio");
+const modalBtnAbrir = document.getElementById("modal-btn-abrir");
+const modalBtnExcel = document.getElementById("modal-btn-excel");
+const modalBtnCancelar = document.getElementById("modal-btn-cancelar");
+
+let pedidoRelatorioPendente = null;
+
+function abrirModalEscolhaRelatorio(pedido) {
+  pedidoRelatorioPendente = pedido;
+  modalEscolhaRelatorio.hidden = false;
+}
+
+function fecharModalEscolhaRelatorio() {
+  modalEscolhaRelatorio.hidden = true;
+  pedidoRelatorioPendente = null;
+}
+
 // Clicar num numero do relatorio (ex.: "+30 dias" da Sentença, ou "90
-// dias" do demonstrativo de processos sem movimentação) navega a aba
-// atual/visivel ate' o Relatório Geral ja' consultado com o mesmo filtro
-// daquele numero, para o usuario conferir a lista de processos por tras
-// dele. So' um clique por vez: todos os botoes ficam desabilitados
-// durante a navegacao/consulta.
+// dias" do demonstrativo de processos sem movimentação) abre um modal
+// perguntando se o usuario quer so' abrir o relatório já consultado ou
+// tambem exportar a planilha Excel que o proprio eproc gera para aquele
+// resultado. So' depois da escolha e' que a aba atual/visivel navega e
+// consulta de fato.
 for (const botao of botoesValorRelatorio) {
-  botao.addEventListener("click", async () => {
-    const categoria = botao.dataset.tipo || "situacao";
-    const situacao = botao.dataset.situacao;
-    const filtro = botao.dataset.filtro;
-
-    definirBotoesValorHabilitados(false);
-    btnRelatorios.disabled = true;
-    btnAbrirTelaRelatorio.disabled = true;
-    areaErrosRelatorio.hidden = true;
-    setStatusRelatorio("Abrindo o relatório detalhado nesta aba...");
-
-    try {
-      const resposta = await chrome.runtime.sendMessage({
-        tipo: "ABRIR_RELATORIO_PREENCHIDO",
-        categoria,
-        situacao,
-        filtro,
-      });
-      if (!resposta || !resposta.ok) {
-        throw new Error((resposta && resposta.erro) || "Falha ao abrir o relatório detalhado.");
-      }
-    } catch (e) {
-      setStatusRelatorio("Erro ao abrir o relatório detalhado.");
-      areaErrosRelatorio.hidden = false;
-      areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
-      definirBotoesValorHabilitados(true);
-      btnRelatorios.disabled = false;
-      btnAbrirTelaRelatorio.disabled = false;
-    }
-    // Em caso de sucesso, os botoes sao reabilitados quando chegar a
-    // mensagem RELATORIO_PREENCHIDO_FINALIZADO (o fluxo demora alguns
-    // segundos, envolvendo navegacao de pagina).
+  botao.addEventListener("click", () => {
+    abrirModalEscolhaRelatorio({
+      categoria: botao.dataset.tipo || "situacao",
+      situacao: botao.dataset.situacao,
+      filtro: botao.dataset.filtro,
+    });
   });
 }
+
+async function executarAberturaRelatorio(pedido, exportarExcel) {
+  definirBotoesValorHabilitados(false);
+  btnRelatorios.disabled = true;
+  btnAbrirTelaRelatorio.disabled = true;
+  areaErrosRelatorio.hidden = true;
+  setStatusRelatorio(
+    exportarExcel
+      ? "Abrindo o relatório e exportando a planilha nesta aba..."
+      : "Abrindo o relatório detalhado nesta aba..."
+  );
+
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "ABRIR_RELATORIO_PREENCHIDO",
+      categoria: pedido.categoria,
+      situacao: pedido.situacao,
+      filtro: pedido.filtro,
+      exportarExcel,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha ao abrir o relatório detalhado.");
+    }
+  } catch (e) {
+    setStatusRelatorio("Erro ao abrir o relatório detalhado.");
+    areaErrosRelatorio.hidden = false;
+    areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
+    definirBotoesValorHabilitados(true);
+    btnRelatorios.disabled = false;
+    btnAbrirTelaRelatorio.disabled = false;
+  }
+  // Em caso de sucesso, os botoes sao reabilitados quando chegar a
+  // mensagem RELATORIO_PREENCHIDO_FINALIZADO (o fluxo demora alguns
+  // segundos, envolvendo navegacao de pagina).
+}
+
+modalBtnAbrir.addEventListener("click", () => {
+  const pedido = pedidoRelatorioPendente;
+  fecharModalEscolhaRelatorio();
+  if (pedido) executarAberturaRelatorio(pedido, false);
+});
+
+modalBtnExcel.addEventListener("click", () => {
+  const pedido = pedidoRelatorioPendente;
+  fecharModalEscolhaRelatorio();
+  if (pedido) executarAberturaRelatorio(pedido, true);
+});
+
+modalBtnCancelar.addEventListener("click", () => {
+  fecharModalEscolhaRelatorio();
+});
 
 btnRelatorios.addEventListener("click", async () => {
   btnRelatorios.disabled = true;

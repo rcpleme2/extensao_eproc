@@ -729,6 +729,52 @@ function clicarLinkRelatorioGeralNaPagina() {
   return true;
 }
 
+// Roda ja' na tela do Relatório Geral, apos uma consulta ter sido feita:
+// abre o menu "Exportar" da tabela de resultados (botao dropdown do
+// DataTables Buttons) e clica na opcao "Excel", disparando o download da
+// planilha que o proprio eproc gera. Autocontida, executada via
+// chrome.scripting.executeScript. Nunca lanca excecao: sempre resolve com
+// { ok, erro }.
+function exportarExcelNaPagina() {
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  return (async () => {
+    try {
+      const botaoExportar = document.querySelector(
+        'a.btn-acoes-bloco.dropdown-toggle[aria-controls="tblProcessoLista"]'
+      );
+      if (!botaoExportar) {
+        throw new Error('Botão "Exportar" não encontrado nesta página.');
+      }
+      botaoExportar.click();
+
+      let botaoExcel = null;
+      for (let tentativa = 0; tentativa < 25; tentativa += 1) {
+        await aguardar(200);
+        botaoExcel =
+          document.querySelector(
+            'a.buttons-excel.buttons-html5[aria-controls="tblProcessoLista"]'
+          ) ||
+          Array.from(document.querySelectorAll("a.dt-button.dropdown-item")).find(
+            (el) => (el.textContent || "").trim() === "Excel"
+          );
+        if (botaoExcel) break;
+      }
+
+      if (!botaoExcel) {
+        throw new Error('Opção "Excel" não encontrada no menu de exportação.');
+      }
+
+      botaoExcel.click();
+      return { ok: true, erro: null };
+    } catch (e) {
+      return { ok: false, erro: e && e.message ? e.message : String(e) };
+    }
+  })();
+}
+
 // Abre uma aba oculta nova, navega ate' o Relatório Geral e roda UMA
 // consulta nela, depois fecha a aba. Ver comentario acima de
 // "consultarUmaVezNaPagina" sobre por que cada consulta usa sua propria
@@ -893,7 +939,7 @@ function resolverParametrosConsulta(categoria, situacao, filtro) {
 // (que roda tudo em abas ocultas descartaveis), aqui o objetivo e'
 // exatamente mostrar o resultado na tela, entao usa a aba visivel e nao
 // a fecha no final.
-async function abrirRelatorioPreenchido(categoria, situacao, filtro) {
+async function abrirRelatorioPreenchido(categoria, situacao, filtro, exportarExcel) {
   const parametros = resolverParametrosConsulta(categoria, situacao, filtro);
 
   const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -925,6 +971,17 @@ async function abrirRelatorioPreenchido(categoria, situacao, filtro) {
 
   if (result && result.erro) {
     throw new Error(result.erro);
+  }
+
+  if (exportarExcel) {
+    const [{ result: resultadoExcel } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: exportarExcelNaPagina,
+    });
+
+    if (resultadoExcel && resultadoExcel.erro) {
+      throw new Error(resultadoExcel.erro);
+    }
   }
 }
 
@@ -976,7 +1033,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     // espera o carregamento/consulta terminar (alguns segundos), entao usa
     // confirmacao imediata + mensagem separada de conclusao em vez de um
     // unico sendResponse pendurado.
-    abrirRelatorioPreenchido(mensagem.categoria, mensagem.situacao, mensagem.filtro)
+    abrirRelatorioPreenchido(mensagem.categoria, mensagem.situacao, mensagem.filtro, mensagem.exportarExcel)
       .then(() => {
         chrome.runtime
           .sendMessage({ tipo: "RELATORIO_PREENCHIDO_FINALIZADO", ok: true })

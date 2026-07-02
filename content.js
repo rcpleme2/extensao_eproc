@@ -185,25 +185,36 @@ function garantirEstiloBotaoAbrirPainel() {
   if (document.getElementById(ID_ESTILO)) return;
   const style = document.createElement("style");
   style.id = ID_ESTILO;
+  // Cor vibrante e propositalmente diferente do azul do cabecalho/logo do
+  // jus.br, para o botao nao se camuflar e ficar facil de notar.
   style.textContent = `
     #${ID_BOTAO_ABRIR_PAINEL} {
       display: inline-flex;
       align-items: center;
-      justify-content: center;
-      width: 1.6rem;
-      height: 1.6rem;
-      margin-left: 0.5rem;
-      padding: 0;
+      gap: 5px;
+      margin-left: 0.6rem;
+      padding: 5px 12px;
       border: none;
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.15);
-      color: #fff;
-      font-size: 1rem;
+      border-radius: 999px;
+      background: #f5a623;
+      color: #1c1c1c;
+      font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 0.78rem;
+      font-weight: 700;
       line-height: 1;
+      white-space: nowrap;
       cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+      transition: transform 0.1s ease, box-shadow 0.1s ease;
     }
     #${ID_BOTAO_ABRIR_PAINEL}:hover {
-      background: rgba(255, 255, 255, 0.3);
+      background: #ffb648;
+      transform: scale(1.05);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    }
+    #${ID_BOTAO_ABRIR_PAINEL} .eproc-exportador-botao-icone {
+      font-size: 0.95rem;
+      line-height: 1;
     }
   `;
   document.head.appendChild(style);
@@ -222,7 +233,14 @@ function adicionarBotaoAbrirPainel() {
   botao.type = "button";
   botao.title = "Abrir Extensão Auxiliar eProc";
   botao.setAttribute("aria-label", "Abrir Extensão Auxiliar eProc");
-  botao.textContent = "⚖";
+
+  const icone = document.createElement("span");
+  icone.className = "eproc-exportador-botao-icone";
+  icone.setAttribute("aria-hidden", "true");
+  icone.textContent = "⚖";
+  botao.appendChild(icone);
+  botao.appendChild(document.createTextNode("Extensão eProc"));
+
   botao.addEventListener("click", (evento) => {
     evento.preventDefault();
     evento.stopPropagation();

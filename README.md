@@ -160,16 +160,22 @@ conferir manualmente.
 
 Todos os números das duas tabelas — os 6 de Total/Urgentes/+30 dias ×
 Despacho/Sentença e os 3 do demonstrativo de sem movimentação (30/90/120
-dias) — são clicáveis: ao clicar, a **aba atual e visível** navega até o
-Relatório Geral já com a mesma situação (ou, no caso de "sem
-movimentação", sem nenhuma situação) e o mesmo filtro daquele número
-selecionados, e a consulta já executada, mostrando a lista de processos
-por trás dele — útil para conferir exatamente quais processos compõem
-aquela contagem. Diferente da geração do relatório (que roda em abas
-ocultas descartáveis para não incomodar quem está navegando), aqui o
-objetivo é justamente mostrar o resultado na tela, então a aba usada é a
-que já está aberta e visível, e ela permanece aberta com o resultado ao
-final.
+dias) — são clicáveis. Ao clicar, a extensão pergunta o que fazer:
+
+- **Abrir relatório**: a **aba atual e visível** navega até o Relatório
+  Geral já com a mesma situação (ou, no caso de "sem movimentação", sem
+  nenhuma situação) e o mesmo filtro daquele número selecionados, e a
+  consulta já executada, mostrando a lista de processos por trás dele —
+  útil para conferir exatamente quais processos compõem aquela contagem.
+- **Exportar planilha (Excel)**: faz a mesma navegação/consulta acima e,
+  em seguida, clica automaticamente no botão "Exportar" da tabela de
+  resultados e na opção "Excel", disparando o download da planilha que o
+  próprio eproc gera para aquele filtro exato.
+
+Diferente da geração do relatório (que roda em abas ocultas descartáveis
+para não incomodar quem está navegando), aqui o objetivo é justamente
+mostrar o resultado (ou gerar a planilha) na tela, então a aba usada é a
+que já está aberta e visível, e ela permanece aberta ao final.
 
 O botão funciona a partir de qualquer página do eproc que tenha o menu
 lateral visível (não precisa estar na tela de um processo
@@ -180,9 +186,11 @@ especificamente).
 Além do ícone da extensão na barra de ferramentas (que em instalações
 novas do Chrome/Edge costuma ficar escondido atrás do ícone de "peça de
 quebra-cabeça", precisando ser fixado manualmente), a extensão injeta um
-pequeno botão (⚖) ao lado da logo do "Portal jus.br" no cabeçalho do
-eproc. Clicar nesse botão abre o painel lateral da extensão diretamente,
-sem precisar localizar o ícone na barra de ferramentas.
+botão em formato de pílula, laranja e com o texto "Extensão eProc" (⚖),
+ao lado da logo do "Portal jus.br" no cabeçalho do eproc — a cor e o
+texto são propositalmente diferentes do resto do cabeçalho, para o botão
+não passar despercebido. Clicar nele abre o painel lateral da extensão
+diretamente, sem precisar localizar o ícone na barra de ferramentas.
 
 ## Ícone da extensão
 
