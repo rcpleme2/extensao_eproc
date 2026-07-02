@@ -145,6 +145,7 @@ function lerEstadoDivDochtml(tabId) {
       target: { tabId },
       func: () => {
         const div = document.getElementById("divdochtml");
+        const textoBody = !div && document.body ? (document.body.innerText || "").trim() : "";
         return {
           existe: !!div,
           conteudo: div ? div.innerHTML : "",
@@ -153,7 +154,13 @@ function lerEstadoDivDochtml(tabId) {
           // pagina realmente carregou (pagina de erro/login, outra
           // estrutura, etc.) - so' os primeiros 500 caracteres para nao
           // poluir o log.
-          amostraBody: !div && document.body ? (document.body.innerText || "").slice(0, 500) : null,
+          amostraBody: !div ? textoBody.slice(0, 500) || null : null,
+          // Alguns documentos (ex.: atos ordinatorios ligados ao DJEN) nao
+          // usam a div "#divdochtml" nem AJAX - a pagina inteira ja' vem
+          // pronta, com o conteudo real direto no body. Guarda o texto
+          // completo (nao só a amostra) para usar como conteudo do
+          // documento sem precisar esperar uma div que nunca vai existir.
+          corpoTextoCompleto: !div ? textoBody : null,
         };
       },
     })
@@ -214,6 +221,15 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
           "| erro:",
           ultimoEstado.erro
         );
+        // Se a div nunca existiu mas o body ja' trouxe um texto
+        // substancial, essa pagina nao usa o fluxo classico de "casca +
+        // AJAX" - o conteudo real ja' esta' pronto de imediato (visto em
+        // atos ordinatorios ligados ao DJEN). Usa esse texto direto, sem
+        // esperar os 18s de polling por uma div que nunca vai aparecer.
+        if (!ultimoEstado.existe && ultimoEstado.corpoTextoCompleto && ultimoEstado.corpoTextoCompleto.length > 30) {
+          console.log("[eproc-html]", "Página sem #divdochtml, mas com conteúdo pronto no body - usando direto.");
+          return { conteudo: null, textoBruto: ultimoEstado.corpoTextoCompleto, erro: null };
+        }
       }
       if (ultimoEstado.conteudo && ultimoEstado.conteudo.trim()) break;
       // Se a aba fechou sozinha (ex.: a propria pagina se fecha por nao
@@ -266,7 +282,7 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
 // primeira tentativa, mas funciona numa segunda tentativa.
 async function abrirAbaEExtrairHtmlDivDochtml(url) {
   const primeira = await tentarAbrirAbaEExtrairHtmlDivDochtml(url);
-  if (primeira.conteudo) return primeira;
+  if (primeira.conteudo || primeira.textoBruto) return primeira;
 
   console.warn(
     "[eproc-html]",
@@ -307,11 +323,26 @@ async function tentarFallbackFetchHtml(url) {
   }
 }
 
+function escaparHtml(texto) {
+  return texto
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 async function obterConteudoHtmlReal(url, nomeDocumento) {
-  const { conteudo, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
+  const { conteudo, textoBruto, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
   if (conteudo) {
     return {
       html: `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body>${conteudo}</body></html>`,
+      erro: null,
+    };
+  }
+  if (textoBruto) {
+    return {
+      html: `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${nomeDocumento}</title></head><body><pre>${escaparHtml(
+        textoBruto
+      )}</pre></body></html>`,
       erro: null,
     };
   }
@@ -342,7 +373,9 @@ function converterHtmlParaTextoSimples(html) {
 }
 
 async function obterTextoHtmlReal(url) {
-  const { conteudo, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
+  const { conteudo, textoBruto, erro } = await abrirAbaEExtrairHtmlDivDochtml(url);
+  if (textoBruto) return { texto: textoBruto, erro: null };
+
   let html = conteudo;
   let erroFinal = erro;
 

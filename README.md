@@ -191,16 +191,18 @@ completa") permite ajustar a detecção com precisão.
 - **HTML** (certidões, atos ordinatórios, mandados): reaproveita o mesmo
   mecanismo de aba oculta já usado nos outros modos para ler o texto real
   do documento (uma aba própria por documento, separada da aba
-  compartilhada dos PDFs). Se a primeira tentativa não conseguir ler o
-  conteúdo a tempo, uma segunda tentativa é feita automaticamente, com
-  uma aba nova. Se as duas tentativas com aba oculta falharem (por
-  exemplo, quando a própria aba se fecha sozinha antes de terminar — visto
-  em alguns atos ordinatórios ligados à publicação no DJEN, cuja página
-  não segue o fluxo clássico de "casca + AJAX"), a extensão tenta como
-  último recurso um download direto (`fetch` autenticado da mesma URL) e
-  usa o HTML retornado, se houver. Só quando isso também falha o documento
-  entra no arquivo final com uma nota de erro. Veja a seção de
-  diagnóstico abaixo para os detalhes de cada tentativa.
+  compartilhada dos PDFs). Alguns documentos (ex.: atos ordinatórios
+  ligados à publicação no DJEN) não usam a div "#divdochtml"/AJAX
+  clássica — a página inteira já chega pronta, com o conteúdo direto no
+  `body`. Nesse caso a extensão detecta isso já na primeira leitura e usa
+  esse texto na hora, sem esperar os ~18s de polling. Se a primeira
+  tentativa (com a div clássica) não conseguir ler o conteúdo a tempo,
+  uma segunda tentativa é feita automaticamente, com uma aba nova. Se
+  ainda assim falhar por completo (ex.: a própria aba se fecha sozinha
+  antes de terminar), a extensão tenta como último recurso um download
+  direto (`fetch` autenticado da mesma URL). Só quando isso também falha
+  o documento entra no arquivo final com uma nota de erro. Veja a seção
+  de diagnóstico abaixo para os detalhes de cada tentativa.
 
 ### Anonimização (melhor esforço)
 
