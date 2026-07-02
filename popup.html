@@ -90,18 +90,38 @@
         <tbody>
           <tr>
             <th scope="row">Despacho</th>
-            <td><button type="button" class="valor-link" id="valor-despacho" data-situacao="despacho" data-filtro="total" disabled></button></td>
-            <td><button type="button" class="valor-link" id="valor-despacho-urgentes" data-situacao="despacho" data-filtro="urgentes" disabled></button></td>
-            <td><button type="button" class="valor-link" id="valor-despacho-mais30dias" data-situacao="despacho" data-filtro="mais30Dias" disabled></button></td>
+            <td><button type="button" class="valor-link" id="valor-despacho" data-tipo="situacao" data-situacao="despacho" data-filtro="total" disabled></button></td>
+            <td><button type="button" class="valor-link" id="valor-despacho-urgentes" data-tipo="situacao" data-situacao="despacho" data-filtro="urgentes" disabled></button></td>
+            <td><button type="button" class="valor-link" id="valor-despacho-mais30dias" data-tipo="situacao" data-situacao="despacho" data-filtro="mais30Dias" disabled></button></td>
           </tr>
           <tr>
             <th scope="row">Sentença</th>
-            <td><button type="button" class="valor-link" id="valor-sentenca" data-situacao="sentenca" data-filtro="total" disabled></button></td>
-            <td><button type="button" class="valor-link" id="valor-sentenca-urgentes" data-situacao="sentenca" data-filtro="urgentes" disabled></button></td>
-            <td><button type="button" class="valor-link" id="valor-sentenca-mais30dias" data-situacao="sentenca" data-filtro="mais30Dias" disabled></button></td>
+            <td><button type="button" class="valor-link" id="valor-sentenca" data-tipo="situacao" data-situacao="sentenca" data-filtro="total" disabled></button></td>
+            <td><button type="button" class="valor-link" id="valor-sentenca-urgentes" data-tipo="situacao" data-situacao="sentenca" data-filtro="urgentes" disabled></button></td>
+            <td><button type="button" class="valor-link" id="valor-sentenca-mais30dias" data-tipo="situacao" data-situacao="sentenca" data-filtro="mais30Dias" disabled></button></td>
           </tr>
         </tbody>
       </table>
+
+      <table class="tabela-relatorio tabela-relatorio-sem-mov">
+        <thead>
+          <tr>
+            <th scope="col">Sem movimentação</th>
+            <th scope="col">30 dias</th>
+            <th scope="col">90 dias</th>
+            <th scope="col">120 dias</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Processos</th>
+            <td><button type="button" class="valor-link" id="valor-sem-mov-30" data-tipo="semMovimentacao" data-filtro="30" disabled></button></td>
+            <td><button type="button" class="valor-link" id="valor-sem-mov-90" data-tipo="semMovimentacao" data-filtro="90" disabled></button></td>
+            <td><button type="button" class="valor-link" id="valor-sem-mov-120" data-tipo="semMovimentacao" data-filtro="120" disabled></button></td>
+          </tr>
+        </tbody>
+      </table>
+
       <div id="aviso-urgencia" class="aviso-urgencia" hidden></div>
     </div>
 

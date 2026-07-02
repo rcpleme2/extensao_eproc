@@ -172,10 +172,72 @@ function substituirSiglaPorNomeUsuario() {
   }
 }
 
+// Botao injetado ao lado da logo do Portal jus.br no cabecalho do eproc,
+// que abre o painel lateral da extensao com um clique - alternativa para
+// quem prefere nao depender do icone da extensao na barra de ferramentas
+// do navegador (que fica escondido atras do icone de "puzzle" por padrao
+// em instalacoes novas do Chrome/Edge).
+const ID_BOTAO_ABRIR_PAINEL = "eproc-exportador-botao-abrir-painel";
+const SELETOR_LOGO_JUSBR = 'img[src*="jusbr_logo"]';
+
+function garantirEstiloBotaoAbrirPainel() {
+  const ID_ESTILO = "eproc-exportador-estilo-botao-abrir-painel";
+  if (document.getElementById(ID_ESTILO)) return;
+  const style = document.createElement("style");
+  style.id = ID_ESTILO;
+  style.textContent = `
+    #${ID_BOTAO_ABRIR_PAINEL} {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.6rem;
+      height: 1.6rem;
+      margin-left: 0.5rem;
+      padding: 0;
+      border: none;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      font-size: 1rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    #${ID_BOTAO_ABRIR_PAINEL}:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function adicionarBotaoAbrirPainel() {
+  if (document.getElementById(ID_BOTAO_ABRIR_PAINEL)) return;
+
+  const logo = document.querySelector(SELETOR_LOGO_JUSBR);
+  if (!logo || !logo.parentElement) return;
+
+  garantirEstiloBotaoAbrirPainel();
+
+  const botao = document.createElement("button");
+  botao.id = ID_BOTAO_ABRIR_PAINEL;
+  botao.type = "button";
+  botao.title = "Abrir Extensão Auxiliar eProc";
+  botao.setAttribute("aria-label", "Abrir Extensão Auxiliar eProc");
+  botao.textContent = "⚖";
+  botao.addEventListener("click", (evento) => {
+    evento.preventDefault();
+    evento.stopPropagation();
+    chrome.runtime.sendMessage({ tipo: "ABRIR_PAINEL_LATERAL" }).catch(() => {});
+  });
+
+  logo.insertAdjacentElement("afterend", botao);
+}
+
 substituirSiglaPorNomeUsuario();
+adicionarBotaoAbrirPainel();
 
 const observadorEventos = new MutationObserver(() => {
   substituirSiglaPorNomeUsuario();
+  adicionarBotaoAbrirPainel();
 });
 observadorEventos.observe(document.body, { childList: true, subtree: true });
 

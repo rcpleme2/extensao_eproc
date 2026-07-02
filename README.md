@@ -119,12 +119,18 @@ está vendo**. Para cada situação (**"MOVIMENTO-AGUARDA DESPACHO"** e
 - **+30 dias**: quantos desses estão na situação há mais de 30 dias
   (preenchendo o campo "Dias na situação" com `30` antes de consultar).
 
-Isso dá 6 consultas ao todo. Cada uma delas roda em uma **aba oculta
-própria** (criada com `active: false`, sem roubar o foco nem alterar o que
-você está vendo), que abre a página, navega até o Relatório Geral,
-seleciona a situação e o filtro daquela consulta específica, clica em
-"Consultar", lê o resultado e fecha a aba — uma aba nova para cada uma das
-6 combinações, nunca reaproveitando a mesma aba para mais de uma consulta.
+Além disso, o mesmo botão levanta um demonstrativo de **processos sem
+movimentação**, preenchendo numericamente o campo "Dias sem movimentação"
+(`#txtDiasSemMovimentacao`) com três faixas: **30, 90 e 120 dias**. Esse
+filtro não depende de nenhuma situação selecionada.
+
+Isso dá 9 consultas ao todo (6 de situação + 3 de sem movimentação). Cada
+uma delas roda em uma **aba oculta própria** (criada com `active: false`,
+sem roubar o foco nem alterar o que você está vendo), que abre a página,
+navega até o Relatório Geral, seleciona a situação (quando aplicável) e o
+filtro daquela consulta específica, clica em "Consultar", lê o resultado e
+fecha a aba — uma aba nova para cada consulta, nunca reaproveitando a
+mesma aba para mais de uma.
 Isso é proposital: reaproveitar a mesma aba para interagir duas vezes
 seguidas com o campo "Informação complementar" (um componente Tagify)
 se mostrou instável nos testes — a primeira consulta na aba sempre
@@ -152,19 +158,37 @@ principal, navega a **aba atual e visível** direto para a tela do
 Relatório Geral (sem consultar nada) — um atalho para quem prefere
 conferir manualmente.
 
-Cada um dos 6 números da tabela (Total/Urgentes/+30 dias × Despacho/
-Sentença) é clicável: ao clicar, a **aba atual e visível** navega até o
-Relatório Geral já com a mesma situação e o mesmo filtro daquele número
-selecionados e a consulta já executada, mostrando a lista de processos por
-trás dele — útil para conferir exatamente quais processos compõem aquela
-contagem. Diferente da geração do relatório (que roda em abas ocultas
-descartáveis para não incomodar quem está navegando), aqui o objetivo é
-justamente mostrar o resultado na tela, então a aba usada é a que já está
-aberta e visível, e ela permanece aberta com o resultado ao final.
+Todos os números das duas tabelas — os 6 de Total/Urgentes/+30 dias ×
+Despacho/Sentença e os 3 do demonstrativo de sem movimentação (30/90/120
+dias) — são clicáveis: ao clicar, a **aba atual e visível** navega até o
+Relatório Geral já com a mesma situação (ou, no caso de "sem
+movimentação", sem nenhuma situação) e o mesmo filtro daquele número
+selecionados, e a consulta já executada, mostrando a lista de processos
+por trás dele — útil para conferir exatamente quais processos compõem
+aquela contagem. Diferente da geração do relatório (que roda em abas
+ocultas descartáveis para não incomodar quem está navegando), aqui o
+objetivo é justamente mostrar o resultado na tela, então a aba usada é a
+que já está aberta e visível, e ela permanece aberta com o resultado ao
+final.
 
 O botão funciona a partir de qualquer página do eproc que tenha o menu
 lateral visível (não precisa estar na tela de um processo
 especificamente).
+
+## Abrir o painel a partir da própria página
+
+Além do ícone da extensão na barra de ferramentas (que em instalações
+novas do Chrome/Edge costuma ficar escondido atrás do ícone de "peça de
+quebra-cabeça", precisando ser fixado manualmente), a extensão injeta um
+pequeno botão (⚖) ao lado da logo do "Portal jus.br" no cabeçalho do
+eproc. Clicar nesse botão abre o painel lateral da extensão diretamente,
+sem precisar localizar o ícone na barra de ferramentas.
+
+## Ícone da extensão
+
+O ícone (barra de ferramentas e `chrome://extensions`) é uma balança da
+justiça branca sobre fundo azul (`#2c6ea6`, a mesma cor usada no resto do
+painel), em vez do ícone genérico de documento usado antes.
 
 ## Observações
 

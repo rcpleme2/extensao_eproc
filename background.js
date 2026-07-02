@@ -522,6 +522,10 @@ const VALOR_SITUACAO_AGUARDA_DESPACHO = "M;22;C";
 const VALOR_SITUACAO_AGUARDA_SENTENCA = "M;21;C";
 const DIAS_LIMITE_ATRASO = 30;
 
+// Faixas usadas no demonstrativo de processos sem movimentação
+// (campo #txtDiasSemMovimentacao no Relatório Geral).
+const FAIXAS_DIAS_SEM_MOVIMENTACAO = [30, 90, 120];
+
 // Cada consulta (total / urgentes / +30 dias, para cada situacao) agora
 // abre sua PROPRIA aba oculta, usada uma unica vez e descartada. Duas
 // tentativas anteriores mostraram que reaproveitar a mesma aba para
@@ -581,6 +585,23 @@ function consultarUmaVezNaPagina(parametros) {
     const input = document.getElementById("txtDiasSituacao");
     if (!input) {
       throw new Error('Campo "Dias na situação" (#txtDiasSituacao) não encontrado nesta página.');
+    }
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    nativeSetter.call(input, String(dias));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // Mesma logica de "definirDiasSituacao", so' que para o campo "Dias sem
+  // movimentação" (#txtDiasSemMovimentacao), usado no demonstrativo de
+  // processos parados. Esse campo nao depende de nenhuma situacao
+  // selecionada no outro filtro.
+  function definirDiasSemMovimentacao(dias) {
+    const input = document.getElementById("txtDiasSemMovimentacao");
+    if (!input) {
+      throw new Error(
+        'Campo "Dias sem movimentação" (#txtDiasSemMovimentacao) não encontrado nesta página.'
+      );
     }
     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
     nativeSetter.call(input, String(dias));
@@ -669,10 +690,19 @@ function consultarUmaVezNaPagina(parametros) {
 
   return (async () => {
     try {
-      selecionarSituacao(parametros.valorSituacao);
+      // O filtro "Dias sem movimentação" (demonstrativo de processos
+      // parados) e' independente da "Situação": nesse caso
+      // "parametros.valorSituacao" vem nulo e o select nao e' tocado.
+      if (parametros.valorSituacao) {
+        selecionarSituacao(parametros.valorSituacao);
+      }
 
       if (parametros.diasSituacao != null) {
         definirDiasSituacao(parametros.diasSituacao);
+      }
+
+      if (parametros.diasSemMovimentacao != null) {
+        definirDiasSemMovimentacao(parametros.diasSemMovimentacao);
       }
 
       if (parametros.urgente) {
@@ -790,8 +820,21 @@ async function gerarRelatorioGeral(aoProgredir) {
   const despacho = await consultarBloco("MOVIMENTO-AGUARDA DESPACHO", VALOR_SITUACAO_AGUARDA_DESPACHO);
   const sentenca = await consultarBloco("MOVIMENTO-AGUARDA SENTENÇA", VALOR_SITUACAO_AGUARDA_SENTENCA);
 
+  const semMovimentacao = { erros: [] };
+  for (const dias of FAIXAS_DIAS_SEM_MOVIMENTACAO) {
+    notificar(`Consultando processos sem movimentação há mais de ${dias} dias...`);
+    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      valorSituacao: null,
+      urgente: false,
+      diasSituacao: null,
+      diasSemMovimentacao: dias,
+    });
+    semMovimentacao[`dias${dias}`] = r.contagem;
+    if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
+  }
+
   notificar("Finalizando...");
-  return { despacho, sentenca };
+  return { despacho, sentenca, semMovimentacao };
 }
 
 // Atalho: navega a aba ATUAL (visivel) direto para a tela do Relatório
@@ -815,10 +858,22 @@ async function abrirTelaRelatorioGeral() {
   }
 }
 
-// Traduz os identificadores usados no painel ("despacho"/"sentenca" +
-// "total"/"urgentes"/"mais30Dias") para os parametros que
-// "consultarUmaVezNaPagina" entende.
-function resolverParametrosConsulta(situacao, filtro) {
+// Traduz os identificadores usados no painel para os parametros que
+// "consultarUmaVezNaPagina" entende. Duas categorias de relatorio:
+// - "situacao" (padrao): situacao "despacho"/"sentenca" + filtro
+//   "total"/"urgentes"/"mais30Dias".
+// - "semMovimentacao": demonstrativo de processos parados, sem situacao
+//   nenhuma selecionada; filtro e' a quantidade de dias ("30"/"90"/"120").
+function resolverParametrosConsulta(categoria, situacao, filtro) {
+  if (categoria === "semMovimentacao") {
+    return {
+      valorSituacao: null,
+      urgente: false,
+      diasSituacao: null,
+      diasSemMovimentacao: Number(filtro),
+    };
+  }
+
   const valorSituacao =
     situacao === "sentenca" ? VALOR_SITUACAO_AGUARDA_SENTENCA : VALOR_SITUACAO_AGUARDA_DESPACHO;
 
@@ -838,8 +893,8 @@ function resolverParametrosConsulta(situacao, filtro) {
 // (que roda tudo em abas ocultas descartaveis), aqui o objetivo e'
 // exatamente mostrar o resultado na tela, entao usa a aba visivel e nao
 // a fecha no final.
-async function abrirRelatorioPreenchido(situacao, filtro) {
-  const parametros = resolverParametrosConsulta(situacao, filtro);
+async function abrirRelatorioPreenchido(categoria, situacao, filtro) {
+  const parametros = resolverParametrosConsulta(categoria, situacao, filtro);
 
   const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!aba || !aba.id) {
@@ -921,7 +976,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     // espera o carregamento/consulta terminar (alguns segundos), entao usa
     // confirmacao imediata + mensagem separada de conclusao em vez de um
     // unico sendResponse pendurado.
-    abrirRelatorioPreenchido(mensagem.situacao, mensagem.filtro)
+    abrirRelatorioPreenchido(mensagem.categoria, mensagem.situacao, mensagem.filtro)
       .then(() => {
         chrome.runtime
           .sendMessage({ tipo: "RELATORIO_PREENCHIDO_FINALIZADO", ok: true })
@@ -937,6 +992,25 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
           .catch(() => {});
       });
     sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "ABRIR_PAINEL_LATERAL") {
+    // Enviada pelo botao que o content script injeta ao lado da logo do
+    // Portal jus.br. sidePanel.open() so' funciona chamado em resposta
+    // direta a um gesto do usuario - por isso e' chamado aqui de imediato,
+    // sem nenhum "await" antes, na mesma volta de evento em que a
+    // mensagem chega (o clique que originou a mensagem ainda conta como o
+    // gesto do usuario).
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (!tabId || !chrome.sidePanel || !chrome.sidePanel.open) {
+      sendResponse({ ok: false, erro: "Não foi possível abrir o painel lateral." });
+      return false;
+    }
+    chrome.sidePanel
+      .open({ tabId })
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
     return true;
   }
 

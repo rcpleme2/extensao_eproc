@@ -225,6 +225,10 @@ progress {
   font-size: 12.5px;
 }
 
+.tabela-relatorio-sem-mov {
+  margin-top: 10px;
+}
+
 .tabela-relatorio th,
 .tabela-relatorio td {
   padding: 6px 8px;

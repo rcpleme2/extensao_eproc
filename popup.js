@@ -122,6 +122,9 @@ const valorDespachoUrgentesEl = document.getElementById("valor-despacho-urgentes
 const valorSentencaUrgentesEl = document.getElementById("valor-sentenca-urgentes");
 const valorDespachoMais30DiasEl = document.getElementById("valor-despacho-mais30dias");
 const valorSentencaMais30DiasEl = document.getElementById("valor-sentenca-mais30dias");
+const valorSemMov30El = document.getElementById("valor-sem-mov-30");
+const valorSemMov90El = document.getElementById("valor-sem-mov-90");
+const valorSemMov120El = document.getElementById("valor-sem-mov-120");
 const avisoUrgenciaEl = document.getElementById("aviso-urgencia");
 const areaProgressoRelatorio = document.getElementById("area-progresso-relatorio");
 const textoProgressoRelatorio = document.getElementById("texto-progresso-relatorio");
@@ -145,6 +148,9 @@ const botoesValorRelatorio = [
   valorSentencaUrgentesEl,
   valorDespachoMais30DiasEl,
   valorSentencaMais30DiasEl,
+  valorSemMov30El,
+  valorSemMov90El,
+  valorSemMov120El,
 ];
 
 function definirBotoesValorHabilitados(habilitado) {
@@ -153,13 +159,15 @@ function definirBotoesValorHabilitados(habilitado) {
   }
 }
 
-// Clicar num numero do relatorio (ex.: "+30 dias" da Sentença) navega a
-// aba atual/visivel ate' o Relatório Geral ja' consultado com o mesmo
-// filtro daquele numero, para o usuario conferir a lista de processos por
-// tras dele. So' um clique por vez: os 6 botoes ficam desabilitados
+// Clicar num numero do relatorio (ex.: "+30 dias" da Sentença, ou "90
+// dias" do demonstrativo de processos sem movimentação) navega a aba
+// atual/visivel ate' o Relatório Geral ja' consultado com o mesmo filtro
+// daquele numero, para o usuario conferir a lista de processos por tras
+// dele. So' um clique por vez: todos os botoes ficam desabilitados
 // durante a navegacao/consulta.
 for (const botao of botoesValorRelatorio) {
   botao.addEventListener("click", async () => {
+    const categoria = botao.dataset.tipo || "situacao";
     const situacao = botao.dataset.situacao;
     const filtro = botao.dataset.filtro;
 
@@ -172,6 +180,7 @@ for (const botao of botoesValorRelatorio) {
     try {
       const resposta = await chrome.runtime.sendMessage({
         tipo: "ABRIR_RELATORIO_PREENCHIDO",
+        categoria,
         situacao,
         filtro,
       });
@@ -291,10 +300,19 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       valorSentencaUrgentesEl.textContent = formatarContagem(sentenca.urgentes);
       valorSentencaMais30DiasEl.textContent = formatarContagem(sentenca.mais30Dias);
 
+      const semMovimentacao = resultado.semMovimentacao || {};
+      valorSemMov30El.textContent = formatarContagem(semMovimentacao.dias30);
+      valorSemMov90El.textContent = formatarContagem(semMovimentacao.dias90);
+      valorSemMov120El.textContent = formatarContagem(semMovimentacao.dias120);
+
       areaRelatorio.hidden = false;
       definirBotoesValorHabilitados(true);
 
-      const avisos = [...(despacho.erros || []), ...(sentenca.erros || [])];
+      const avisos = [
+        ...(despacho.erros || []),
+        ...(sentenca.erros || []),
+        ...(semMovimentacao.erros || []),
+      ];
       if (avisos.length > 0) {
         avisoUrgenciaEl.hidden = false;
         avisoUrgenciaEl.textContent = `Alguns valores não puderam ser determinados: ${avisos.join(" | ")}`;
