@@ -6,7 +6,19 @@
 // perto de "Construcao do MD unico", sobre o motivo).
 
 importScripts("libs/pdf-lib.min.js");
-const { PDFDocument, StandardFonts } = self.PDFLib;
+const { PDFDocument, StandardFonts, rgb } = self.PDFLib;
+
+// Identidade visual institucional (TJPR/eProc) reaproveitada em todos os
+// PDFs gerados pela extensao (tabelas de Localizadores/Processos/
+// Remessas e o resumo do Relatório Gerencial da Unidade) - mesma paleta
+// ja' usada nos documentos HTML exportados (Regras de Automação), para
+// manter consistencia visual entre os diferentes formatos de saida.
+const COR_PRIMARIA_ESCURA = rgb(0x1c / 255, 0x3d / 255, 0x5a / 255); // #1c3d5a
+const COR_PRIMARIA = rgb(0x2c / 255, 0x6e / 255, 0xa6 / 255); // #2c6ea6
+const COR_CINZA_TEXTO = rgb(0.35, 0.35, 0.35);
+const COR_CINZA_CLARO = rgb(0.95, 0.96, 0.97);
+const COR_CINZA_BORDA = rgb(0.82, 0.85, 0.87);
+const COR_BRANCO = rgb(1, 1, 1);
 
 // Abre o painel lateral (side panel) ao clicar no icone da extensao, em
 // vez do popup efemero padrao, para que ele permaneca visivel enquanto o
@@ -2126,21 +2138,6 @@ async function consultarBlocoUnidade(urlBase, valorOrgaoJuizo, nomeSituacao, val
   return bloco;
 }
 
-// Monta as linhas de texto de um bloco (despacho/sentenca) para o PDF.
-function formatarLinhasBlocoUnidade(titulo, bloco) {
-  const fmt = (v) => (v == null ? "?" : String(v));
-  const linhas = [
-    titulo,
-    `- Total: ${fmt(bloco.total)}`,
-    `- Urgentes: ${fmt(bloco.urgentes)}`,
-    `- Não urgentes: ${fmt(bloco.naoUrgentes)}`,
-    `- Aguardando há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${fmt(bloco.mais90Dias)}`,
-  ];
-  if (bloco.erros.length > 0) {
-    linhas.push(`- Avisos: ${bloco.erros.join(" | ")}`);
-  }
-  return linhas;
-}
 
 // Le' o numero de processos de cada Localizador de uma unidade -
 // DIFERENTE do resto do painel (que usa a tela "Localizadores do
@@ -2246,32 +2243,45 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
   notificar("Gerando PDF...");
 
   const dataInformacao = new Date().toLocaleString("pt-BR");
-  const linhasResumo = [
-    `Unidade: ${nomeUnidade}`,
-    `Data da informação: ${dataInformacao}`,
-    "",
-    ...formatarLinhasBlocoUnidade("Conclusos para decisão:", despacho),
-    "",
-    ...formatarLinhasBlocoUnidade("Conclusos para sentença:", sentenca),
-    "",
-    "Processos sem movimentação:",
-    `- Há mais de 30 dias: ${semMovimentacao.dias30 == null ? "?" : semMovimentacao.dias30}`,
-    `- Há mais de 90 dias: ${semMovimentacao.dias90 == null ? "?" : semMovimentacao.dias90}`,
-    `- Há mais de 120 dias: ${semMovimentacao.dias120 == null ? "?" : semMovimentacao.dias120}`,
-    ...(semMovimentacao.erros.length > 0 ? [`- Avisos: ${semMovimentacao.erros.join(" | ")}`] : []),
-    "",
-    `Remessas em Aberto: ${remessas.length} processo(s)`,
+  const linhasBloco = (bloco) => [
+    { rotulo: "Total", valor: bloco.total == null ? "?" : bloco.total },
+    { rotulo: "Urgentes", valor: bloco.urgentes == null ? "?" : bloco.urgentes },
+    { rotulo: "Não urgentes", valor: bloco.naoUrgentes == null ? "?" : bloco.naoUrgentes },
+    {
+      rotulo: `Aguardando há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`,
+      valor: bloco.mais90Dias == null ? "?" : bloco.mais90Dias,
+    },
   ];
-  if (erroLocalizadores) {
-    linhasResumo.push("", `Aviso (Localizadores): ${erroLocalizadores}`);
-  }
-  if (erroRemessas) {
-    linhasResumo.push("", `Aviso (Remessas em Aberto): ${erroRemessas}`);
-  }
 
+  const secoesResumo = [
+    { titulo: "CONCLUSOS PARA DECISÃO", linhas: linhasBloco(despacho) },
+    { titulo: "CONCLUSOS PARA SENTENÇA", linhas: linhasBloco(sentenca) },
+    {
+      titulo: "PROCESSOS SEM MOVIMENTAÇÃO",
+      linhas: [
+        { rotulo: "Há mais de 30 dias", valor: semMovimentacao.dias30 == null ? "?" : semMovimentacao.dias30 },
+        { rotulo: "Há mais de 90 dias", valor: semMovimentacao.dias90 == null ? "?" : semMovimentacao.dias90 },
+        { rotulo: "Há mais de 120 dias", valor: semMovimentacao.dias120 == null ? "?" : semMovimentacao.dias120 },
+      ],
+    },
+    {
+      titulo: "REMESSAS EM ABERTO",
+      linhas: [{ rotulo: "Total de processos", valor: remessas.length }],
+    },
+  ];
+
+  const avisos = [];
+  if (despacho.erros.length > 0) avisos.push(`Conclusos para decisão: ${despacho.erros.join(" | ")}`);
+  if (sentenca.erros.length > 0) avisos.push(`Conclusos para sentença: ${sentenca.erros.join(" | ")}`);
+  if (semMovimentacao.erros.length > 0) avisos.push(`Processos sem movimentação: ${semMovimentacao.erros.join(" | ")}`);
+  if (erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
+  if (erroRemessas) avisos.push(`Remessas em Aberto: ${erroRemessas}`);
+
+  const bytesCapa = await construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoesResumo, avisos);
+  const pdfCapa = await PDFDocument.load(bytesCapa);
   const pdfFinal = await PDFDocument.create();
-  const fonteTexto = await pdfFinal.embedFont(StandardFonts.Helvetica);
-  adicionarTextoComoPaginas(pdfFinal, fonteTexto, "Relatório Gerencial da Unidade", linhasResumo.join("\n"));
+  const paginasCapa = await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices());
+  paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
 
   if (localizadoresOrdenados.length > 0) {
     const bytesLocalizadores = await construirPdfLocalizadores(
@@ -2830,41 +2840,139 @@ const PDF_LOCALIZADORES_MARGEM = 36;
 const PDF_LOCALIZADORES_TAMANHO_FONTE = 9;
 const PDF_LOCALIZADORES_ALTURA_LINHA = PDF_LOCALIZADORES_TAMANHO_FONTE * 1.35;
 
+// Altura reservada no topo de cada pagina para o cabecalho institucional
+// (barra colorida + "TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ" + "Sistema
+// eProc" + linha separadora) e no rodape para o numero da pagina - o
+// conteudo de cada pagina (titulo, tabela) comeca/termina respeitando
+// essas faixas, em vez de usar a altura da folha inteira.
+const PDF_ALTURA_CABECALHO_INSTITUCIONAL = 40;
+const PDF_ALTURA_RODAPE = 22;
+
+// Desenha o cabecalho institucional (barra + TJPR + eProc + linha) no
+// topo de uma pagina - reaproveitado em toda pagina de todo PDF gerado
+// pela extensao (tabelas de Localizadores/Processos/Remessas e o resumo
+// do Relatório Gerencial da Unidade), para dar uma identidade visual
+// unica e profissional em vez de paginas so' com texto corrido.
+function desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem) {
+  const alturaPagina = pagina.getHeight();
+
+  pagina.drawRectangle({
+    x: 0,
+    y: alturaPagina - 6,
+    width: largura,
+    height: 6,
+    color: COR_PRIMARIA,
+  });
+
+  pagina.drawText("TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ", {
+    x: margem,
+    y: alturaPagina - 20,
+    size: 10,
+    font: fonteNegrito,
+    color: COR_PRIMARIA_ESCURA,
+  });
+  pagina.drawText("Sistema eProc", {
+    x: margem,
+    y: alturaPagina - 32,
+    size: 8,
+    font: fonteNormal,
+    color: COR_CINZA_TEXTO,
+  });
+
+  pagina.drawLine({
+    start: { x: margem, y: alturaPagina - 38 },
+    end: { x: largura - margem, y: alturaPagina - 38 },
+    thickness: 0.75,
+    color: COR_CINZA_BORDA,
+  });
+}
+
+// Desenha o rodape (linha + "eProc/TJPR" + numero da pagina) - chamado
+// so' no final, depois de todas as paginas prontas, ja' que o total de
+// paginas so' e' conhecido nesse momento.
+function desenharRodapePaginas(pdf, fonteNormal, largura, margem) {
+  const paginas = pdf.getPages();
+  paginas.forEach((pagina, indice) => {
+    const y = PDF_ALTURA_RODAPE - 10;
+    pagina.drawLine({
+      start: { x: margem, y: PDF_ALTURA_RODAPE },
+      end: { x: largura - margem, y: PDF_ALTURA_RODAPE },
+      thickness: 0.5,
+      color: COR_CINZA_BORDA,
+    });
+    pagina.drawText("eProc/TJPR - documento gerado pela Extensão Auxiliar eProc", {
+      x: margem,
+      y,
+      size: 7,
+      font: fonteNormal,
+      color: COR_CINZA_TEXTO,
+    });
+    const textoPagina = `Página ${indice + 1} de ${paginas.length}`;
+    const larguraTexto = fonteNormal.widthOfTextAtSize(textoPagina, 7);
+    pagina.drawText(textoPagina, {
+      x: largura - margem - larguraTexto,
+      y,
+      size: 7,
+      font: fonteNormal,
+      color: COR_CINZA_TEXTO,
+    });
+  });
+}
+
 // Gerador generico de PDF-tabela reaproveitado tanto pelos Localizadores
-// do Órgão quanto pelos Processos por Localizador: recebe as colunas ja'
-// com a largura em pontos (nao fracao) para poder ser reaproveitado com
-// qualquer numero/tamanho de colunas.
+// do Órgão quanto pelos Processos por Localizador e Remessas em Aberto:
+// recebe as colunas ja' com a largura em pontos (nao fracao) para poder
+// ser reaproveitado com qualquer numero/tamanho de colunas.
 async function construirPdfTabela(itens, colunas, tituloDocumento) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
   const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
 
+  const larguraPagina = PDF_LOCALIZADORES_LARGURA_PAGINA;
+  const margem = PDF_LOCALIZADORES_MARGEM;
+  const alturaLinhaCabecalhoColunas = PDF_LOCALIZADORES_ALTURA_LINHA * 1.7;
+
   let pagina = null;
   let y = 0;
+  let indiceLinhaZebra = 0;
 
   function desenharCabecalhoColunas() {
-    let x = PDF_LOCALIZADORES_MARGEM;
+    const alturaFaixa = alturaLinhaCabecalhoColunas;
+    pagina.drawRectangle({
+      x: margem,
+      y: y - alturaFaixa,
+      width: larguraPagina - margem * 2,
+      height: alturaFaixa,
+      color: COR_PRIMARIA_ESCURA,
+    });
+    let x = margem + 4;
     for (const coluna of colunas) {
       pagina.drawText(sanitizarTextoPdf(coluna.titulo), {
         x,
-        y,
+        y: y - alturaFaixa + alturaFaixa * 0.32,
         size: PDF_LOCALIZADORES_TAMANHO_FONTE,
         font: fonteNegrito,
+        color: COR_BRANCO,
       });
       x += coluna.largura;
     }
-    y -= PDF_LOCALIZADORES_ALTURA_LINHA * 1.6;
+    // Gap extra apos a faixa do cabecalho, para a primeira linha de
+    // dados nunca encostar/sobrepor visualmente na faixa colorida.
+    y -= alturaFaixa + 6;
+    indiceLinhaZebra = 0;
   }
 
   function novaPagina(comTitulo) {
     pagina = pdf.addPage([PDF_LOCALIZADORES_LARGURA_PAGINA, PDF_LOCALIZADORES_ALTURA_PAGINA]);
-    y = PDF_LOCALIZADORES_ALTURA_PAGINA - PDF_LOCALIZADORES_MARGEM;
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, larguraPagina, margem);
+    y = PDF_LOCALIZADORES_ALTURA_PAGINA - PDF_ALTURA_CABECALHO_INSTITUCIONAL - PDF_LOCALIZADORES_MARGEM;
     if (comTitulo) {
       pagina.drawText(sanitizarTextoPdf(tituloDocumento), {
-        x: PDF_LOCALIZADORES_MARGEM,
+        x: margem,
         y,
         size: 13,
         font: fonteNegrito,
+        color: COR_PRIMARIA_ESCURA,
       });
       y -= PDF_LOCALIZADORES_ALTURA_LINHA * 2.2;
     }
@@ -2878,17 +2986,31 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
       quebrarLinhas(sanitizarTextoPdf(String(item[coluna.campo] ?? "")), fonteNormal, PDF_LOCALIZADORES_TAMANHO_FONTE, coluna.largura - 4)
     );
     const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
+    const alturaLinha = maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA + PDF_LOCALIZADORES_ALTURA_LINHA * 0.4;
 
-    if (y - maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA < PDF_LOCALIZADORES_MARGEM) {
+    if (y - alturaLinha < PDF_ALTURA_RODAPE + PDF_LOCALIZADORES_MARGEM) {
       novaPagina(false);
     }
 
-    let x = PDF_LOCALIZADORES_MARGEM;
+    // Faixa zebrada (linhas pares com fundo cinza claro) para facilitar
+    // acompanhar cada linha visualmente numa tabela longa.
+    if (indiceLinhaZebra % 2 === 1) {
+      pagina.drawRectangle({
+        x: margem,
+        y: y - alturaLinha + PDF_LOCALIZADORES_ALTURA_LINHA * 0.3,
+        width: larguraPagina - margem * 2,
+        height: alturaLinha,
+        color: COR_CINZA_CLARO,
+      });
+    }
+    indiceLinhaZebra += 1;
+
+    let x = margem + 4;
     for (let i = 0; i < colunas.length; i += 1) {
       let yColuna = y;
       for (const linha of linhasPorColuna[i]) {
         try {
-          pagina.drawText(linha, { x, y: yColuna, size: PDF_LOCALIZADORES_TAMANHO_FONTE, font: fonteNormal });
+          pagina.drawText(linha, { x, y: yColuna, size: PDF_LOCALIZADORES_TAMANHO_FONTE, font: fonteNormal, color: COR_CINZA_TEXTO });
         } catch (e) {
           // Ignora linha que a fonte padrao nao consiga desenhar.
         }
@@ -2896,8 +3018,10 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
       }
       x += colunas[i].largura;
     }
-    y -= maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA + PDF_LOCALIZADORES_ALTURA_LINHA * 0.4;
+    y -= alturaLinha;
   }
+
+  desenharRodapePaginas(pdf, fonteNormal, larguraPagina, margem);
 
   return pdf.save();
 }
@@ -2932,6 +3056,133 @@ function construirPdfRemessasEmAberto(itens, tituloDocumento) {
     { titulo: "Dias da Remessa", largura: larguraUtil * 0.13, campo: "diasRemessa" },
   ];
   return construirPdfTabela(itens, colunas, tituloDocumento);
+}
+
+// Desenha uma "secao" do resumo do Relatório Gerencial da Unidade: uma
+// barra de titulo (fundo escuro, texto branco) seguida de linhas
+// rotulo/valor (rotulo a esquerda em cinza, valor em negrito e destacado
+// a direita), com faixas zebradas - mesma linguagem visual das tabelas
+// de Localizadores/Processos/Remessas, so' que no formato rotulo-valor
+// em vez de colunas. Devolve o "y" seguinte, apos a secao.
+function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, largura, titulo, linhas) {
+  let y = yInicial;
+  const alturaCabecalho = 18;
+
+  pagina.drawRectangle({ x, y: y - alturaCabecalho, width: largura, height: alturaCabecalho, color: COR_PRIMARIA_ESCURA });
+  pagina.drawText(sanitizarTextoPdf(titulo), {
+    x: x + 6,
+    y: y - alturaCabecalho + 5,
+    size: 10,
+    font: fonteNegrito,
+    color: COR_BRANCO,
+  });
+  y -= alturaCabecalho;
+
+  const alturaLinha = 16;
+  linhas.forEach((linha, indice) => {
+    if (indice % 2 === 1) {
+      pagina.drawRectangle({ x, y: y - alturaLinha, width: largura, height: alturaLinha, color: COR_CINZA_CLARO });
+    }
+    pagina.drawText(sanitizarTextoPdf(linha.rotulo), {
+      x: x + 6,
+      y: y - alturaLinha + 5,
+      size: 9.5,
+      font: fonteNormal,
+      color: COR_CINZA_TEXTO,
+    });
+    const textoValor = sanitizarTextoPdf(String(linha.valor));
+    const larguraValor = fonteNegrito.widthOfTextAtSize(textoValor, 9.5);
+    pagina.drawText(textoValor, {
+      x: x + largura - 6 - larguraValor,
+      y: y - alturaLinha + 5,
+      size: 9.5,
+      font: fonteNegrito,
+      color: COR_PRIMARIA_ESCURA,
+    });
+    y -= alturaLinha;
+  });
+
+  pagina.drawRectangle({ x, y, width: largura, height: 0.75, color: COR_CINZA_BORDA });
+  return y - 16;
+}
+
+// Monta a capa/resumo do Relatório Gerencial da Unidade: cabecalho
+// institucional, titulo, unidade/data e uma secao por bloco de dados
+// (conclusos para decisão/sentença, sem movimentação, remessas em
+// aberto), cada uma no formato rotulo/valor. Avisos (falhas parciais em
+// alguma consulta) entram no final, em texto simples. Devolve um PDF a
+// parte (bytes), depois copiado para dentro do PDF final junto com as
+// tabelas de Localizadores/Remessas - mesmo padrao ja' usado para
+// combinar os PDFs de cada secao num unico arquivo.
+async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoes, avisos) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  function novaPagina() {
+    const pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    return { pagina, y: altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem };
+  }
+
+  let { pagina, y } = novaPagina();
+
+  pagina.drawText("Relatório Gerencial da Unidade", {
+    x: margem,
+    y,
+    size: 18,
+    font: fonteNegrito,
+    color: COR_PRIMARIA_ESCURA,
+  });
+  y -= 24;
+  pagina.drawText(`Unidade: ${sanitizarTextoPdf(nomeUnidade)}`, {
+    x: margem,
+    y,
+    size: 11,
+    font: fonteNegrito,
+    color: COR_CINZA_TEXTO,
+  });
+  y -= 15;
+  pagina.drawText(`Data da informação: ${dataInformacao}`, {
+    x: margem,
+    y,
+    size: 9.5,
+    font: fonteNormal,
+    color: COR_CINZA_TEXTO,
+  });
+  y -= 22;
+
+  for (const secao of secoes) {
+    const alturaEstimada = 18 + secao.linhas.length * 16 + 16;
+    if (y - alturaEstimada < PDF_ALTURA_RODAPE + margem) {
+      ({ pagina, y } = novaPagina());
+    }
+    y = desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, margem, y, larguraUtil, secao.titulo, secao.linhas);
+  }
+
+  if (avisos.length > 0) {
+    if (y - 14 * (avisos.length + 1) < PDF_ALTURA_RODAPE + margem) {
+      ({ pagina, y } = novaPagina());
+    }
+    pagina.drawText("Avisos", { x: margem, y, size: 10, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+    y -= 14;
+    for (const aviso of avisos) {
+      const linhasAviso = quebrarLinhas(sanitizarTextoPdf(aviso), fonteNormal, 8.5, larguraUtil);
+      for (const linhaAviso of linhasAviso) {
+        pagina.drawText(linhaAviso, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+        y -= 11;
+      }
+    }
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+
+  return pdf.save();
 }
 
 // Planilha em formato "Excel XML Spreadsheet" (SpreadsheetML, o mesmo

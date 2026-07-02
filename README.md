@@ -414,6 +414,18 @@ perfil). Fluxo:
    único arquivo `relatorio_gerencial_<unidade>_<data>.pdf` em
    `Downloads/eproc/`, em vez de arquivos separados.
 
+   O PDF segue uma identidade visual sóbria e institucional, com o
+   cabeçalho **"TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ · Sistema eProc"**
+   repetido no topo de cada página, capa com os números organizados em
+   seções coloridas (rótulo/valor, uma por bloco: decisão, sentença, sem
+   movimentação, remessas), rodapé com numeração de página e aviso de
+   que o documento foi gerado pela extensão. As tabelas de Localizadores/
+   Processos/Remessas usam a mesma paleta (cabeçalho de coluna com fundo
+   escuro e texto branco, linhas com listras zebradas para facilitar a
+   leitura). Essa mesma identidade visual vale para os PDFs de
+   Localizadores/Processos por Localizador exportados fora do painel da
+   Corregedoria também, já que reaproveitam o mesmo gerador de tabela.
+
    A extração dos Localizadores **não** usa a tela "Localizadores do
    Órgão" (diferente do resto do painel) — o Relatório Geral tem seu
    próprio campo **"Localizador"** (um widget Tagify, igual ao de
