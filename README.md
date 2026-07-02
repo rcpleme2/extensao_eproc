@@ -92,16 +92,19 @@ Assim como no MD único, os documentos são organizados por evento da
 movimentação processual: para cada evento detectado na página, o PDF
 recebe uma página divisória com o texto do evento (número, data/hora e
 descrição) e a lista de nome + descrição de cada documento vinculado a
-ele (a descrição vem do `aria-label` do link no eproc, ex.: "Visualizar
-documento INIC1 do tipo pdf"), seguida dos documentos propriamente ditos
-(na mesma ordem cronológica de sempre). Eventos sem nenhum documento
-anexado ainda recebem sua página divisória, com uma nota indicando isso.
-Documentos cujo evento não foi identificado (ou não bate com nenhum
-evento detectado na página) entram por último, numa seção "Documentos
-sem evento identificado" (também com a lista de nome + descrição no
-início). Se a movimentação não puder ser detectada na página, o PDF
-volta ao formato antigo (documentos em sequência, sem divisórias de
-evento).
+ele. A descrição é a observação livre que o usuário digita ao anexar o
+documento no eproc (comum em documentos do tipo "Outros" — ex.: "FICHA DE
+CADASTRO RÉ"), lida do `<span class="infraTextoTooltipObservacao">` que
+aparece ao lado do link na página; nem todo documento tem uma, e nesses
+casos a lista mostra "Arquivo sem descrição incluída". Depois da lista
+vêm os documentos propriamente ditos (na mesma ordem cronológica de
+sempre). Eventos sem nenhum documento anexado ainda recebem sua página
+divisória, com uma nota indicando isso. Documentos cujo evento não foi
+identificado (ou não bate com nenhum evento detectado na página) entram
+por último, numa seção "Documentos sem evento identificado" (também com a
+lista de nome + descrição no início). Se a movimentação não puder ser
+detectada na página, o PDF volta ao formato antigo (documentos em
+sequência, sem divisórias de evento).
 
 Cada tipo de documento entra no PDF único de um jeito diferente:
 - **PDF**: as páginas do documento original são copiadas para o PDF final,

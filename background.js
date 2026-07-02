@@ -575,13 +575,13 @@ function rotuloEvento(evento) {
   return `${numero} — ${evento.dataHora} — ${evento.descricao || "(sem descrição)"}`;
 }
 
-// Lista, uma por linha, o nome e a descricao (quando disponivel - vem do
-// aria-label do link no eproc, ex.: "Visualizar documento INIC1 do tipo
-// pdf") de cada documento vinculado a um evento, para a pagina divisoria
-// do PDF unico mostrar de imediato quais arquivos estao ali dentro.
+// Lista, uma por linha, o nome e a descricao (a observacao livre que o
+// usuario digita ao anexar o documento - nem todo documento tem uma) de
+// cada documento vinculado a um evento, para a pagina divisoria do PDF
+// unico mostrar de imediato quais arquivos estao ali dentro.
 function listarDocumentosDoEvento(docs) {
   return docs
-    .map((doc) => (doc.descricao ? `- ${doc.nome}: ${doc.descricao}` : `- ${doc.nome}`))
+    .map((doc) => `- ${doc.nome}: ${doc.descricao || "Arquivo sem descrição incluída"}`)
     .join("\n");
 }
 

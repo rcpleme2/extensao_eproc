@@ -44,6 +44,21 @@ function extrairNumeroEvento(anchorEl) {
   return null;
 }
 
+// A descricao livre que o usuario digita ao anexar um documento (comum em
+// documentos do tipo "Outros") fica num <span class="infraTextoTooltip
+// infraTextoTooltipObservacao"> logo apos o link, dentro da mesma celula
+// da tabela - confirmado na pagina real do eproc (ex.: "OUT8</a><br>
+// <span class="infraTextoTooltip infraTextoTooltipObservacao">imagem</span>").
+// O aria-label do proprio link ("Visualizar documento OUT8 do tipo jpeg")
+// NAO e' essa descricao, so' repete nome+tipo - por isso nao e' usado
+// aqui. Nem todo documento tem essa observacao preenchida.
+function extrairDescricaoDocumento(anchorEl) {
+  const td = anchorEl.closest("td");
+  if (!td) return "";
+  const span = td.querySelector(".infraTextoTooltipObservacao");
+  return span ? (span.textContent || "").replace(/\s+/g, " ").trim() : "";
+}
+
 function extrairOrdemNoEvento(anchorEl) {
   // O numero no final do rotulo visivel (INIC1 -> 1, OUT3 -> 3, ...)
   // corresponde a posicao do documento dentro do seu evento.
@@ -94,11 +109,7 @@ function listarDocumentos() {
       idDocumento: idDoc,
       nome: (a.textContent || "").trim() || a.getAttribute("data-nome") || idDoc,
       dataNome: a.getAttribute("data-nome") || "",
-      // O eproc coloca uma descricao curta no aria-label do link (ex.:
-      // "Visualizar documento INIC1 do tipo pdf "), usada aqui so' como
-      // texto complementar nas paginas divisorias de evento do PDF/MD
-      // unico - nao ha' outra descricao mais detalhada disponivel no DOM.
-      descricao: (a.getAttribute("aria-label") || "").trim(),
+      descricao: extrairDescricaoDocumento(a),
       mimetype: (a.getAttribute("data-mimetype") || "").toLowerCase(),
       href: a.href,
       evento: extrairNumeroEvento(a),
