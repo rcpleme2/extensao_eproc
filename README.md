@@ -131,31 +131,44 @@ rede** além do próprio eproc.
 
 A extensão lê a tabela de movimentação da própria página (número do
 evento, data/hora, descrição) e monta uma lista cronológica no topo do
-arquivo, por exemplo:
+arquivo, com uma linha em branco entre cada movimento, por exemplo:
 
 ```
 ## Movimentação processual
 
-- **01/07/2026 09:15** — Evento 1: Distribuído por sorteio
-- **02/07/2026 10:30** — Evento 2: Juntada de petição inicial
+- **02/07/2026 09:50:47** — Evento 1: Distribuído por sorteio (TOMUN01)
+
+- **02/07/2026 09:50:47** — Evento 2: Autos incluídos no Juízo 100% Digital
 ```
 
-Essa detecção é **melhor esforço** (baseada em padrões de data/hora e nos
-mesmos identificadores de linha já usados para associar documentos aos
-seus eventos) — não foi validada contra uma amostra real da tabela de
-movimentação de todos os tribunais. Se a lista sair incompleta, fora de
-ordem ou vazia no seu tribunal, um `.mhtml` da tela de detalhes do
-processo (Chrome: Ctrl+S → "Página da Web, completa") permite ajustar a
-detecção com precisão — é o mesmo processo já usado para calibrar outras
-partes desta extensão.
+A tabela de eventos é identificada pela estrutura confirmada numa página
+real do eproc: a tabela `#tblEventos`, com uma linha `<tr
+id="trEventoN">` por evento (número, data/hora e descrição em colunas
+próprias — a descrição usa a classe `td.infraEventoDescricao`). Um
+método alternativo (baseado só em reconhecer o padrão de data/hora)
+entra em ação apenas se essa estrutura não for encontrada, para tentar
+cobrir variações entre tribunais.
+
+Cada linha de movimentação reconhecida é destacada na própria página com
+um fundo **azul claro**, do mesmo jeito que os links de documento já são
+destacados em amarelo — útil para conferir visualmente que a extensão
+identificou a tabela certa antes de exportar.
+
+Se a lista sair incompleta, fora de ordem ou vazia no seu tribunal, um
+`.mhtml` da tela de detalhes do processo (Chrome: Ctrl+S → "Página da Web,
+completa") permite ajustar a detecção com precisão.
 
 ### Extração de texto dos documentos
 
 - **PDF com camada de texto** (a maioria dos documentos gerados
-  digitalmente): o texto é extraído diretamente, usando a biblioteca
+  digitalmente): o texto é extraído com a biblioteca
   [pdf.js](https://mozilla.github.io/pdf.js/) (vendorizada em
-  `libs/pdf.min.js` / `libs/pdf.worker.min.js`), rodando dentro do
-  próprio service worker da extensão — sem aba oculta, sem rede.
+  `libs/pdf.min.js` / `libs/pdf.worker.min.js`). Isso roda numa **aba
+  oculta** própria (reaproveitada para todos os PDFs do processo, uma só
+  aba para todos eles) aberta no domínio do eproc — não no service worker
+  da extensão, já que o pdf.js precisa de um documento HTML mesmo só para
+  ler texto (rodar no service worker, que não tem DOM, falhava com
+  `Setting up fake worker failed: "document is not defined"`).
 - **PDF escaneado ou imagem** (jpg, png, gif, bmp, webp) sem camada de
   texto: **não há OCR nesta versão** (uma tentativa anterior usando
   Tesseract.js não funcionou de forma confiável e foi removida). Esses
@@ -164,8 +177,8 @@ partes desta extensão.
   individuais") para ver o conteúdo original.
 - **HTML** (certidões, atos ordinatórios, mandados): reaproveita o mesmo
   mecanismo de aba oculta já usado nos outros modos para ler o texto real
-  do documento (é a única parte deste modo que ainda usa uma aba própria,
-  já que não tem como ler esse conteúdo sem renderizar a página real).
+  do documento (uma aba própria por documento, separada da aba
+  compartilhada dos PDFs).
 
 ### Anonimização (melhor esforço)
 
@@ -202,16 +215,18 @@ modo e no cabeçalho do arquivo gerado.
 
 1. Abra o console do service worker em `chrome://extensions` (clique em
    **"service worker"** / "Inspect views: service worker" na extensão).
-   Os logs prefixados `[eproc-md]` mostram cada etapa: início/fim de cada
-   documento, páginas de PDF lidas, downloads, etc.
-2. Nenhuma etapa demorada fica presa para sempre: download de documento e
-   abertura de PDF têm limite de tempo (30s) — ao estourar, vira um erro
-   tratado normalmente (nos avisos do arquivo final), em vez de travar a
-   exportação inteira.
-3. Documentos "html" ainda usam uma aba oculta própria (visível na barra
-   de abas do navegador, sem ficar em primeiro plano) - se travar
-   especificamente num documento desse tipo, o mecanismo é o mesmo já
-   usado no modo "Arquivos individuais"/"PDF único", não específico do MD.
+   Os logs prefixados `[eproc-md]` mostram cada etapa: abertura da aba de
+   PDF, início/fim de cada documento, downloads, etc.
+2. Se o processo tiver algum PDF, uma aba oculta é aberta para
+   processá-los (visível na barra de abas do navegador, sem ficar em
+   primeiro plano) — clique nela e abra o DevTools (F12) para ver logs
+   `[eproc-md]` específicos de dentro dela.
+3. Documentos "html" usam sua própria aba oculta separada (mesmo
+   mecanismo já usado no modo "Arquivos individuais"/"PDF único").
+4. Nenhuma etapa demorada fica presa para sempre: download de documento
+   tem limite de 30s, e a extração de texto de cada PDF tem limite de
+   60s — ao estourar, vira um erro tratado normalmente (nos avisos do
+   arquivo final), em vez de travar a exportação inteira.
 
 ## Relatório Geral (conclusos para despacho/sentença)
 

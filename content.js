@@ -123,93 +123,131 @@ function listarDocumentos() {
   };
 }
 
+const CLASSE_DESTAQUE_MOVIMENTACAO = "eproc-exportador-destaque-movimentacao";
+const ID_ESTILO_DESTAQUE_MOVIMENTACAO = "eproc-exportador-estilo-destaque-movimentacao";
+
+// Mesma ideia de "garantirEstiloDestaque"/"destacarAncoras" (usadas para
+// destacar os links de documento), so' que para as linhas de
+// movimentação identificadas - com uma cor diferente (azul) para não se
+// confundir com o destaque amarelo dos documentos.
+function garantirEstiloDestaqueMovimentacao() {
+  if (document.getElementById(ID_ESTILO_DESTAQUE_MOVIMENTACAO)) return;
+  const style = document.createElement("style");
+  style.id = ID_ESTILO_DESTAQUE_MOVIMENTACAO;
+  style.textContent = `
+    tr.${CLASSE_DESTAQUE_MOVIMENTACAO} {
+      background-color: rgba(33, 150, 243, 0.16) !important;
+      outline: 1px solid #1565c0 !important;
+      box-shadow: 0 0 0 1px rgba(21, 101, 192, 0.35) !important;
+    }
+    tr.${CLASSE_DESTAQUE_MOVIMENTACAO} > td {
+      background-color: rgba(33, 150, 243, 0.16) !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function destacarLinhasMovimentacao(linhas) {
+  garantirEstiloDestaqueMovimentacao();
+  for (const linha of linhas) {
+    linha.classList.add(CLASSE_DESTAQUE_MOVIMENTACAO);
+  }
+}
+
 // Le' a tabela de movimentação do processo (numero do evento, data/hora e
 // descrição), usada para incluir uma linha do tempo no MD único - mesmo
-// quando o processo não tem nenhum documento anexado.
+// quando o processo não tem nenhum documento anexado - e destaca
+// visualmente (fundo azul) cada linha reconhecida na própria página,
+// para conferência visual, do mesmo jeito que já é feito com os
+// documentos (fundo amarelo).
 //
-// IMPORTANTE: isto é uma detecção "melhor esforço", sem uma amostra real
-// da tabela de movimentação confirmada (diferente de outras partes desta
-// extensão, que foram ajustadas com HTML real fornecido pelo usuário).
-// Duas estratégias, da mais para a menos específica:
-//   1. Linhas de tabela (<tr>) que contenham alguma célula com o mesmo
-//      padrão de id já confirmado para documentos (td[id^="tdEvento"]) -
-//      cada evento tem uma linha própria nessa tabela.
-//   2. Se a estratégia 1 não achar nada (ex.: processo sem documentos
-//      anexados, só andamentos), cai para qualquer <tr> cujo texto
-//      contenha um padrão de data/hora reconhecível
-//      ("dd/mm/aaaa hh:mm"), presente em qualquer variação de tabela de
-//      eventos do eproc.
-// Se o resultado não parecer fazer sentido no seu tribunal, um .mhtml da
-// tela de detalhes do processo (como o já usado para outras partes desta
-// extensão) permite ajustar os seletores com precisão.
+// Estrutura confirmada com uma página real do eproc (tela de detalhes do
+// processo): tabela "#tblEventos", uma linha "<tr id=\"trEventoN\">" por
+// evento, com colunas diretas (não aninhadas) para número do evento,
+// data/hora ("dd/mm/aaaa hh:mm:ss") e descrição
+// ("td.infraEventoDescricao"). Os documentos de cada evento ficam numa
+// tabela ANINHADA dentro de uma dessas colunas (por isso não usamos mais
+// "td[id^=tdEvento]" para achar a linha do evento - esse id pertence à
+// tabela aninhada de documentos, não à linha do evento).
+//
+// Estratégia 2 (fallback): usada só se a estratégia 1 não encontrar
+// nada, ex. num tribunal cuja tabela tenha outro id/estrutura - considera
+// qualquer <tr> cuja alguma célula direta seja reconhecível como
+// data/hora.
 function listarMovimentacaoProcessual() {
   const REGEX_DATA_HORA = /^(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)$/;
 
-  // Le' celula por celula (em vez de "linha.textContent" direto): o
-  // textContent de uma <tr> gruda o texto de todas as <td> uma na outra
-  // sem nenhum separador (ex.: "1" + "01/07/2026 09:15" vira
-  // "101/07/2026 09:15", quebrando o reconhecimento da data). Um
-  // separador explicito entre celulas evita esse problema.
-  function celulasDaLinha(linha) {
-    return Array.from(linha.querySelectorAll(":scope > td")).map((td) =>
-      (td.textContent || "").replace(/\s+/g, " ").trim()
-    );
+  function celulasDiretas(linha) {
+    return Array.from(linha.querySelectorAll(":scope > td"));
   }
 
-  // As duas estrategias rodam sempre (e nao uma so' como fallback da
-  // outra): eventos SEM nenhum documento anexado nao tem nenhuma celula
-  // "tdEvento*" para a estrategia 1 encontrar, entao dependem da
-  // estrategia 2 (data/hora reconhecivel) mesmo numa pagina onde outros
-  // eventos (com documento) ja' foram encontrados pela estrategia 1. O
-  // Set elimina duplicatas quando as duas estrategias acham a mesma linha.
-  const linhasCandidatas = new Set();
-  document.querySelectorAll('td[id^="tdEvento"]').forEach((td) => {
-    const linha = td.closest("tr");
-    if (linha) linhasCandidatas.add(linha);
-  });
-  document.querySelectorAll("tr").forEach((tr) => {
-    if (celulasDaLinha(tr).some((celula) => REGEX_DATA_HORA.test(celula))) {
-      linhasCandidatas.add(tr);
+  function extrairDeLinha(linha) {
+    const idMatch = (linha.id || "").match(/^trEvento(\d+)$/);
+    const numeroEvento = idMatch ? Number(idMatch[1]) : null;
+
+    const tds = celulasDiretas(linha);
+    const tdData = tds.find((td) => REGEX_DATA_HORA.test((td.textContent || "").trim()));
+    if (!tdData) return null;
+    const dataHora = (tdData.textContent || "").trim();
+
+    const tdDescricao = linha.querySelector(":scope > td.infraEventoDescricao");
+    let descricao;
+    if (tdDescricao) {
+      descricao = (tdDescricao.textContent || "").replace(/\s+/g, " ").trim();
+    } else {
+      // Fallback generico (tribunal sem a classe "infraEventoDescricao"):
+      // junta as demais celulas diretas, exceto a de data e uma que seja
+      // so' o numero do evento repetido.
+      descricao = tds
+        .filter(
+          (td) =>
+            td !== tdData &&
+            (numeroEvento == null || (td.textContent || "").trim() !== String(numeroEvento))
+        )
+        .map((td) => (td.textContent || "").replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .join(" — ");
     }
-  });
+
+    return { linha, numeroEvento, dataHora, descricao };
+  }
 
   const eventos = [];
+  const linhasDestacar = [];
   const vistos = new Set();
 
-  for (const linha of linhasCandidatas) {
-    const celulas = celulasDaLinha(linha);
-    const indiceData = celulas.findIndex((celula) => REGEX_DATA_HORA.test(celula));
-    if (indiceData === -1) continue;
-
-    const dataHora = celulas[indiceData];
-
-    let numeroEvento = null;
-    const elementoComId = linha.id ? linha : linha.querySelector('[id*="Evento"]');
-    const idMatch = ((elementoComId && elementoComId.id) || "").match(/Evento(\d+)/);
-    if (idMatch) numeroEvento = Number(idMatch[1]);
-
-    // Descricao: as demais celulas da linha, ignorando a data/hora e uma
-    // celula que seja so' o numero do evento (ja capturado a parte).
-    const descricao = celulas
-      .filter((celula, indice) => {
-        if (indice === indiceData) return false;
-        if (numeroEvento != null && celula === String(numeroEvento)) return false;
-        return celula !== "";
-      })
-      .join(" — ")
-      .trim();
-
-    const chave = `${numeroEvento}|${dataHora}|${descricao}`;
-    if (vistos.has(chave)) continue;
+  const processarLinha = (linha) => {
+    const evento = extrairDeLinha(linha);
+    if (!evento) return;
+    const chave = `${evento.numeroEvento}|${evento.dataHora}|${evento.descricao}`;
+    if (vistos.has(chave)) return;
     vistos.add(chave);
+    linhasDestacar.push(linha);
+    eventos.push({
+      numeroEvento: evento.numeroEvento,
+      dataHora: evento.dataHora,
+      descricao: evento.descricao,
+    });
+  };
 
-    eventos.push({ numeroEvento, dataHora, descricao });
+  document
+    .querySelectorAll('#tblEventos tbody > tr[id^="trEvento"], table.infraTable tbody > tr[id^="trEvento"]')
+    .forEach(processarLinha);
+
+  if (eventos.length === 0) {
+    document.querySelectorAll("tr").forEach((tr) => {
+      if (celulasDiretas(tr).some((td) => REGEX_DATA_HORA.test((td.textContent || "").trim()))) {
+        processarLinha(tr);
+      }
+    });
   }
 
   eventos.sort((a, b) => {
     if (a.numeroEvento != null && b.numeroEvento != null) return a.numeroEvento - b.numeroEvento;
     return 0;
   });
+
+  destacarLinhasMovimentacao(linhasDestacar);
 
   return eventos;
 }

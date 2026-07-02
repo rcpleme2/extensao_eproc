@@ -1,19 +1,12 @@
 // Service worker: recebe a lista de documentos do painel e dispara os
 // downloads via chrome.downloads, um de cada vez, reportando progresso.
-// Tambem sabe montar um PDF unico (pdf-lib) e um MD unico com texto
-// anonimizado (pdf.js, so' para ler a camada de texto nativa dos PDFs -
-// sem OCR).
+// Tambem sabe montar um PDF unico (pdf-lib, aqui mesmo no service worker)
+// e um MD unico com texto anonimizado - a extracao de texto de PDF (via
+// pdf.js) roda numa aba oculta, nao aqui (ver comentario mais abaixo,
+// perto de "Construcao do MD unico", sobre o motivo).
 
-importScripts("libs/pdf-lib.min.js", "libs/pdf.min.js");
+importScripts("libs/pdf-lib.min.js");
 const { PDFDocument, StandardFonts } = self.PDFLib;
-
-// pdf.js precisa do arquivo do worker mesmo usando "disableWorker: true"
-// nas chamadas (esse modo so' evita criar uma Worker thread separada -
-// ele ainda carrega/roda o codigo de libs/pdf.worker.min.js, so' que na
-// mesma thread do service worker, em vez de numa thread a parte).
-// Testado num Chromium real: sem isso, getDocument() falha com "No
-// GlobalWorkerOptions.workerSrc specified" mesmo com disableWorker.
-self.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("libs/pdf.worker.min.js");
 
 // Abre o painel lateral (side panel) ao clicar no icone da extensao, em
 // vez do popup efemero padrao, para que ele permaneca visivel enquanto o
@@ -424,21 +417,22 @@ async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProce
 
 // ---- Construcao do MD unico (texto + anonimizacao "melhor esforco") ----
 //
-// Diferente das primeiras versoes, este modo NAO faz OCR (removido por nao
-// ter funcionado de forma confiavel) - so' extrai o texto que ja existe
-// nativamente no documento. Isso significa que roda inteiramente no
-// SERVICE WORKER, sem precisar de nenhuma aba oculta nem chamada de rede
-// externa: pdf.js (vendorizado em libs/pdf.min.js) le' a camada de texto
-// nativa dos PDFs, com "disableWorker: true" (sem worker separado, ja'
-// que nao ha' renderizacao de pagina para fazer - so' texto). Documentos
-// "html" continuam usando o mecanismo de aba oculta ja' existente (nao
-// tem como ler o conteudo deles sem renderizar a pagina real). Imagens
+// Este modo NAO faz OCR (removido por nao ter funcionado de forma
+// confiavel) - so' extrai o texto que ja existe nativamente no
+// documento. A extracao de PDF usa pdf.js (vendorizado em
+// libs/pdf.min.js), mas NAO roda no service worker: pdf.js precisa de
+// "document" (DOM) mesmo so' para ler texto - a tentativa de rodar no
+// service worker falhava com "Setting up fake worker failed: document is
+// not defined", ja' que service workers nao tem DOM. Por isso roda numa
+// ABA OCULTA de verdade (mesmo mecanismo ja' usado para documentos
+// "html"), aberta no proprio dominio do eproc, reaproveitada para todos
+// os PDFs do processo (uma aba so', nao uma por documento). Imagens
 // (jpg/png/etc.) nao tem como ter texto extraido sem OCR, entao entram no
-// MD apenas com uma nota indicando isso.
+// MD apenas com uma nota indicando isso, sem precisar de aba nenhuma.
 //
 // Prefixo usado em todos os logs deste modo (console do "Inspect views:
-// service worker" em chrome://extensions), para facilitar filtrar
-// ("[eproc-md]") quando algo falhar.
+// service worker" em chrome://extensions, e da propria aba oculta), para
+// facilitar filtrar ("[eproc-md]") quando algo falhar.
 const LOG_MD = "[eproc-md]";
 
 // Impede que uma unica etapa demorada (ex.: um fetch que nunca retorna)
@@ -456,46 +450,97 @@ function comTimeout(promessa, ms, mensagem) {
 
 const MIMETYPES_IMAGEM_SEM_OCR = ["jpg", "jpeg", "png", "gif", "bmp", "webp"];
 
-// Le' a camada de texto nativa de um PDF com pdf.js, pagina por pagina.
-// "disableWorker: true" faz o pdf.js rodar o codigo do worker
-// (libs/pdf.worker.min.js, carregado via workerSrc no topo deste arquivo)
-// na mesma thread do service worker, em vez de tentar criar uma Worker
-// thread separada - mais simples e suficiente para so' ler texto (nao ha'
-// nenhuma renderizacao de pagina, ja' que nao fazemos mais OCR).
-async function extrairTextoPdf(buffer, nome) {
-  console.log(LOG_MD, "Abrindo PDF com pdf.js:", nome, `(${buffer.byteLength} bytes)`);
-  const pdf = await comTimeout(
-    self.pdfjsLib.getDocument({ data: buffer, disableWorker: true }).promise,
-    30000,
-    `Tempo esgotado (30s) abrindo o PDF "${nome}" com pdf.js.`
-  );
-  console.log(LOG_MD, `PDF "${nome}" aberto, páginas:`, pdf.numPages);
-
-  const partes = [];
-  for (let i = 1; i <= pdf.numPages; i += 1) {
-    const pagina = await pdf.getPage(i);
-    const conteudoTexto = await pagina.getTextContent();
-    const texto = conteudoTexto.items
-      .map((item) => item.str || "")
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-    console.log(LOG_MD, `"${nome}" página ${i}/${pdf.numPages}: ${texto.length} caractere(s).`);
-    partes.push(
-      texto || "_(sem texto nesta página - o documento pode ser uma imagem digitalizada, sem OCR nesta versão)_"
-    );
+// Injetada UMA vez por aba (via files: ["libs/pdf.min.js"] + esta
+// funcao). Aponta o worker do pdf.js para o arquivo local e define, no
+// escopo global da PAGINA (window.__eproc*), a funcao que extrai o texto
+// de um PDF - necessario porque cada chamada de executeScript com "func"
+// e' serializada e avaliada isoladamente, sem acesso as demais funcoes
+// deste arquivo (background.js).
+function prepararAmbientePdfNaPagina() {
+  if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("libs/pdf.worker.min.js");
   }
 
-  return partes.join("\n\n");
+  window.__eprocExtrairTextoPdf = async function (parametros) {
+    try {
+      const resposta = await fetch(parametros.url, { credentials: "same-origin" });
+      if (!resposta.ok) {
+        throw new Error(`Falha ao baixar o documento (HTTP ${resposta.status}).`);
+      }
+      const buffer = await resposta.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
+
+      const partes = [];
+      for (let i = 1; i <= pdf.numPages; i += 1) {
+        const pagina = await pdf.getPage(i);
+        const conteudoTexto = await pagina.getTextContent();
+        const texto = conteudoTexto.items
+          .map((item) => item.str || "")
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim();
+        partes.push(
+          texto || "_(sem texto nesta página - o documento pode ser uma imagem digitalizada, sem OCR nesta versão)_"
+        );
+      }
+
+      return { texto: partes.join("\n\n"), erro: null };
+    } catch (e) {
+      return { texto: "", erro: e && e.message ? e.message : String(e) };
+    }
+  };
 }
 
-// Baixa e extrai o texto de um documento (PDF ou imagem) para o MD único.
-// Documentos "html" NAO passam por aqui - continuam usando
-// "obterTextoHtmlReal", ja' existente, que precisa de uma aba oculta
-// renderizando a pagina de verdade.
-async function extrairTextoDocumentoMd(url, mimetype, nome) {
-  console.log(LOG_MD, "Processando documento:", nome, "| tipo:", mimetype);
+// Chamada uma vez por PDF (executeScript so' aceita passar "args" junto
+// de "func", nao junto de "files") - so' repassa para a funcao real ja'
+// definida no escopo da pagina por "prepararAmbientePdfNaPagina".
+function chamarExtrairTextoPdfNaPagina(parametros) {
+  return window.__eprocExtrairTextoPdf(parametros);
+}
 
+async function prepararAbaProcessamentoPdfMd(urlOrigemEproc) {
+  console.log(LOG_MD, "Abrindo aba oculta de processamento de PDF em:", urlOrigemEproc);
+  const aba = await chrome.tabs.create({ url: urlOrigemEproc, active: false });
+  await aguardarCarregamentoAba(aba.id);
+
+  await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    files: ["libs/pdf.min.js"],
+  });
+  await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: prepararAmbientePdfNaPagina,
+  });
+  console.log(LOG_MD, "Aba de processamento de PDF pronta:", aba.id);
+
+  return aba;
+}
+
+async function extrairTextoPdfNaAba(tabId, url, nome) {
+  console.log(LOG_MD, "Extraindo texto do PDF:", nome);
+  try {
+    const [{ result } = {}] = await comTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: chamarExtrairTextoPdfNaPagina,
+        args: [{ url, nome }],
+      }),
+      60000,
+      `Tempo esgotado (60s) extraindo texto de "${nome}" na aba oculta.`
+    );
+    console.log(LOG_MD, "Concluído:", nome, "| erro:", result && result.erro);
+    return result || { texto: "", erro: "Sem resultado retornado pela aba." };
+  } catch (e) {
+    console.error(LOG_MD, "Erro extraindo", nome, ":", e);
+    return { texto: "", erro: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Extrai o texto de um documento (PDF ou imagem) para o MD único.
+// Documentos "html" NAO passam por aqui - continuam usando
+// "obterTextoHtmlReal", ja' existente, que tem seu proprio mecanismo de
+// aba oculta (uma por documento).
+async function extrairTextoDocumentoMd(tabIdPdf, url, mimetype, nome) {
   if (MIMETYPES_IMAGEM_SEM_OCR.includes(mimetype)) {
     return {
       texto: `_Documento do tipo imagem (${mimetype}) - texto não incluído (sem OCR nesta versão). Consulte o arquivo individual para ver a imagem._`,
@@ -510,23 +555,7 @@ async function extrairTextoDocumentoMd(url, mimetype, nome) {
     };
   }
 
-  try {
-    const resposta = await comTimeout(
-      fetch(url, { credentials: "same-origin" }),
-      30000,
-      `Tempo esgotado (30s) baixando o documento "${nome}".`
-    );
-    if (!resposta.ok) {
-      throw new Error(`Falha ao baixar o documento (HTTP ${resposta.status}).`);
-    }
-    const buffer = await resposta.arrayBuffer();
-    const texto = await extrairTextoPdf(buffer, nome);
-    console.log(LOG_MD, "Concluído:", nome);
-    return { texto, erro: null };
-  } catch (e) {
-    console.error(LOG_MD, "Erro processando", nome, ":", e);
-    return { texto: "", erro: e && e.message ? e.message : String(e) };
-  }
+  return extrairTextoPdfNaAba(tabIdPdf, url, nome);
 }
 
 // ---- Anonimizacao "melhor esforco" ----
@@ -636,7 +665,7 @@ function construirSecaoMovimentacao(movimentacao) {
   return (
     "## Movimentação processual\n\n" +
     "> Detecção automática (melhor esforço) da tabela de movimentação da página - confira contra a tela do eproc.\n\n" +
-    `${linhas.join("\n")}\n`
+    `${linhas.join("\n\n")}\n`
   );
 }
 
@@ -646,43 +675,59 @@ async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProces
   const secoes = [construirSecaoMovimentacao(movimentacao)];
   const avisos = [];
 
-  for (let i = 0; i < documentos.length; i += 1) {
-    const doc = documentos[i];
-    const numero = String(i + 1).padStart(4, "0");
-    let corpo;
-    console.log(LOG_MD, `[${i + 1}/${documentos.length}]`, doc.nome, `(${doc.mimetype})`);
-    if (aoProgredir) aoProgredir(i, documentos.length, doc.nome);
+  // A aba de processamento de PDF so' e' aberta se houver pelo menos um
+  // PDF entre os documentos - processos so' com HTML/imagens nao
+  // precisam dela.
+  let abaPdf = null;
+  if (documentos.some((doc) => doc.mimetype === "pdf")) {
+    const origemEproc = `${new URL(documentos[0].href).origin}/eproc/controlador.php`;
+    abaPdf = await prepararAbaProcessamentoPdfMd(origemEproc);
+  }
 
-    try {
-      const urlReal = await resolverUrl(doc);
+  try {
+    for (let i = 0; i < documentos.length; i += 1) {
+      const doc = documentos[i];
+      const numero = String(i + 1).padStart(4, "0");
+      let corpo;
+      console.log(LOG_MD, `[${i + 1}/${documentos.length}]`, doc.nome, `(${doc.mimetype})`);
+      if (aoProgredir) aoProgredir(i, documentos.length, doc.nome);
 
-      if (doc.mimetype === "html") {
-        const { texto, erro } = await obterTextoHtmlReal(urlReal);
-        if (texto) {
-          corpo = texto;
+      try {
+        const urlReal = await resolverUrl(doc);
+
+        if (doc.mimetype === "html") {
+          const { texto, erro } = await obterTextoHtmlReal(urlReal);
+          if (texto) {
+            corpo = texto;
+          } else {
+            console.warn(LOG_MD, "Falha ao extrair HTML de", doc.nome, ":", erro);
+            corpo = `_Não foi possível extrair o conteúdo deste documento (${erro || "motivo desconhecido"})._`;
+            avisos.push(`${doc.nome}: ${erro || "motivo desconhecido"}`);
+          }
         } else {
-          console.warn(LOG_MD, "Falha ao extrair HTML de", doc.nome, ":", erro);
-          corpo = `_Não foi possível extrair o conteúdo deste documento (${erro || "motivo desconhecido"})._`;
-          avisos.push(`${doc.nome}: ${erro || "motivo desconhecido"}`);
+          const resultado = await extrairTextoDocumentoMd(abaPdf && abaPdf.id, urlReal, doc.mimetype, doc.nome);
+          if (resultado.erro && !resultado.texto) {
+            console.warn(LOG_MD, "Falha ao extrair texto de", doc.nome, ":", resultado.erro);
+            corpo = `_Não foi possível extrair o texto deste documento (${resultado.erro})._`;
+            avisos.push(`${doc.nome}: ${resultado.erro}`);
+          } else {
+            corpo = resultado.texto || "_(sem texto identificado)_";
+          }
         }
-      } else {
-        const resultado = await extrairTextoDocumentoMd(urlReal, doc.mimetype, doc.nome);
-        if (resultado.erro && !resultado.texto) {
-          console.warn(LOG_MD, "Falha ao extrair texto de", doc.nome, ":", resultado.erro);
-          corpo = `_Não foi possível extrair o texto deste documento (${resultado.erro})._`;
-          avisos.push(`${doc.nome}: ${resultado.erro}`);
-        } else {
-          corpo = resultado.texto || "_(sem texto identificado)_";
-        }
+      } catch (e) {
+        console.error(LOG_MD, "Erro processando", doc.nome, ":", e);
+        corpo = `_Não foi possível processar este documento (${String(e)})._`;
+        avisos.push(`${doc.nome}: ${String(e)}`);
       }
-    } catch (e) {
-      console.error(LOG_MD, "Erro processando", doc.nome, ":", e);
-      corpo = `_Não foi possível processar este documento (${String(e)})._`;
-      avisos.push(`${doc.nome}: ${String(e)}`);
-    }
 
-    secoes.push(`## ${numero} — ${doc.nome}\n\n${corpo.trim()}\n`);
-    if (aoProgredir) aoProgredir(i + 1, documentos.length, doc.nome);
+      secoes.push(`## ${numero} — ${doc.nome}\n\n${corpo.trim()}\n`);
+      if (aoProgredir) aoProgredir(i + 1, documentos.length, doc.nome);
+    }
+  } finally {
+    if (abaPdf) {
+      console.log(LOG_MD, "Encerrando aba de processamento de PDF", abaPdf.id, "...");
+      chrome.tabs.remove(abaPdf.id).catch(() => {});
+    }
   }
 
   console.log(LOG_MD, "Todos os documentos processados. Avisos:", avisos.length);
