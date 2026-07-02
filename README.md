@@ -1,9 +1,9 @@
 # Extensão Auxiliar eProc
 
-Extensão para Chrome/Edge com duas funcionalidades para o sistema **eproc**
+Extensão para Chrome/Edge com funcionalidades para o sistema **eproc**
 (usado por diversos tribunais brasileiros: TJPR, TJSC, TJAL, Justiça Federal,
-etc.), organizadas em dois cartões separados no painel: **Exportar
-Documentos** e **Relatórios**.
+etc.), organizadas em três cartões separados no painel: **Exportar
+Documentos**, **Relatórios** e **Regras de Automação**.
 
 ## Exportar Documentos
 
@@ -185,6 +185,33 @@ ou conferir o download.
 O botão funciona a partir de qualquer página do eproc que tenha o menu
 lateral visível (não precisa estar na tela de um processo
 especificamente).
+
+## Regras de Automação
+
+Na tela **"Automatizar Tramitação Processual"** do eproc
+(`acao=automatizar_localizadores`), cada regra listada na tabela pode estar
+**ativa** ou **desativada** (indicado pelo interruptor "Ativa"/"**
+DESATIVADA **" ao lado de cada linha). Essa tabela é difícil de ler de
+relance: as colunas são estreitas e cada regra mistura critério, ação e
+outros filtros num texto corrido.
+
+O cartão **"Regras de Automação"** tem um botão **"Exportar regras
+ativas"**, habilitado automaticamente sempre que a aba ativa está nessa
+tela (reavaliado a cada troca de aba/navegação, já que o painel lateral
+permanece aberto). Ao clicar:
+
+1. A extensão lê a tabela e filtra **apenas as regras ativas** (ignora as
+   marcadas como "** DESATIVADA **").
+2. Gera um documento HTML novo, com um "cartão" por regra ativa, mostrando
+   de forma completa e legível: número/prioridade, grupo, localizador de
+   origem, o critério que dispara a regra, o localizador de destino/ação
+   (incluindo eventos automatizados programados, quando houver) e outros
+   critérios (ex.: juízo do processo, localizador adicional). O conteúdo é
+   o mesmo da página original (nada é resumido ou omitido), só que
+   reorganizado em blocos rotulados em vez da tabela apertada.
+3. Abre esse documento em uma **aba nova**, com um link de atalho em cada
+   cartão para editar aquela regra ou ver seu histórico diretamente no
+   eproc.
 
 ## Abrir o painel a partir da própria página
 

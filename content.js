@@ -259,9 +259,82 @@ const observadorEventos = new MutationObserver(() => {
 });
 observadorEventos.observe(document.body, { childList: true, subtree: true });
 
+// Le' as regras da tela "Automatizar Tramitação Processual"
+// (acao=automatizar_localizadores). Cada regra e' uma <tr
+// id="trLocalizadorAut_{id}"> com 8 colunas (na mesma ordem do <thead> da
+// pagina): checkbox, Nº/Prioridade, Grupo, Localizador ORIGEM, Tipo de
+// Controle/Critério, Localizador DESTINO/Ação, Outros Critérios, Ações.
+// O estado ativa/inativa de cada regra e' o proprio checkbox do
+// "toggle" (#customSwitch{id}, rotulado "Ativa"/"Inativar Regra
+// Temporariamente") - so' as regras com esse checkbox marcado entram no
+// resultado, conforme pedido ("considere apenas as regras que estão
+// ativas").
+function listarRegrasAutomacaoAtivas() {
+  const linhas = Array.from(document.querySelectorAll('tr[id^="trLocalizadorAut_"]'));
+  const regras = [];
+
+  for (const linha of linhas) {
+    const m = linha.id.match(/^trLocalizadorAut_(.+)$/);
+    const id = m ? m[1] : null;
+    const switchEl = id ? document.getElementById(`customSwitch${id}`) : null;
+    // Se por algum motivo o switch nao for encontrado, nao arrisca excluir
+    // a regra silenciosamente - melhor incluir do que esconder uma regra
+    // que pode estar ativa.
+    const ativa = switchEl ? switchEl.checked : true;
+    if (!ativa) continue;
+
+    const tds = linha.querySelectorAll(":scope > td");
+    if (tds.length < 8) continue;
+
+    const spanNumero = tds[1].querySelector("span > span");
+    const numero = spanNumero ? (spanNumero.textContent || "").trim() : "";
+
+    const opcaoPrioridade = tds[1].querySelector("select.selPrioridade option[selected]");
+    const prioridade = opcaoPrioridade ? (opcaoPrioridade.textContent || "").trim() : "";
+
+    const spanGrupo = tds[2].querySelector('span[id^="spnGrupoRegra_"]');
+    let grupo = spanGrupo ? (spanGrupo.textContent || "").trim() : "";
+    if (!grupo || grupo === "[+]") grupo = "Nenhum";
+
+    const localizadorOrigem = (tds[3].textContent || "").trim() || "Nenhum";
+    const criterioHtml = (tds[4].innerHTML || "").trim();
+    const destinoAcaoHtml = (tds[5].innerHTML || "").trim();
+    const outrosCriteriosHtml = (tds[6].innerHTML || "").trim();
+
+    const linkEditar = tds[7].querySelector(
+      'a[href*="acao=automatizar_localizadores_alterar"]:not([href*="sin_duplicar_regra"])'
+    );
+    const linkLog = tds[7].querySelector('a[href*="acao=automatizar_localizadores_log_por_regra"]');
+
+    regras.push({
+      id,
+      numero,
+      prioridade,
+      grupo,
+      localizadorOrigem,
+      criterioHtml,
+      destinoAcaoHtml,
+      outrosCriteriosHtml,
+      linkEditar: linkEditar ? linkEditar.href : "",
+      linkLog: linkLog ? linkLog.href : "",
+    });
+  }
+
+  regras.sort((a, b) => (Number(a.numero) || 0) - (Number(b.numero) || 0));
+
+  return {
+    regras,
+    tituloPagina: document.title || "",
+    totalRegrasNaPagina: linhas.length,
+  };
+}
+
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "LISTAR_DOCUMENTOS") {
     sendResponse(listarDocumentos());
+  }
+  if (mensagem && mensagem.tipo === "LISTAR_REGRAS_AUTOMACAO") {
+    sendResponse(listarRegrasAutomacaoAtivas());
   }
   return true;
 });
