@@ -405,6 +405,8 @@ perfil). Fluxo:
    - Processos sem movimentação há mais de 30, 90 e 120 dias.
    - O total de processos de cada Localizador da unidade, ordenado do
      maior para o menor total.
+   - As Remessas em Aberto da unidade: Juiz Leigo, Processo, Classe
+     Judicial, Data Remessa e Dias da Remessa.
 
    Tudo isso reaproveita as funções já existentes no painel: as mesmas
    consultas do Relatório Geral (agora com um filtro extra de
@@ -423,6 +425,22 @@ perfil). Fluxo:
    de estabilidade já usado para o campo Tagify de "Informação
    complementar" (reaproveitar a mesma aba para duas interações seguidas
    com esse tipo de campo se mostrou instável nos testes anteriores).
+
+   As Remessas em Aberto vêm de uma tela separada, acessada pelo menu
+   lateral **Relatórios → Relatório de remessas em aberto**
+   (`acao=relatorio_remessas_em_aberto/listar`). Diferente do resto do
+   painel, essa tela filtra a unidade por um select próprio
+   (`#IdOrgaoSecretaria`, rotulado "Órgão Julgador"), que usa um espaço
+   de identificadores totalmente diferente do `#selIdOrgaoJuizo`/
+   `#selInfraUnidades` e só lista as unidades pelo **nome descritivo**
+   (sem a sigla) — por isso a extensão guarda esse nome descritivo (lido
+   do atributo `title` das opções do Relatório Geral, no formato "Nome
+   Descritivo - SIGLA") ao carregar as unidades, e usa esse nome (não o
+   ID) para selecionar a unidade certa nessa tela. A tabela de resultado
+   é um DataTable carregado via AJAX; a extensão lê os dados direto pela
+   API do DataTables (em vez de raspar as células renderizadas) e muda a
+   paginação para "mostrar tudo" antes de ler, evitando ter que navegar
+   entre páginas.
 
 ## Regras de Automação
 

@@ -445,7 +445,11 @@ selectUnidadeRelatorio.addEventListener("change", () => {
     areaBtnExportarGerencial.hidden = true;
     return;
   }
-  unidadeSelecionadaCorregedoria = { valor, nome: opcaoSelecionada.textContent };
+  unidadeSelecionadaCorregedoria = {
+    valor,
+    nome: opcaoSelecionada.textContent,
+    nomeDescritivo: opcaoSelecionada.dataset.nomeDescritivo || null,
+  };
   areaUnidadeSelecionada.hidden = false;
   areaUnidadeSelecionada.textContent = `Informações serão extraídas de: ${unidadeSelecionadaCorregedoria.nome}`;
   areaBtnExportarGerencial.hidden = false;
@@ -478,6 +482,7 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
       tipo: "EXPORTAR_RELATORIO_GERENCIAL_UNIDADE",
       valorUnidade: unidade.valor,
       nomeUnidade: unidade.nome,
+      nomeDescritivoUnidade: unidade.nomeDescritivo,
     });
     if (!resposta || !resposta.ok) {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
@@ -605,6 +610,11 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         const opcao = document.createElement("option");
         opcao.value = unidade.valor;
         opcao.textContent = unidade.texto;
+        // Guardado para o Relatório de Remessas em Aberto, que usa um
+        // filtro de unidade próprio (baseado no nome descritivo, não no
+        // mesmo ID do Relatório Geral) - ver comentário em
+        // "lerUnidadesRelatorioGeralNaPagina" no background.js.
+        if (unidade.nomeDescritivo) opcao.dataset.nomeDescritivo = unidade.nomeDescritivo;
         selectUnidadeRelatorio.appendChild(opcao);
       }
       areaSelectUnidade.hidden = unidades.length === 0;
@@ -635,7 +645,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       setStatusCorregedoria(
         `Concluído! Relatório Gerencial de "${resultado.unidade || ""}" salvo em Downloads/eproc/ (${
           resultado.totalLocalizadores || 0
-        } localizador(es) incluído(s)).`
+        } localizador(es), ${resultado.totalRemessas || 0} remessa(s) em aberto).`
       );
     } else {
       setStatusCorregedoria("Erro ao gerar o relatório gerencial.");

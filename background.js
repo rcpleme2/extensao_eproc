@@ -1639,6 +1639,183 @@ async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJui
   }
 }
 
+// ---- Relatório de Remessas em Aberto (Corregedoria) ----
+
+// O link para "Relatório de remessas em aberto" (menu lateral:
+// Relatórios > Relatório de remessas em aberto) ja' existe no DOM mesmo
+// com o menu colapsado - mesmo padrao ja' usado para os demais links de
+// menu desta extensao. Autocontida, executada via
+// chrome.scripting.executeScript.
+function clicarLinkRemessasEmAbertoNaPagina() {
+  const link = document.querySelector('a[href*="acao=relatorio_remessas_em_aberto/listar"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Seleciona uma unidade no filtro "Órgão Julgador"
+// (select#IdOrgaoSecretaria) da tela de Remessas em Aberto - esse
+// select usa um espaco de IDs totalmente diferente do
+// #selIdOrgaoJuizo/#selInfraUnidades (numericos, proprios dessa tela) e
+// so' lista as unidades pelo NOME DESCRITIVO (sem a sigla/abreviacao),
+// entao a selecao e' feita comparando o TEXTO da opcao (normalizado),
+// nao por valor. Autocontida, executada via
+// chrome.scripting.executeScript.
+function selecionarOrgaoSecretariaRemessasNaPagina(nomeDescritivoUnidade) {
+  const select = document.getElementById("IdOrgaoSecretaria");
+  if (!select) {
+    return { ok: false, erro: 'Campo "Órgão Julgador" (#IdOrgaoSecretaria) não encontrado nesta página.' };
+  }
+
+  const normalizar = (s) => (s || "").trim().toLowerCase();
+  const alvo = normalizar(nomeDescritivoUnidade);
+
+  let opcaoEncontrada = null;
+  for (const opcao of select.options) {
+    if (normalizar(opcao.textContent) === alvo) {
+      opcaoEncontrada = opcao;
+      break;
+    }
+  }
+  if (!opcaoEncontrada) {
+    return {
+      ok: false,
+      erro: `Unidade "${nomeDescritivoUnidade}" não encontrada no filtro "Órgão Julgador" da tela de Remessas em Aberto.`,
+    };
+  }
+
+  for (const opcao of select.options) opcao.selected = opcao === opcaoEncontrada;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return { ok: true, erro: null };
+}
+
+// Clica em "Consultar" e le' o resultado direto da API do DataTables
+// (jQuery.fn.DataTable) que alimenta a tabela "#tbl_remessas_em_aberto" -
+// mais confiavel que raspar o DOM renderizado, ja' que os dados brutos
+// de cada linha (NomePessoa, NumProcesso, DesClasseJudicial, Inclusao,
+// DiasRemessa) ficam disponiveis direto no objeto de dados do
+// DataTables, sem precisar esperar/parsear a renderizacao de cada
+// celula. Troca a paginacao para "mostrar tudo" (page.len(-1)) antes de
+// ler, para nao precisar navegar entre paginas. Autocontida, executada
+// via chrome.scripting.executeScript. Nunca lanca excecao: sempre
+// resolve com { itens, erro }.
+function extrairRemessasEmAbertoNaPagina() {
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function textoDeHtml(html) {
+    const div = document.createElement("div");
+    div.innerHTML = html || "";
+    return (div.textContent || "").trim();
+  }
+
+  return (async () => {
+    try {
+      const botaoConsultar = document.querySelector('button[onclick="submeterFrmFiltroRemessasEmAberto()"]');
+      if (!botaoConsultar) {
+        return { itens: [], erro: 'Botão "Consultar" não encontrado nesta página.' };
+      }
+
+      if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
+        return { itens: [], erro: "jQuery DataTables não disponível nesta página." };
+      }
+
+      const tabelaEl = jQuery("#tbl_remessas_em_aberto");
+      if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tbl_remessas_em_aberto")) {
+        return { itens: [], erro: 'Tabela "#tbl_remessas_em_aberto" não encontrada ou ainda não inicializada.' };
+      }
+      const dt = tabelaEl.DataTable();
+
+      const aguardarRedesenho = () =>
+        Promise.race([
+          new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true))),
+          aguardar(20000).then(() => false),
+        ]);
+
+      const promessaConsulta = aguardarRedesenho();
+      botaoConsultar.click();
+      await promessaConsulta;
+
+      // Mostra todas as linhas de uma vez, sem paginacao do DataTables.
+      const promessaMostrarTudo = aguardarRedesenho();
+      dt.page.len(-1).draw(false);
+      await promessaMostrarTudo;
+
+      const linhas = dt.rows({ search: "applied" }).data().toArray();
+      const itens = linhas.map((linha) => ({
+        juizLeigo: (linha.NomePessoa || "").trim(),
+        processo: textoDeHtml(linha.LinkProcesso) || (linha.NumProcesso != null ? String(linha.NumProcesso) : ""),
+        classeJudicial: (linha.DesClasseJudicial || "").trim(),
+        dataRemessa: (linha.Inclusao || "").slice(0, 10),
+        diasRemessa: linha.DiasRemessa != null ? Number(linha.DiasRemessa) : null,
+      }));
+
+      return { itens, erro: null };
+    } catch (e) {
+      return { itens: [], erro: e && e.message ? e.message : String(e) };
+    }
+  })();
+}
+
+// Abre uma aba oculta, navega ate' o Relatório de Remessas em Aberto,
+// seleciona a unidade no filtro "Órgão Julgador" (por nome descritivo -
+// ver comentario de "selecionarOrgaoSecretariaRemessasNaPagina") e le' o
+// resultado da consulta.
+async function abrirAbaEExtrairRemessasEmAberto(urlBase, nomeDescritivoUnidade) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRemessasEmAbertoNaPagina,
+    });
+
+    if (!linkEncontrado) {
+      return {
+        itens: [],
+        erro:
+          'Link "Relatório de remessas em aberto" não encontrado na página atual (menu lateral: Relatórios > Relatório de remessas em aberto). Abra uma página do eproc com o menu lateral e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    if (nomeDescritivoUnidade) {
+      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoSecretariaRemessasNaPagina,
+        args: [nomeDescritivoUnidade],
+      });
+
+      if (!resultadoSelecao || !resultadoSelecao.ok) {
+        return {
+          itens: [],
+          erro: (resultadoSelecao && resultadoSelecao.erro) || 'Falha ao selecionar a unidade no filtro "Órgão Julgador".',
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: extrairRemessasEmAbertoNaPagina,
+    });
+
+    return result || { itens: [], erro: "Sem resultado ao ler o relatório de remessas em aberto." };
+  } catch (e) {
+    return { itens: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
+}
+
 // Roda ja' na tela do Relatório Geral, apos uma consulta ter sido feita:
 // abre o menu "Exportar" da tabela de resultados (botao dropdown do
 // DataTables Buttons) e clica na opcao "Excel", disparando o download da
@@ -1829,10 +2006,23 @@ function lerUnidadesRelatorioGeralNaPagina() {
   }
   const unidades = Array.from(select.options)
     .filter((opcao) => opcao.value && opcao.value !== "null")
-    .map((opcao) => ({
-      valor: opcao.value,
-      texto: (opcao.textContent || opcao.getAttribute("title") || "").trim(),
-    }));
+    .map((opcao) => {
+      // O atributo "title" desse select traz o nome descritivo completo
+      // da unidade, no formato "Nome Descritivo - SIGLA/ABREVIACAO" (o
+      // mesmo formato usado no seletor de perfil #selInfraUnidades). Ja'
+      // o filtro "Órgão Julgador" da tela de Remessas em Aberto usa
+      // outro espaco de IDs (numericos, sem relacao com o valor deste
+      // select) e lista as unidades so' pelo nome descritivo - por isso
+      // guardamos essa parte separada, para conseguir casar as duas
+      // telas por nome em vez de por ID.
+      const title = (opcao.getAttribute("title") || "").trim();
+      const nomeDescritivo = title.includes(" - ") ? title.slice(0, title.lastIndexOf(" - ")).trim() : title;
+      return {
+        valor: opcao.value,
+        texto: (opcao.textContent || title || "").trim(),
+        nomeDescritivo: nomeDescritivo || null,
+      };
+    });
   return { unidades, erro: null };
 }
 
@@ -1997,7 +2187,7 @@ async function consultarLocalizadoresUnidadeViaRelatorioGeral(urlBase, valorOrga
 // mesmas funcoes do relatorio rapido do painel), consulta o total de
 // processos de cada Localizador dessa unidade (via campo "Localizador"
 // do proprio Relatório Geral) e gera tudo num unico PDF.
-async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, aoProgredir) {
+async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nomeDescritivoUnidade, aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
   };
@@ -2047,6 +2237,12 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, aoPr
   );
   const localizadoresOrdenados = [...localizadores].sort((a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0));
 
+  notificar("Abrindo o Relatório de Remessas em Aberto...");
+  const { itens: remessas, erro: erroRemessas } = await abrirAbaEExtrairRemessasEmAberto(
+    abaAtual.url,
+    nomeDescritivoUnidade || nomeUnidade
+  );
+
   notificar("Gerando PDF...");
 
   const dataInformacao = new Date().toLocaleString("pt-BR");
@@ -2063,9 +2259,14 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, aoPr
     `- Há mais de 90 dias: ${semMovimentacao.dias90 == null ? "?" : semMovimentacao.dias90}`,
     `- Há mais de 120 dias: ${semMovimentacao.dias120 == null ? "?" : semMovimentacao.dias120}`,
     ...(semMovimentacao.erros.length > 0 ? [`- Avisos: ${semMovimentacao.erros.join(" | ")}`] : []),
+    "",
+    `Remessas em Aberto: ${remessas.length} processo(s)`,
   ];
   if (erroLocalizadores) {
     linhasResumo.push("", `Aviso (Localizadores): ${erroLocalizadores}`);
+  }
+  if (erroRemessas) {
+    linhasResumo.push("", `Aviso (Remessas em Aberto): ${erroRemessas}`);
   }
 
   const pdfFinal = await PDFDocument.create();
@@ -2082,6 +2283,16 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, aoPr
     paginasCopiadas.forEach((pagina) => pdfFinal.addPage(pagina));
   }
 
+  if (remessas.length > 0) {
+    const bytesRemessas = await construirPdfRemessasEmAberto(
+      remessas,
+      `Remessas em Aberto da unidade "${nomeUnidade}" — ${remessas.length} processo(s)`
+    );
+    const pdfRemessas = await PDFDocument.load(bytesRemessas);
+    const paginasCopiadas = await pdfFinal.copyPages(pdfRemessas, pdfRemessas.getPageIndices());
+    paginasCopiadas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
   const bytesFinais = await pdfFinal.save();
   const nomeArquivo = `eproc/relatorio_gerencial_${sanitizarNomeArquivo(nomeUnidade)}_${new Date()
     .toISOString()
@@ -2089,7 +2300,11 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, aoPr
   await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytesFinais));
 
   notificar("Finalizando...");
-  return { unidade: nomeUnidade, totalLocalizadores: localizadoresOrdenados.length };
+  return {
+    unidade: nomeUnidade,
+    totalLocalizadores: localizadoresOrdenados.length,
+    totalRemessas: remessas.length,
+  };
 }
 
 // Traduz os identificadores usados no painel para os parametros que
@@ -2703,6 +2918,18 @@ function construirPdfProcessosLocalizador(itens, tituloDocumento) {
     { titulo: "Número Processo", largura: larguraUtil * 0.28, campo: "numeroProcesso" },
     { titulo: "Classe", largura: larguraUtil * 0.52, campo: "classe" },
     { titulo: "Inclusão no localizador", largura: larguraUtil * 0.2, campo: "inclusao" },
+  ];
+  return construirPdfTabela(itens, colunas, tituloDocumento);
+}
+
+function construirPdfRemessasEmAberto(itens, tituloDocumento) {
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const colunas = [
+    { titulo: "Juiz Leigo", largura: larguraUtil * 0.22, campo: "juizLeigo" },
+    { titulo: "Processo", largura: larguraUtil * 0.2, campo: "processo" },
+    { titulo: "Classe Judicial", largura: larguraUtil * 0.31, campo: "classeJudicial" },
+    { titulo: "Data Remessa", largura: larguraUtil * 0.14, campo: "dataRemessa" },
+    { titulo: "Dias da Remessa", largura: larguraUtil * 0.13, campo: "diasRemessa" },
   ];
   return construirPdfTabela(itens, colunas, tituloDocumento);
 }
@@ -3348,9 +3575,14 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
 
   if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_GERENCIAL_UNIDADE") {
     // Mesmo padrao das demais operacoes em segundo plano.
-    exportarRelatorioGerencialUnidade(mensagem.valorUnidade, mensagem.nomeUnidade, (texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_GERENCIAL", texto }).catch(() => {});
-    })
+    exportarRelatorioGerencialUnidade(
+      mensagem.valorUnidade,
+      mensagem.nomeUnidade,
+      mensagem.nomeDescritivoUnidade,
+      (texto) => {
+        chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_GERENCIAL", texto }).catch(() => {});
+      }
+    )
       .then((resultado) => {
         chrome.runtime
           .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultado })
