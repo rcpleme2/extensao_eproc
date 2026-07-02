@@ -520,24 +520,34 @@ async function processarFila(numeroProcesso, documentos, opcoes) {
 // Relatorio Geral, conforme a pagina do eproc analisada.
 const VALOR_SITUACAO_AGUARDA_DESPACHO = "M;22;C";
 const VALOR_SITUACAO_AGUARDA_SENTENCA = "M;21;C";
+const DIAS_LIMITE_ATRASO = 30;
+
+// Cada consulta (total / urgentes / +30 dias, para cada situacao) agora
+// abre sua PROPRIA aba oculta, usada uma unica vez e descartada. Duas
+// tentativas anteriores mostraram que reaproveitar a mesma aba para
+// interagir duas vezes seguidas com o campo "Informação complementar"
+// (Tagify) e' instavel - a primeira consulta na aba sempre funciona, a
+// segunda as vezes nao (a tag nao e' adicionada, mesmo esperando a
+// remocao da tag anterior terminar). Abrir uma aba nova por consulta
+// elimina essa classe de problema por completo (cada aba so' interage
+// com esses campos uma unica vez), ao custo de mais alguns segundos por
+// consulta (mais um carregamento de pagina).
 
 // Roda inteiramente dentro da pagina "Relatorio Geral de Processos" (via
 // chrome.scripting.executeScript): marca a situacao pedida no select
-// multiplo, consulta o total, depois marca tambem o filtro "Informação
-// complementar" = "Petição Urgente - Sim" (campo Tagify:
-// id="selDadoComplementar") e consulta de novo para saber quantos desses
-// sao urgentes. Precisa ser autocontida: e' serializada e executada no
-// contexto da pagina, sem acesso ao escopo deste arquivo.
+// multiplo, opcionalmente marca o filtro "Informação complementar" =
+// "Petição Urgente - Sim" (campo Tagify: id="selDadoComplementar") e/ou
+// preenche o campo "Dias na situação" (#txtDiasSituacao), clica em
+// "Consultar" e le' o total. Precisa ser autocontida: e' serializada e
+// executada no contexto da pagina, sem acesso ao escopo deste arquivo.
+// Nunca lanca excecao: sempre resolve com { contagem, erro }.
 //
-// A parte de urgencia depende do dropdown nativo do Tagify (confirmado
+// O dropdown de "Informação complementar" e' nativo do Tagify (confirmado
 // via inspecao ao vivo com MutationObserver: os itens de sugestao sao
 // "div.tagify__dropdown__item" dentro de "div.tagify__dropdown", com o
 // valor exato no atributo "value" - nao e' jQuery UI Autocomplete, apesar
-// das classes "ui-autocomplete-*" no wrapper). Se a sugestao nao for
-// encontrada por algum motivo (ex.: mudanca na pagina), a consulta do
-// total ainda funciona normalmente; so' o numero de urgentes fica nulo
-// com um aviso explicando o motivo.
-function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
+// das classes "ui-autocomplete-*" no wrapper).
+function consultarUmaVezNaPagina(parametros) {
   function aguardar(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -563,36 +573,23 @@ function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  // Clica no "x" de cada tag existente e ESPERA a remocao realmente
-  // terminar (Tagify pode ter uma transicao/animacao interna antes do
-  // no da tag sumir do DOM). Sem esse espera, a consulta seguinte podia
-  // comecar a adicionar uma nova tag enquanto a remocao da anterior
-  // ainda estava "em andamento", deixando o campo num estado inconsistente
-  // - e' provavelmente o motivo da falha intermitente ao repetir a
-  // marcacao entre uma situacao e outra na mesma aba.
-  async function limparInformacaoComplementar() {
-    const wrapper = document.getElementById("selDadoComplementar-wrapper");
-    if (!wrapper) return;
-    const tagsEl = wrapper.querySelector("tags.tagify");
-
-    wrapper.querySelectorAll(".tagify__tag__removeBtn").forEach((botao) => botao.click());
-
-    if (!tagsEl) return;
-    for (let tentativa = 0; tentativa < 20; tentativa += 1) {
-      if (tagsEl.querySelectorAll(".tagify__tag").length === 0) return;
-      await aguardar(100);
+  // Usa o setter nativo do HTMLInputElement (em vez de so' "input.value =
+  // ...") para garantir que a mudanca seja percebida mesmo se algum
+  // framework de formulario estiver "escutando" o proprio setter da
+  // propriedade, alem de disparar os eventos nativos "input"/"change".
+  function definirDiasSituacao(dias) {
+    const input = document.getElementById("txtDiasSituacao");
+    if (!input) {
+      throw new Error('Campo "Dias na situação" (#txtDiasSituacao) não encontrado nesta página.');
     }
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    nativeSetter.call(input, String(dias));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  // O campo "Informação complementar" e' um Tagify de verdade, com o
-  // dropdown de sugestoes NATIVO da propria biblioteca (confirmado via
-  // MutationObserver numa sessao real: os itens aparecem como
-  // "div.tagify__dropdown__item" dentro de "div.tagify__dropdown", com o
-  // valor exato no atributo "value" - nao e' jQuery UI Autocomplete, as
-  // classes "ui-autocomplete-*" no wrapper eram so' nomenclatura, sem o
-  // widget de fato instanciado). Simula a digitacao no span editavel do
-  // Tagify (que já demonstrado funcionar: o dropdown real reage e filtra
-  // ao digitar) e clica no item cujo atributo "value" bate com o alvo.
+  // Simula a digitacao no span editavel do Tagify e clica no item do
+  // dropdown cujo atributo "value" bate com o alvo.
   async function marcarPeticaoUrgente() {
     const wrapper = document.getElementById("selDadoComplementar-wrapper");
     if (!wrapper) {
@@ -603,9 +600,6 @@ function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
     if (!inputSpan || !tagsEl) {
       throw new Error('Estrutura do campo "Informação complementar" não reconhecida.');
     }
-
-    await limparInformacaoComplementar();
-    await aguardar(150);
 
     const TEXTO_BUSCA = "Petição Urgente";
     const VALOR_ALVO = "Petição Urgente - Sim";
@@ -674,39 +668,23 @@ function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
   }
 
   return (async () => {
-    selecionarSituacao(valorOpcao);
-    await limparInformacaoComplementar();
-    // Da' tempo do bootstrap-select/tagify atualizarem visualmente antes
-    // de consultar (nao estritamente necessario, mas mais fiel ao fluxo
-    // real de uso e evita clicar antes dos componentes reagirem).
-    await aguardar(200);
-
-    const total = await clicarConsultarELer();
-
-    let urgentes = null;
-    let erroUrgentes = null;
     try {
-      try {
-        await marcarPeticaoUrgente();
-      } catch (primeiroErro) {
-        // Uma segunda tentativa cobre casos intermitentes (ex.: o campo
-        // ainda terminando de assentar depois de limpo) sem custar muito
-        // tempo extra quando a primeira ja' funciona.
-        await aguardar(300);
+      selecionarSituacao(parametros.valorSituacao);
+
+      if (parametros.diasSituacao != null) {
+        definirDiasSituacao(parametros.diasSituacao);
+      }
+
+      if (parametros.urgente) {
         await marcarPeticaoUrgente();
       }
-      await aguardar(200);
-      urgentes = await clicarConsultarELer();
-    } catch (e) {
-      erroUrgentes = e && e.message ? e.message : String(e);
-    } finally {
-      // Esperar a remocao terminar de verdade aqui e' o que garante que
-      // a proxima chamada (para a outra situacao, na mesma aba) comece
-      // com o campo "Informação complementar" realmente limpo.
-      await limparInformacaoComplementar();
-    }
 
-    return { total, urgentes, erroUrgentes };
+      await aguardar(200);
+      const contagem = await clicarConsultarELer();
+      return { contagem, erro: null };
+    } catch (e) {
+      return { contagem: null, erro: e && e.message ? e.message : String(e) };
+    }
   })();
 }
 
@@ -721,6 +699,51 @@ function clicarLinkRelatorioGeralNaPagina() {
   return true;
 }
 
+// Abre uma aba oculta nova, navega ate' o Relatório Geral e roda UMA
+// consulta nela, depois fecha a aba. Ver comentario acima de
+// "consultarUmaVezNaPagina" sobre por que cada consulta usa sua propria
+// aba em vez de reaproveitar uma so'.
+async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioGeralNaPagina,
+    });
+
+    if (!linkEncontrado) {
+      return {
+        contagem: null,
+        erro:
+          'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    // Pequena espera extra para os scripts da pagina (bootstrap-select,
+    // tagify etc.) terminarem de inicializar apos o carregamento.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: consultarUmaVezNaPagina,
+      args: [parametros],
+    });
+
+    return result || { contagem: null, erro: "Não foi possível consultar (sem resultado)." };
+  } catch (e) {
+    return { contagem: null, erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
+}
+
 async function gerarRelatorioGeral(aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
@@ -731,63 +754,44 @@ async function gerarRelatorioGeral(aoProgredir) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
 
-  // Abre uma aba oculta (active: false) com a mesma pagina/sessao da aba
-  // atual, para nao alterar o que o usuario esta vendo. Todo o fluxo
-  // (achar o link, navegar, selecionar situacao, consultar) acontece
-  // nessa aba oculta, que e' fechada ao final.
-  let abaOculta;
-  try {
-    notificar("Abrindo aba oculta com a mesma sessão...");
-    abaOculta = await chrome.tabs.create({ url: abaAtual.url, active: false });
-    await aguardarCarregamentoAba(abaOculta.id);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  async function consultarBloco(nomeSituacao, valorSituacao) {
+    const bloco = { total: null, urgentes: null, mais30Dias: null, erros: [] };
 
-    notificar('Localizando o link "Relatório Geral" no menu...');
-    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: abaOculta.id },
-      func: clicarLinkRelatorioGeralNaPagina,
+    notificar(`Consultando ${nomeSituacao}: total...`);
+    let r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      valorSituacao,
+      urgente: false,
+      diasSituacao: null,
     });
+    bloco.total = r.contagem;
+    if (r.erro) bloco.erros.push(`total: ${r.erro}`);
 
-    if (!linkEncontrado) {
-      throw new Error(
-        'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
-      );
-    }
-
-    notificar("Carregando a página do Relatório Geral...");
-    await aguardarCarregamentoAba(abaOculta.id);
-    // Pequena espera extra para os scripts da pagina (bootstrap-select
-    // etc.) terminarem de inicializar apos o carregamento.
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    notificar('Consultando "MOVIMENTO-AGUARDA DESPACHO" (total e urgentes)...');
-    const [{ result: resultadoDespacho } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: abaOculta.id },
-      func: consultarSituacaoComUrgenciaNaPagina,
-      args: [VALOR_SITUACAO_AGUARDA_DESPACHO],
+    notificar(`Consultando ${nomeSituacao}: urgentes...`);
+    r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      valorSituacao,
+      urgente: true,
+      diasSituacao: null,
     });
+    bloco.urgentes = r.contagem;
+    if (r.erro) bloco.erros.push(`urgentes: ${r.erro}`);
 
-    notificar('Consultando "MOVIMENTO-AGUARDA SENTENÇA" (total e urgentes)...');
-    const [{ result: resultadoSentenca } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: abaOculta.id },
-      func: consultarSituacaoComUrgenciaNaPagina,
-      args: [VALOR_SITUACAO_AGUARDA_SENTENCA],
+    notificar(`Consultando ${nomeSituacao}: há mais de ${DIAS_LIMITE_ATRASO} dias...`);
+    r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      valorSituacao,
+      urgente: false,
+      diasSituacao: DIAS_LIMITE_ATRASO,
     });
+    bloco.mais30Dias = r.contagem;
+    if (r.erro) bloco.erros.push(`+${DIAS_LIMITE_ATRASO} dias: ${r.erro}`);
 
-    notificar("Finalizando...");
-    return {
-      conclusosDespacho: resultadoDespacho ? resultadoDespacho.total : null,
-      conclusosDespachoUrgentes: resultadoDespacho ? resultadoDespacho.urgentes : null,
-      avisoUrgenciaDespacho: resultadoDespacho ? resultadoDespacho.erroUrgentes : null,
-      conclusosSentenca: resultadoSentenca ? resultadoSentenca.total : null,
-      conclusosSentencaUrgentes: resultadoSentenca ? resultadoSentenca.urgentes : null,
-      avisoUrgenciaSentenca: resultadoSentenca ? resultadoSentenca.erroUrgentes : null,
-    };
-  } finally {
-    if (abaOculta && abaOculta.id) {
-      chrome.tabs.remove(abaOculta.id).catch(() => {});
-    }
+    return bloco;
   }
+
+  const despacho = await consultarBloco("MOVIMENTO-AGUARDA DESPACHO", VALOR_SITUACAO_AGUARDA_DESPACHO);
+  const sentenca = await consultarBloco("MOVIMENTO-AGUARDA SENTENÇA", VALOR_SITUACAO_AGUARDA_SENTENCA);
+
+  notificar("Finalizando...");
+  return { despacho, sentenca };
 }
 
 // Atalho: navega a aba ATUAL (visivel) direto para a tela do Relatório

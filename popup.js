@@ -117,6 +117,8 @@ const valorDespachoEl = document.getElementById("valor-despacho");
 const valorSentencaEl = document.getElementById("valor-sentenca");
 const valorDespachoUrgentesEl = document.getElementById("valor-despacho-urgentes");
 const valorSentencaUrgentesEl = document.getElementById("valor-sentenca-urgentes");
+const valorDespachoMais30DiasEl = document.getElementById("valor-despacho-mais30dias");
+const valorSentencaMais30DiasEl = document.getElementById("valor-sentenca-mais30dias");
 const avisoUrgenciaEl = document.getElementById("aviso-urgencia");
 const areaProgressoRelatorio = document.getElementById("area-progresso-relatorio");
 const textoProgressoRelatorio = document.getElementById("texto-progresso-relatorio");
@@ -213,18 +215,23 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
-      valorDespachoEl.textContent = formatarContagem(resultado.conclusosDespacho);
-      valorSentencaEl.textContent = formatarContagem(resultado.conclusosSentenca);
-      valorDespachoUrgentesEl.textContent = formatarContagem(resultado.conclusosDespachoUrgentes);
-      valorSentencaUrgentesEl.textContent = formatarContagem(resultado.conclusosSentencaUrgentes);
+      const despacho = resultado.despacho || {};
+      const sentenca = resultado.sentenca || {};
+
+      valorDespachoEl.textContent = formatarContagem(despacho.total);
+      valorDespachoUrgentesEl.textContent = formatarContagem(despacho.urgentes);
+      valorDespachoMais30DiasEl.textContent = formatarContagem(despacho.mais30Dias);
+
+      valorSentencaEl.textContent = formatarContagem(sentenca.total);
+      valorSentencaUrgentesEl.textContent = formatarContagem(sentenca.urgentes);
+      valorSentencaMais30DiasEl.textContent = formatarContagem(sentenca.mais30Dias);
+
       areaRelatorio.hidden = false;
 
-      const avisos = [resultado.avisoUrgenciaDespacho, resultado.avisoUrgenciaSentenca].filter(Boolean);
+      const avisos = [...(despacho.erros || []), ...(sentenca.erros || [])];
       if (avisos.length > 0) {
         avisoUrgenciaEl.hidden = false;
-        avisoUrgenciaEl.textContent = `Não foi possível determinar a urgência em algum caso: ${avisos.join(
-          " | "
-        )}`;
+        avisoUrgenciaEl.textContent = `Alguns valores não puderam ser determinados: ${avisos.join(" | ")}`;
       } else {
         avisoUrgenciaEl.hidden = true;
       }

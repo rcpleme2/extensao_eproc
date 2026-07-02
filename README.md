@@ -109,41 +109,42 @@ esgotado, elemento não encontrado), para facilitar o diagnóstico.
 
 O painel também tem um botão **"Relatórios"** que automatiza uma consulta
 que hoje precisa ser feita manualmente, **sem alterar a página que você
-está vendo**:
+está vendo**. Para cada situação (**"MOVIMENTO-AGUARDA DESPACHO"** e
+**"MOVIMENTO-AGUARDA SENTENÇA"**), ele levanta três números:
 
-1. Abre uma aba oculta (em segundo plano) com a mesma página/sessão da
-   aba atual, e localiza nela o item "Relatório Geral" do menu lateral do
-   eproc (o link já existe no DOM mesmo com o menu colapsado, então não é
-   preciso simular a expansão do menu "Relatórios" antes).
-2. Nessa aba oculta, no campo "Situação", seleciona **"MOVIMENTO-AGUARDA
-   DESPACHO"** e clica em "Consultar", lendo o número de processos
-   encontrados (badge "Processos (N)") — esse é o total.
-3. Marca também o campo "Informação complementar" com a tag **"Petição
-   Urgente - Sim"** e consulta de novo, lendo quantos desses são
-   urgentes. Remove essa marcação antes de seguir para não vazar entre
-   as duas situações.
-4. Repete os passos 2 e 3 para **"MOVIMENTO-AGUARDA SENTENÇA"**.
-5. Fecha a aba oculta e mostra os quatro números no painel: "Conclusos
-   para despacho: N (urgentes: N)" e "Conclusos para sentença: N
-   (urgentes: N)".
+- **Total**: quantos processos estão nessa situação.
+- **Urgentes**: quantos desses têm a marcação "Informação complementar" =
+  "Petição Urgente - Sim".
+- **+30 dias**: quantos desses estão na situação há mais de 30 dias
+  (preenchendo o campo "Dias na situação" com `30` antes de consultar).
+
+Isso dá 6 consultas ao todo. Cada uma delas roda em uma **aba oculta
+própria** (criada com `active: false`, sem roubar o foco nem alterar o que
+você está vendo), que abre a página, navega até o Relatório Geral,
+seleciona a situação e o filtro daquela consulta específica, clica em
+"Consultar", lê o resultado e fecha a aba — uma aba nova para cada uma das
+6 combinações, nunca reaproveitando a mesma aba para mais de uma consulta.
+Isso é proposital: reaproveitar a mesma aba para interagir duas vezes
+seguidas com o campo "Informação complementar" (um componente Tagify)
+se mostrou instável nos testes — a primeira consulta na aba sempre
+funcionava, a segunda às vezes não. Com uma aba nova por consulta, esse
+problema desaparece por completo, ao custo de o relatório completo levar
+mais tempo (a ordem de alguns segundos por consulta, já que cada uma
+recarrega a página do zero).
 
 O campo "Informação complementar" usa o dropdown de sugestões nativo do
 Tagify (confirmado inspecionando a página ao vivo: os itens aparecem como
 `div.tagify__dropdown__item`, com o valor exato no atributo `value`). A
 extensão simula a digitação de "Petição Urgente" no campo, espera a
 sugestão "Petição Urgente - Sim" aparecer no dropdown e clica nela — o
-mesmo que um clique real faria. Se a sugestão não aparecer por algum
-motivo (ex.: mudança futura na página), o total de conclusos continua
-aparecendo normalmente; só o número de urgentes fica com um aviso
-explicando o motivo (visível no painel), sem travar o resto do
+mesmo que um clique real faria. Se alguma consulta falhar por qualquer
+motivo, as demais continuam normalmente; o painel mostra um aviso listando
+especificamente o que não pôde ser determinado, sem travar o resto do
 relatório.
 
-Como a aba oculta é criada com `active: false`, ela não rouba o foco nem
-troca o que aparece na tela — só pode aparecer brevemente na barra de
-abas enquanto carrega. Enquanto processa, o painel mostra um indicador de
-progresso com o passo atual (abrindo a aba, localizando o link,
-consultando cada situação, etc.), então dá para acompanhar sem achar que
-a extensão travou.
+Enquanto processa, o painel mostra um indicador de progresso com o passo
+atual (qual situação/filtro está sendo consultado no momento), então dá
+para acompanhar sem achar que a extensão travou.
 
 Ao lado do botão "Relatórios" há um ícone **↗** que, diferente do botão
 principal, navega a **aba atual e visível** direto para a tela do
