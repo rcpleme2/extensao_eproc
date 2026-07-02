@@ -559,4 +559,104 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosRegras.textContent = mensagem.erro || "Falha desconhecida ao exportar as regras.";
     }
   }
+
+  if (mensagem.tipo === "PROGRESSO_LISTAR_LOCALIZADORES") {
+    textoProgressoNavLocalizadores.textContent = mensagem.texto || "Processando...";
+    setStatusNavLocalizadores(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "LISTAR_LOCALIZADORES_FINALIZADO") {
+    areaProgressoNavLocalizadores.hidden = true;
+    btnCarregarLocalizadores.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      const localizadores = resultado.localizadores || [];
+
+      selectLocalizadorProcessos.innerHTML =
+        '<option value="" selected disabled>Selecione um localizador...</option>';
+      for (const loc of localizadores) {
+        const opcao = document.createElement("option");
+        opcao.value = loc.urlProcessos;
+        opcao.textContent = `${loc.nome} (${loc.totalProcessos})`;
+        selectLocalizadorProcessos.appendChild(opcao);
+      }
+      areaSelectLocalizador.hidden = localizadores.length === 0;
+
+      setStatusNavLocalizadores(
+        localizadores.length > 0
+          ? `${localizadores.length} localizador(es) com processos - selecione um para navegar até ele.`
+          : "Nenhum localizador com processos foi encontrado."
+      );
+      if (resultado.erroColeta) {
+        areaErrosNavLocalizadores.hidden = false;
+        areaErrosNavLocalizadores.textContent = `Aviso: ${resultado.erroColeta}`;
+      }
+    } else {
+      setStatusNavLocalizadores("Erro ao carregar os localizadores.");
+      areaErrosNavLocalizadores.hidden = false;
+      areaErrosNavLocalizadores.textContent =
+        mensagem.erro || "Falha desconhecida ao carregar os localizadores.";
+    }
+  }
+});
+
+const areaNavLocalizadoresInfo = document.getElementById("area-nav-localizadores-info");
+const btnCarregarLocalizadores = document.getElementById("btn-carregar-localizadores");
+const areaProgressoNavLocalizadores = document.getElementById("area-progresso-nav-localizadores");
+const textoProgressoNavLocalizadores = document.getElementById("texto-progresso-nav-localizadores");
+const areaSelectLocalizador = document.getElementById("area-select-localizador");
+const selectLocalizadorProcessos = document.getElementById("select-localizador-processos");
+const areaErrosNavLocalizadores = document.getElementById("area-erros-nav-localizadores");
+
+function setStatusNavLocalizadores(texto) {
+  areaNavLocalizadoresInfo.textContent = texto;
+}
+
+btnCarregarLocalizadores.addEventListener("click", async () => {
+  btnCarregarLocalizadores.disabled = true;
+  areaErrosNavLocalizadores.hidden = true;
+  areaSelectLocalizador.hidden = true;
+  areaProgressoNavLocalizadores.hidden = false;
+  textoProgressoNavLocalizadores.textContent = "Iniciando...";
+  setStatusNavLocalizadores(
+    "Carregando localizadores em segundo plano (percorrendo todas as páginas da listagem)..."
+  );
+
+  // Mesmo padrao de EXPORTAR_LOCALIZADORES: so' confirma que comecou; o
+  // resultado final chega pela mensagem LISTAR_LOCALIZADORES_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({ tipo: "LISTAR_LOCALIZADORES_COM_PROCESSOS" });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar o carregamento.");
+    }
+  } catch (e) {
+    setStatusNavLocalizadores("Erro ao iniciar o carregamento.");
+    areaErrosNavLocalizadores.hidden = false;
+    areaErrosNavLocalizadores.textContent = e && e.message ? e.message : String(e);
+    areaProgressoNavLocalizadores.hidden = true;
+    btnCarregarLocalizadores.disabled = false;
+  }
+});
+
+// Ao escolher um localizador no dropdown, navega a aba ATUAL (a mesma de
+// onde o painel foi aberto) direto para a lista de processos daquele
+// localizador - a URL ja' vem absoluta e pronta (com hash/sessao
+// inclusos) da propria raspagem feita na aba oculta.
+selectLocalizadorProcessos.addEventListener("change", async () => {
+  const url = selectLocalizadorProcessos.value;
+  if (!url) return;
+
+  areaErrosNavLocalizadores.hidden = true;
+  try {
+    const aba = await getAbaAtiva();
+    if (!aba || !aba.id) {
+      throw new Error("Nenhuma aba ativa encontrada.");
+    }
+    await chrome.tabs.update(aba.id, { url });
+    setStatusNavLocalizadores("Navegando até os processos do localizador selecionado...");
+  } catch (e) {
+    areaErrosNavLocalizadores.hidden = false;
+    areaErrosNavLocalizadores.textContent = e && e.message ? e.message : String(e);
+  }
 });

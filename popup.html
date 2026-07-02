@@ -192,6 +192,36 @@
     <div id="area-erros-localizadores" class="erros" hidden></div>
   </section>
 
+  <section class="card">
+    <h2 class="card-titulo">
+      <span class="card-icone" aria-hidden="true">🔎</span>
+      Ir para processos de um Localizador
+    </h2>
+
+    <div id="area-nav-localizadores-info" class="status">
+      Carrega os Localizadores do Órgão que têm pelo menos um processo
+      atribuído e navega direto até a lista de processos do localizador
+      escolhido.
+    </div>
+
+    <div class="botoes">
+      <button id="btn-carregar-localizadores">Carregar localizadores</button>
+    </div>
+
+    <div id="area-progresso-nav-localizadores" class="progresso-relatorio" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="texto-progresso-nav-localizadores"></span>
+    </div>
+
+    <div class="opcoes" id="area-select-localizador" hidden>
+      <select id="select-localizador-processos">
+        <option value="" selected disabled>Selecione um localizador...</option>
+      </select>
+    </div>
+
+    <div id="area-erros-nav-localizadores" class="erros" hidden></div>
+  </section>
+
   <div id="modal-escolha-relatorio" class="modal-overlay" hidden>
     <div class="modal-caixa">
       <p class="modal-texto">O que você deseja fazer com esse valor?</p>

@@ -121,6 +121,15 @@ button:disabled {
   margin-top: 4px;
 }
 
+.opcoes select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 13px;
+}
+
 .aviso-md-unico {
   margin: 2px 0 4px;
   padding: 6px 8px;

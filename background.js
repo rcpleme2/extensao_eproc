@@ -1814,7 +1814,18 @@ function raspaerLocalizadoresNaPagina() {
     const descricao = (celulas[3].textContent || "").replace(/\s+/g, " ").trim();
     const totalTexto = (celulas[6].textContent || "").replace(/\s+/g, " ").trim();
     const totalMatch = totalTexto.match(/\d+/);
-    itens.push({ nome, descricao, totalProcessos: totalMatch ? Number(totalMatch[0]) : 0 });
+    // Quando ha' pelo menos 1 processo, o numero na coluna "Total de
+    // processos" e' um link (acao=localizador_processos_lista) que leva
+    // direto para a lista de processos daquele localizador - usado pela
+    // navegacao rapida do painel. ".href" (em vez do atributo "href" cru)
+    // devolve a URL ja' absoluta, resolvida pelo proprio navegador.
+    const linkProcessos = celulas[6].querySelector("a");
+    itens.push({
+      nome,
+      descricao,
+      totalProcessos: totalMatch ? Number(totalMatch[0]) : 0,
+      urlProcessos: linkProcessos ? linkProcessos.href : null,
+    });
   }
 
   const caption = tabela.querySelector("caption");
@@ -2216,6 +2227,36 @@ async function exportarLocalizadores(formatos, aoProgredir) {
   return { total: itensOrdenados.length, erroColeta: erro };
 }
 
+// Reaproveita a mesma coleta multi-pagina de "Localizadores do Órgão"
+// (abrirAbaEColetarLocalizadores) para alimentar o dropdown de navegacao
+// rapida do painel: so' os localizadores com pelo menos 1 processo
+// atribuido (os outros nao tem link nenhum para navegar), ordenados por
+// nome para facilitar achar um especifico na lista.
+async function listarLocalizadoresComProcessos(aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  notificar("Abrindo a tela de Localizadores do Órgão...");
+  const { itens, erro } = await abrirAbaEColetarLocalizadores(abaAtual.url);
+
+  if (itens.length === 0) {
+    throw new Error(erro || "Nenhum localizador encontrado.");
+  }
+
+  const comProcessos = itens
+    .filter((item) => item.totalProcessos > 0 && item.urlProcessos)
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
+  notificar("Finalizando...");
+  return { localizadores: comProcessos, erroColeta: erro };
+}
+
 // ---- Regras de Automação (exportar sem precisar estar na página) ----
 
 // O link para "Automatizar Localizadores do Órgão" (menu Localizadores >
@@ -2530,6 +2571,31 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({
             tipo: "LOCALIZADORES_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "LISTAR_LOCALIZADORES_COM_PROCESSOS") {
+    // Mesmo padrao de EXPORTAR_LOCALIZADORES: percorre varias paginas e
+    // demora, entao confirma o recebimento na hora e avisa o resultado
+    // final por uma mensagem separada.
+    listarLocalizadoresComProcessos((texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_LISTAR_LOCALIZADORES", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "LISTAR_LOCALIZADORES_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "LISTAR_LOCALIZADORES_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })

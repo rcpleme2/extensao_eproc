@@ -459,6 +459,31 @@ Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
 A aba oculta usada para navegar e coletar os dados é fechada
 automaticamente ao final, sem interferir na aba que você está usando.
 
+## Ir para processos de um Localizador
+
+O cartão **"Ir para processos de um Localizador"** navega direto até a
+lista de processos de um Localizador do Órgão escolhido, sem precisar
+abrir a tela de Localizadores manualmente e procurar a linha certa.
+
+Ao clicar em **"Carregar localizadores"**:
+
+1. A extensão roda a mesma coleta multi-página usada pela exportação em
+   PDF/Excel (aba oculta, volta para a página 1 se necessário, percorre
+   todas as páginas da listagem).
+2. Filtra para manter só os localizadores com **pelo menos 1 processo**
+   atribuído — os demais não têm para onde navegar, já que o número da
+   coluna "Total de processos" só é um link quando maior que zero.
+3. Preenche um menu suspenso com esses localizadores (nome e total de
+   processos entre parênteses), ordenados alfabeticamente.
+
+Ao **escolher um localizador** no menu, a aba em que o painel foi aberto
+navega diretamente para `acao=localizador_processos_lista` daquele
+localizador — a mesma página que abriria clicando no número da coluna
+"Total de processos" na listagem (URL já capturada, com sessão/hash
+inclusos, durante a coleta). Se precisar carregar a lista de novo (por
+exemplo, depois que os números mudarem), basta clicar em "Carregar
+localizadores" novamente.
+
 ## Abrir o painel a partir da própria página
 
 Além do ícone da extensão na barra de ferramentas (que em instalações
