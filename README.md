@@ -424,7 +424,12 @@ Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
    link "Localizadores do Órgão" do menu lateral (funciona mesmo com o
    submenu colapsado, já que o link já existe no DOM independente do
    estado visual do menu).
-2. Raspa a tabela da página atual e, enquanto o botão "Próxima Página"
+2. O eproc lembra a última página vista nessa listagem e reabre a tela
+   nela (não sempre na página 1) — antes de coletar, a extensão confere
+   se o botão "Primeira Página" está desabilitado (sinal de que já está
+   na página 1); se não estiver, clica nele e espera voltar, para nunca
+   perder os localizadores das páginas anteriores.
+3. Raspa a tabela da página atual e, enquanto o botão "Próxima Página"
    estiver habilitado, clica nele e espera a página seguinte terminar de
    carregar (detectado pela mudança no texto da legenda da tabela, ex.:
    "1 a 50" → "51 a 100") antes de raspar a página seguinte — cobrindo
@@ -433,7 +438,8 @@ Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
    contínuo dentro da própria página), para não quebrar com "Frame with
    ID 0 was removed" caso a paginação dispare uma navegação de verdade em
    vez de só atualizar a tabela via AJAX.
-3. Gera os arquivos marcados em `Downloads/eproc/`:
+4. Ordena os localizadores pelo **Total de processos** (do maior para o
+   menor) e gera os arquivos marcados em `Downloads/eproc/`:
    - **PDF**: tabela paginada (A4 paisagem), com cabeçalho repetido em
      cada página e as colunas de nome/descrição quebradas em várias
      linhas quando o texto for longo, para nunca cortar conteúdo.

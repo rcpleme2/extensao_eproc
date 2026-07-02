@@ -1817,16 +1817,38 @@ function raspaerLocalizadoresNaPagina() {
   }
 
   const caption = tabela.querySelector("caption");
-  const li = document.getElementById("lnkInfraProximaPaginaSuperior");
-  const temProxima = !!(li && !li.classList.contains("disabled"));
+  const liProxima = document.getElementById("lnkInfraProximaPaginaSuperior");
+  const temProxima = !!(liProxima && !liProxima.classList.contains("disabled"));
+  // O eproc lembra a ultima pagina vista na listagem e reabre a tela
+  // nela (nao sempre na pagina 1) - "Primeira Página" so' fica
+  // desabilitada quando ja' estamos nela, entao serve para detectar isso
+  // e a exportacao precisa voltar para a pagina 1 antes de comecar a
+  // coletar, senao perde os localizadores das paginas anteriores.
+  const liPrimeira = document.getElementById("lnkInfraPrimeiraPaginaSuperior");
+  const estaNaPrimeiraPagina = !!(liPrimeira && liPrimeira.classList.contains("disabled"));
 
-  return { itens, caption: caption ? (caption.textContent || "").trim() : "", temProxima, erro: null };
+  return {
+    itens,
+    caption: caption ? (caption.textContent || "").trim() : "",
+    temProxima,
+    estaNaPrimeiraPagina,
+    erro: null,
+  };
 }
 
 // So' clica em "Próxima Página" e retorna - nao espera nada aqui dentro
 // (ver comentario de "raspaerLocalizadoresNaPagina" sobre o motivo).
 function clicarProximaPaginaLocalizadores() {
   const link = document.querySelector("#lnkInfraProximaPaginaSuperior a");
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// So' clica em "Primeira Página" e retorna - mesmo motivo de
+// "clicarProximaPaginaLocalizadores".
+function clicarPrimeiraPaginaLocalizadores() {
+  const link = document.querySelector("#lnkInfraPrimeiraPaginaSuperior a");
   if (!link) return false;
   link.click();
   return true;
@@ -1884,20 +1906,62 @@ async function abrirAbaEColetarLocalizadores(urlBase) {
       throw ultimoErro || new Error("Sem resultado ao ler a página.");
     }
 
+    let leituraAtual;
+    try {
+      leituraAtual = await raspaerPaginaAtualComRetentativa();
+    } catch (e) {
+      return { itens: [], erro: `Falha ao ler a página inicial: ${e && e.message ? e.message : String(e)}` };
+    }
+    if (leituraAtual.erro) return { itens: [], erro: leituraAtual.erro };
+
+    // A tela pode ter aberto numa pagina que nao e' a primeira (o eproc
+    // lembra a ultima pagina vista) - volta para a pagina 1 antes de
+    // comecar a coletar, senao os localizadores das paginas anteriores
+    // ficam de fora.
+    if (!leituraAtual.estaNaPrimeiraPagina) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: aba.id },
+          func: clicarPrimeiraPaginaLocalizadores,
+        });
+      } catch (e) {
+        return {
+          itens: [],
+          erro: `Falha ao voltar para a primeira página: ${e && e.message ? e.message : String(e)}`,
+        };
+      }
+
+      await aguardarCarregamentoAba(aba.id).catch(() => {});
+
+      const captionAntes = leituraAtual.caption;
+      let mudou = false;
+      for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        try {
+          leituraAtual = await raspaerPaginaAtualComRetentativa();
+        } catch (e) {
+          continue;
+        }
+        if (leituraAtual && leituraAtual.caption !== captionAntes) {
+          mudou = true;
+          break;
+        }
+      }
+      if (!mudou) {
+        return {
+          itens: [],
+          erro: 'A tela não voltou para a primeira página a tempo (botão "Primeira Página").',
+        };
+      }
+    }
+
     const todos = [];
     let pagina = 1;
     const LIMITE_PAGINAS = 200; // seguranca contra loop infinito
 
     while (pagina <= LIMITE_PAGINAS) {
-      let leitura;
-      try {
-        leitura = await raspaerPaginaAtualComRetentativa();
-      } catch (e) {
-        return {
-          itens: todos,
-          erro: `Falha ao ler a página ${pagina}: ${e && e.message ? e.message : String(e)}`,
-        };
-      }
+      const leitura = leituraAtual;
+      leituraAtual = null;
 
       if (leitura.erro) return { itens: todos, erro: leitura.erro };
       todos.push(...leitura.itens);
@@ -1950,6 +2014,7 @@ async function abrirAbaEColetarLocalizadores(urlBase) {
         };
       }
 
+      leituraAtual = leituraNova;
       pagina += 1;
     }
 
@@ -2126,23 +2191,28 @@ async function exportarLocalizadores(formatos, aoProgredir) {
     throw new Error(erro || "Nenhum localizador encontrado.");
   }
 
-  const tituloDocumento = `Localizadores do Órgão — ${itens.length} registro(s) — gerado em ${new Date().toLocaleString("pt-BR")}`;
+  // Classificado por total de processos (do maior para o menor), para
+  // destacar de imediato os localizadores mais usados - vale tanto para
+  // o PDF quanto para a planilha.
+  const itensOrdenados = [...itens].sort((a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0));
+
+  const tituloDocumento = `Localizadores do Órgão — ${itensOrdenados.length} registro(s) — gerado em ${new Date().toLocaleString("pt-BR")}`;
   const nomeBase = `eproc/localizadores_orgao_${new Date().toISOString().slice(0, 10)}`;
 
   if (formatos.pdf) {
     notificar("Gerando PDF...");
-    const bytes = await construirPdfLocalizadores(itens, tituloDocumento);
+    const bytes = await construirPdfLocalizadores(itensOrdenados, tituloDocumento);
     await baixarUm(`${nomeBase}.pdf`, construirDataUrlBinario("application/pdf", bytes));
   }
 
   if (formatos.excel) {
     notificar("Gerando planilha Excel...");
-    const xml = construirExcelLocalizadores(itens);
+    const xml = construirExcelLocalizadores(itensOrdenados);
     await baixarUm(`${nomeBase}.xls`, construirDataUrl("application/vnd.ms-excel", xml));
   }
 
   notificar("Finalizando...");
-  return { total: itens.length, erroColeta: erro };
+  return { total: itensOrdenados.length, erroColeta: erro };
 }
 
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
