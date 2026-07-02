@@ -1,10 +1,19 @@
 // Service worker: recebe a lista de documentos do painel e dispara os
 // downloads via chrome.downloads, um de cada vez, reportando progresso.
-// Tambem sabe montar um PDF unico combinando todos os documentos, usando
-// a biblioteca vendorizada pdf-lib (libs/pdf-lib.min.js).
+// Tambem sabe montar um PDF unico (pdf-lib) e um MD unico com texto
+// anonimizado (pdf.js, so' para ler a camada de texto nativa dos PDFs -
+// sem OCR).
 
-importScripts("libs/pdf-lib.min.js");
+importScripts("libs/pdf-lib.min.js", "libs/pdf.min.js");
 const { PDFDocument, StandardFonts } = self.PDFLib;
+
+// pdf.js precisa do arquivo do worker mesmo usando "disableWorker: true"
+// nas chamadas (esse modo so' evita criar uma Worker thread separada -
+// ele ainda carrega/roda o codigo de libs/pdf.worker.min.js, so' que na
+// mesma thread do service worker, em vez de numa thread a parte).
+// Testado num Chromium real: sem isso, getDocument() falha com "No
+// GlobalWorkerOptions.workerSrc specified" mesmo com disableWorker.
+self.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("libs/pdf.worker.min.js");
 
 // Abre o painel lateral (side panel) ao clicar no icone da extensao, em
 // vez do popup efemero padrao, para que ele permaneca visivel enquanto o
@@ -413,35 +422,30 @@ async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProce
   await baixarUm(nomeArquivo, dataUrl);
 }
 
-// ---- Construcao do MD unico (com OCR e anonimizacao "melhor esforco") ----
+// ---- Construcao do MD unico (texto + anonimizacao "melhor esforco") ----
 //
-// Diferente do PDF unico (que roda inteiramente no service worker, usando
-// pdf-lib), este modo precisa de pdf.js (para ler a camada de texto de
-// PDFs) e do Tesseract.js (OCR, para paginas escaneadas/imagens sem texto).
-// Nenhuma das duas roda bem num service worker MV3: paginas de extensao
-// (service worker incluso) tem uma CSP fixa que bloqueia a execucao de
-// script remoto, e o Tesseract precisa baixar da CDN (jsdelivr) o motor
-// (WASM) e os dados do idioma - so' esses dois arquivos grandes, nunca o
-// conteudo dos documentos, que nao sai do navegador. Por isso essa etapa
-// roda dentro de uma ABA OCULTA de verdade, aberta no proprio dominio do
-// eproc (nao numa pagina da extensao): scripts injetados via
-// chrome.scripting.executeScript (arquivo ou funcao) nao ficam presos a
-// CSP da extensao, entao o Tesseract consegue buscar o motor/idioma
-// normalmente nessa aba.
-// Prefixo usado em TODOS os logs deste modo, tanto os que rodam no
-// service worker (console do "Inspect views: service worker" em
-// chrome://extensions) quanto os que rodam dentro da aba oculta injetada
-// (console normal de DevTools, aberto na propria aba - ela aparece na
-// barra de abas mesmo sem estar em primeiro plano). Facilita filtrar
-// ("[eproc-md]") quando algo trava ou falha.
+// Diferente das primeiras versoes, este modo NAO faz OCR (removido por nao
+// ter funcionado de forma confiavel) - so' extrai o texto que ja existe
+// nativamente no documento. Isso significa que roda inteiramente no
+// SERVICE WORKER, sem precisar de nenhuma aba oculta nem chamada de rede
+// externa: pdf.js (vendorizado em libs/pdf.min.js) le' a camada de texto
+// nativa dos PDFs, com "disableWorker: true" (sem worker separado, ja'
+// que nao ha' renderizacao de pagina para fazer - so' texto). Documentos
+// "html" continuam usando o mecanismo de aba oculta ja' existente (nao
+// tem como ler o conteudo deles sem renderizar a pagina real). Imagens
+// (jpg/png/etc.) nao tem como ter texto extraido sem OCR, entao entram no
+// MD apenas com uma nota indicando isso.
+//
+// Prefixo usado em todos os logs deste modo (console do "Inspect views:
+// service worker" em chrome://extensions), para facilitar filtrar
+// ("[eproc-md]") quando algo falhar.
 const LOG_MD = "[eproc-md]";
 
-// Impede que uma unica etapa (ex.: o Tesseract esperando a CDN responder,
-// ou um fetch que nunca retorna) trave o processo inteiro para sempre -
-// sem isso, uma promessa que nunca resolve simplesmente pendura a
-// exportacao no meio, sem nenhum erro visivel. Cada chamada demorada
-// abaixo tem um limite de tempo; ao estourar, vira um erro tratado
-// normalmente (aparece nos avisos do documento final), em vez de travar.
+// Impede que uma unica etapa demorada (ex.: um fetch que nunca retorna)
+// trave o processo inteiro para sempre - sem isso, uma promessa que nunca
+// resolve simplesmente pendura a exportacao no meio, sem nenhum erro
+// visivel. Ao estourar, vira um erro tratado normalmente (aparece nos
+// avisos do documento final), em vez de travar.
 function comTimeout(promessa, ms, mensagem) {
   let idTimeout;
   const timeout = new Promise((_, reject) => {
@@ -450,243 +454,78 @@ function comTimeout(promessa, ms, mensagem) {
   return Promise.race([promessa, timeout]).finally(() => clearTimeout(idTimeout));
 }
 
-// Injetada UMA vez por aba (via files: ["libs/pdf.min.js",
-// "libs/tesseract.min.js"] + esta funcao), depois que os dois arquivos
-// vendorizados ja' foram carregados como scripts na aba. Aponta o worker
-// do pdf.js para o arquivo local (em vez de tentar buscar da CDN) e define,
-// no escopo global da PAGINA (window.__eproc*), as funcoes que processam
-// cada documento. Isso e' necessario porque cada chamada de
-// executeScript com "func" e' serializada e avaliada isoladamente, sem
-// acesso as demais funcoes deste arquivo (background.js) - entao elas
-// precisam ja existir no escopo da pagina antes de serem chamadas uma vez
-// por documento.
-function prepararAmbienteMdNaPagina() {
-  const LOG_MD = "[eproc-md]";
+const MIMETYPES_IMAGEM_SEM_OCR = ["jpg", "jpeg", "png", "gif", "bmp", "webp"];
 
-  console.log(LOG_MD, "Preparando ambiente na aba...", {
-    pdfjsLib: !!window.pdfjsLib,
-    Tesseract: !!window.Tesseract,
-  });
+// Le' a camada de texto nativa de um PDF com pdf.js, pagina por pagina.
+// "disableWorker: true" faz o pdf.js rodar o codigo do worker
+// (libs/pdf.worker.min.js, carregado via workerSrc no topo deste arquivo)
+// na mesma thread do service worker, em vez de tentar criar uma Worker
+// thread separada - mais simples e suficiente para so' ler texto (nao ha'
+// nenhuma renderizacao de pagina, ja' que nao fazemos mais OCR).
+async function extrairTextoPdf(buffer, nome) {
+  console.log(LOG_MD, "Abrindo PDF com pdf.js:", nome, `(${buffer.byteLength} bytes)`);
+  const pdf = await comTimeout(
+    self.pdfjsLib.getDocument({ data: buffer, disableWorker: true }).promise,
+    30000,
+    `Tempo esgotado (30s) abrindo o PDF "${nome}" com pdf.js.`
+  );
+  console.log(LOG_MD, `PDF "${nome}" aberto, páginas:`, pdf.numPages);
 
-  if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("libs/pdf.worker.min.js");
-    console.log(LOG_MD, "pdf.js configurado, workerSrc =", window.pdfjsLib.GlobalWorkerOptions.workerSrc);
-  } else {
-    console.error(LOG_MD, "window.pdfjsLib não encontrado após injetar libs/pdf.min.js - MD único vai falhar para PDFs.");
-  }
-
-  if (!window.Tesseract) {
-    console.error(LOG_MD, "window.Tesseract não encontrado após injetar libs/tesseract.min.js - OCR vai falhar.");
-  }
-
-  function comTimeout(promessa, ms, mensagem) {
-    let idTimeout;
-    const timeout = new Promise((_, reject) => {
-      idTimeout = setTimeout(() => reject(new Error(mensagem)), ms);
-    });
-    return Promise.race([promessa, timeout]).finally(() => clearTimeout(idTimeout));
-  }
-
-  // Um unico worker do Tesseract e' reaproveitado para todos os
-  // documentos desta aba (criar um worker novo por documento seria muito
-  // mais lento). Guardar a PROMESSA (nao o worker resolvido) evita criar
-  // dois workers se dois documentos comecarem a ser processados quase ao
-  // mesmo tempo. Tem um limite de 90s: se a CDN do Tesseract nao
-  // responder (rede bloqueada, offline, etc.), falha com um erro claro em
-  // vez de pendurar a exportacao inteira para sempre.
-  async function obterTesseractWorker() {
-    if (!window.__eprocTesseractWorker) {
-      console.log(LOG_MD, "Criando worker do Tesseract (baixando motor/idioma da CDN se ainda não tiver em cache)...");
-      window.__eprocTesseractWorker = comTimeout(
-        window.Tesseract.createWorker("por", 1, {
-          workerPath: chrome.runtime.getURL("libs/tesseract-worker.min.js"),
-          logger: (m) => console.log(LOG_MD, "[tesseract]", m && m.status, m && m.progress),
-          // corePath/langPath ficam no padrao do Tesseract.js (CDN
-          // jsdelivr) - sao o motor (wasm) e os dados do idioma, os unicos
-          // arquivos grandes o suficiente para nao vendorizar. Isso baixa
-          // alguns MB na primeira vez que o OCR e' usado (o navegador
-          // guarda em cache depois); nenhum conteudo de documento e'
-          // enviado para fora, so' esses dois arquivos sao baixados.
-        }),
-        90000,
-        "Tempo esgotado (90s) esperando o motor de OCR (Tesseract) inicializar - verifique sua conexão com a internet (a CDN jsdelivr precisa estar acessível na primeira vez)."
-      )
-        .then((worker) => {
-          console.log(LOG_MD, "Worker do Tesseract pronto.");
-          return worker;
-        })
-        .catch((e) => {
-          console.error(LOG_MD, "Falha ao criar worker do Tesseract:", e);
-          window.__eprocTesseractWorker = null;
-          throw e;
-        });
-    }
-    return window.__eprocTesseractWorker;
-  }
-
-  async function extrairTextoPdf(buffer) {
-    console.log(LOG_MD, "Abrindo PDF com pdf.js, tamanho (bytes):", buffer.byteLength);
-    const pdf = await comTimeout(
-      window.pdfjsLib.getDocument({ data: buffer }).promise,
-      30000,
-      "Tempo esgotado (30s) abrindo o PDF com pdf.js."
+  const partes = [];
+  for (let i = 1; i <= pdf.numPages; i += 1) {
+    const pagina = await pdf.getPage(i);
+    const conteudoTexto = await pagina.getTextContent();
+    const texto = conteudoTexto.items
+      .map((item) => item.str || "")
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    console.log(LOG_MD, `"${nome}" página ${i}/${pdf.numPages}: ${texto.length} caractere(s).`);
+    partes.push(
+      texto || "_(sem texto nesta página - o documento pode ser uma imagem digitalizada, sem OCR nesta versão)_"
     );
-    console.log(LOG_MD, "PDF aberto, páginas:", pdf.numPages);
-    const partes = [];
-    let ocrUsado = false;
-
-    for (let i = 1; i <= pdf.numPages; i += 1) {
-      console.log(LOG_MD, `Página ${i}/${pdf.numPages}: lendo camada de texto...`);
-      const pagina = await pdf.getPage(i);
-      const conteudoTexto = await pagina.getTextContent();
-      let texto = conteudoTexto.items
-        .map((item) => item.str || "")
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim();
-      console.log(LOG_MD, `Página ${i}/${pdf.numPages}: ${texto.length} caractere(s) na camada de texto.`);
-
-      if (texto.length < 20) {
-        // Pouco ou nenhum texto na camada nativa do PDF - provavel pagina
-        // escaneada. Renderiza a pagina para um canvas e tenta OCR nela.
-        console.log(LOG_MD, `Página ${i}/${pdf.numPages}: pouco texto nativo, tentando OCR...`);
-        const worker = await obterTesseractWorker();
-        const viewport = pagina.getViewport({ scale: 2 });
-        const canvas = document.createElement("canvas");
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        const ctx = canvas.getContext("2d");
-        await comTimeout(
-          pagina.render({ canvasContext: ctx, viewport }).promise,
-          30000,
-          `Tempo esgotado (30s) renderizando a página ${i} para OCR.`
-        );
-        const dataUrl = canvas.toDataURL("image/png");
-        const resultado = await comTimeout(
-          worker.recognize(dataUrl),
-          120000,
-          `Tempo esgotado (120s) rodando OCR na página ${i}.`
-        );
-        const textoOcr = (resultado.data.text || "").trim();
-        console.log(LOG_MD, `Página ${i}/${pdf.numPages}: OCR retornou ${textoOcr.length} caractere(s).`);
-        if (textoOcr) {
-          texto = textoOcr;
-          ocrUsado = true;
-        }
-      }
-
-      partes.push(texto || "(sem texto identificado nesta página)");
-    }
-
-    return { texto: partes.join("\n\n"), ocrUsado, erro: null };
   }
 
-  async function extrairTextoImagem(buffer, mimetype) {
-    console.log(LOG_MD, "Rodando OCR direto na imagem, tamanho (bytes):", buffer.byteLength);
-    const worker = await obterTesseractWorker();
-    const tipoMime = mimetype === "jpg" ? "jpeg" : mimetype;
-    const blob = new Blob([buffer], { type: `image/${tipoMime}` });
-    const resultado = await comTimeout(
-      worker.recognize(blob),
-      120000,
-      "Tempo esgotado (120s) rodando OCR na imagem."
-    );
-    const texto = (resultado.data.text || "").trim();
-    console.log(LOG_MD, `OCR da imagem retornou ${texto.length} caractere(s).`);
-    return { texto, ocrUsado: true, erro: texto ? null : "OCR não identificou texto na imagem." };
+  return partes.join("\n\n");
+}
+
+// Baixa e extrai o texto de um documento (PDF ou imagem) para o MD único.
+// Documentos "html" NAO passam por aqui - continuam usando
+// "obterTextoHtmlReal", ja' existente, que precisa de uma aba oculta
+// renderizando a pagina de verdade.
+async function extrairTextoDocumentoMd(url, mimetype, nome) {
+  console.log(LOG_MD, "Processando documento:", nome, "| tipo:", mimetype);
+
+  if (MIMETYPES_IMAGEM_SEM_OCR.includes(mimetype)) {
+    return {
+      texto: `_Documento do tipo imagem (${mimetype}) - texto não incluído (sem OCR nesta versão). Consulte o arquivo individual para ver a imagem._`,
+      erro: null,
+    };
   }
 
-  const MIMETYPES_IMAGEM_OCR = ["jpg", "jpeg", "png", "gif", "bmp", "webp"];
-
-  window.__eprocProcessarDocumentoMd = async function (parametros) {
-    console.log(LOG_MD, "Processando documento:", parametros.nome, "| tipo:", parametros.mimetype, "| url:", parametros.url);
-    try {
-      const resposta = await comTimeout(
-        fetch(parametros.url, { credentials: "same-origin" }),
-        30000,
-        "Tempo esgotado (30s) baixando o documento."
-      );
-      if (!resposta.ok) {
-        throw new Error(`Falha ao baixar o documento (HTTP ${resposta.status}).`);
-      }
-      const buffer = await resposta.arrayBuffer();
-
-      let resultado;
-      if (parametros.mimetype === "pdf") {
-        resultado = await extrairTextoPdf(buffer);
-      } else if (MIMETYPES_IMAGEM_OCR.includes(parametros.mimetype)) {
-        resultado = await extrairTextoImagem(buffer, parametros.mimetype);
-      } else {
-        resultado = {
-          texto: "",
-          ocrUsado: false,
-          erro: `Tipo "${parametros.mimetype}" não suportado para extração de texto no MD único.`,
-        };
-      }
-      console.log(LOG_MD, "Concluído:", parametros.nome, "| ocrUsado:", resultado.ocrUsado, "| erro:", resultado.erro);
-      return resultado;
-    } catch (e) {
-      console.error(LOG_MD, "Erro processando", parametros.nome, ":", e);
-      return { texto: "", ocrUsado: false, erro: e && e.message ? e.message : String(e) };
-    }
-  };
-
-  console.log(LOG_MD, "Ambiente pronto.");
-}
-
-// Chamada uma vez por documento (executeScript so' aceita passar "args"
-// junto de "func", nao junto de "files") - so' repassa para a funcao real
-// ja' definida no escopo da pagina por "prepararAmbienteMdNaPagina".
-function chamarProcessarDocumentoMdNaPagina(parametros) {
-  return window.__eprocProcessarDocumentoMd(parametros);
-}
-
-function encerrarTesseractWorkerNaPagina() {
-  console.log("[eproc-md]", "Encerrando worker do Tesseract (se existir)...");
-  if (window.__eprocTesseractWorker) {
-    return window.__eprocTesseractWorker.then((worker) => worker.terminate()).catch(() => {});
+  if (mimetype !== "pdf") {
+    return {
+      texto: "",
+      erro: `Tipo "${mimetype}" não suportado para extração de texto no MD único.`,
+    };
   }
-  return Promise.resolve();
-}
 
-async function prepararAbaProcessamentoMd(urlOrigemEproc) {
-  console.log(LOG_MD, "Abrindo aba oculta de processamento em:", urlOrigemEproc);
-  const aba = await chrome.tabs.create({ url: urlOrigemEproc, active: false });
-  console.log(LOG_MD, "Aba criada, id =", aba.id, "- aguardando carregamento...");
-  await aguardarCarregamentoAba(aba.id);
-  console.log(LOG_MD, "Aba carregada. Injetando libs/pdf.min.js e libs/tesseract.min.js...");
-
-  await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    files: ["libs/pdf.min.js", "libs/tesseract.min.js"],
-  });
-  console.log(LOG_MD, "Bibliotecas injetadas. Configurando ambiente...");
-
-  await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: prepararAmbienteMdNaPagina,
-  });
-  console.log(LOG_MD, "Ambiente configurado na aba", aba.id, "- pronto para processar documentos.");
-
-  return aba;
-}
-
-async function processarDocumentoMd(tabId, url, mimetype, nome) {
-  console.log(LOG_MD, "Enviando documento para a aba processar:", nome);
   try {
-    const [{ result } = {}] = await comTimeout(
-      chrome.scripting.executeScript({
-        target: { tabId },
-        func: chamarProcessarDocumentoMdNaPagina,
-        args: [{ url, mimetype, nome }],
-      }),
-      180000,
-      `Tempo esgotado (180s) processando "${nome}" na aba oculta - a aba pode ter travado ou navegado para outro lugar.`
+    const resposta = await comTimeout(
+      fetch(url, { credentials: "same-origin" }),
+      30000,
+      `Tempo esgotado (30s) baixando o documento "${nome}".`
     );
-    return result || { texto: "", ocrUsado: false, erro: "Sem resultado retornado pela aba." };
+    if (!resposta.ok) {
+      throw new Error(`Falha ao baixar o documento (HTTP ${resposta.status}).`);
+    }
+    const buffer = await resposta.arrayBuffer();
+    const texto = await extrairTextoPdf(buffer, nome);
+    console.log(LOG_MD, "Concluído:", nome);
+    return { texto, erro: null };
   } catch (e) {
-    console.error(LOG_MD, "Erro/timeout chamando executeScript para", nome, ":", e);
-    return { texto: "", ocrUsado: false, erro: e && e.message ? e.message : String(e) };
+    console.error(LOG_MD, "Erro processando", nome, ":", e);
+    return { texto: "", erro: e && e.message ? e.message : String(e) };
   }
 }
 
@@ -696,11 +535,10 @@ async function processarDocumentoMd(tabId, url, mimetype, nome) {
 // nomes - nao e' NLP nem usa uma lista real das partes do processo. Serve
 // para reduzir a exposicao de dados pessoais mais obvios (CPF/CNPJ,
 // telefone, e-mail, linhas de endereco, nomes em Maiuscula+minuscula), mas
-// NAO e' uma garantia de anonimizacao completa. Documentos digitalizados
-// com OCR de baixa qualidade, nomes escritos em CAIXA ALTA (comuns em
-// petições/certidões) ou formatos atipicos de documento podem passar sem
-// ser detectados. Sempre revise o arquivo gerado antes de compartilhar
-// externamente.
+// NAO e' uma garantia de anonimizacao completa. Nomes escritos em CAIXA
+// ALTA (comuns em petições/certidões) ou formatos atipicos de documento
+// podem passar sem ser detectados. Sempre revise o arquivo gerado antes
+// de compartilhar externamente.
 const REGEX_EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
 const REGEX_CNPJ = /\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g;
 const REGEX_CPF = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
@@ -776,68 +614,75 @@ function anonimizarTexto(texto) {
   return resultado;
 }
 
-async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProcesso, aoProgredir) {
-  console.log(LOG_MD, "Iniciando MD único.", documentos.length, "documento(s).");
-  if (documentos.length === 0) return;
+// Monta a secao de movimentacao processual (numero do evento, data/hora e
+// descricao), sempre a PRIMEIRA secao do documento - antes de qualquer
+// anexo, e inclusa mesmo que o processo nao tenha nenhum documento
+// anexado. "movimentacao" vem do "listarMovimentacaoProcessual()" do
+// content.js (deteccao best-effort, ver comentario la').
+function construirSecaoMovimentacao(movimentacao) {
+  if (!movimentacao || movimentacao.length === 0) {
+    return (
+      "## Movimentação processual\n\n" +
+      "_Não foi possível localizar a tabela de movimentação nesta página " +
+      "(ou o processo não possui movimentações registradas)._\n"
+    );
+  }
 
-  // Precisa ser uma URL com o caminho "/eproc/..." (nao so' a origem) para
-  // bater com o host_permissions declarado no manifest
-  // ("*://*/eproc/*") - senao chrome.scripting.executeScript e' negado
-  // nesta aba por falta de permissao de host.
-  const origemEproc = `${new URL(documentos[0].href).origin}/eproc/controlador.php`;
-  const aba = await prepararAbaProcessamentoMd(origemEproc);
+  const linhas = movimentacao.map((evento) => {
+    const numero = evento.numeroEvento != null ? `Evento ${evento.numeroEvento}` : "Evento";
+    return `- **${evento.dataHora}** — ${numero}: ${evento.descricao || "(sem descrição)"}`;
+  });
 
-  const secoes = [];
+  return (
+    "## Movimentação processual\n\n" +
+    "> Detecção automática (melhor esforço) da tabela de movimentação da página - confira contra a tela do eproc.\n\n" +
+    `${linhas.join("\n")}\n`
+  );
+}
+
+async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProcesso, movimentacao, aoProgredir) {
+  console.log(LOG_MD, "Iniciando MD único.", documentos.length, "documento(s),", (movimentacao || []).length, "evento(s) de movimentação.");
+
+  const secoes = [construirSecaoMovimentacao(movimentacao)];
   const avisos = [];
 
-  try {
-    for (let i = 0; i < documentos.length; i += 1) {
-      const doc = documentos[i];
-      const numero = String(i + 1).padStart(4, "0");
-      let corpo;
-      console.log(LOG_MD, `[${i + 1}/${documentos.length}]`, doc.nome, `(${doc.mimetype})`);
-      if (aoProgredir) aoProgredir(i, documentos.length, doc.nome);
+  for (let i = 0; i < documentos.length; i += 1) {
+    const doc = documentos[i];
+    const numero = String(i + 1).padStart(4, "0");
+    let corpo;
+    console.log(LOG_MD, `[${i + 1}/${documentos.length}]`, doc.nome, `(${doc.mimetype})`);
+    if (aoProgredir) aoProgredir(i, documentos.length, doc.nome);
 
-      try {
-        const urlReal = await resolverUrl(doc);
+    try {
+      const urlReal = await resolverUrl(doc);
 
-        if (doc.mimetype === "html") {
-          const { texto, erro } = await obterTextoHtmlReal(urlReal);
-          if (texto) {
-            corpo = texto;
-          } else {
-            console.warn(LOG_MD, "Falha ao extrair HTML de", doc.nome, ":", erro);
-            corpo = `_Não foi possível extrair o conteúdo deste documento (${erro || "motivo desconhecido"})._`;
-            avisos.push(`${doc.nome}: ${erro || "motivo desconhecido"}`);
-          }
+      if (doc.mimetype === "html") {
+        const { texto, erro } = await obterTextoHtmlReal(urlReal);
+        if (texto) {
+          corpo = texto;
         } else {
-          const resultado = await processarDocumentoMd(aba.id, urlReal, doc.mimetype, doc.nome);
-          if (resultado.erro && !resultado.texto) {
-            console.warn(LOG_MD, "Falha ao extrair texto de", doc.nome, ":", resultado.erro);
-            corpo = `_Não foi possível extrair o texto deste documento (${resultado.erro})._`;
-            avisos.push(`${doc.nome}: ${resultado.erro}`);
-          } else {
-            corpo = resultado.texto || "_(sem texto identificado)_";
-            if (resultado.ocrUsado) {
-              corpo = `> ⚠️ Texto obtido por OCR (reconhecimento automático de imagem) — pode conter erros de leitura.\n\n${corpo}`;
-            }
-          }
+          console.warn(LOG_MD, "Falha ao extrair HTML de", doc.nome, ":", erro);
+          corpo = `_Não foi possível extrair o conteúdo deste documento (${erro || "motivo desconhecido"})._`;
+          avisos.push(`${doc.nome}: ${erro || "motivo desconhecido"}`);
         }
-      } catch (e) {
-        console.error(LOG_MD, "Erro processando", doc.nome, ":", e);
-        corpo = `_Não foi possível processar este documento (${String(e)})._`;
-        avisos.push(`${doc.nome}: ${String(e)}`);
+      } else {
+        const resultado = await extrairTextoDocumentoMd(urlReal, doc.mimetype, doc.nome);
+        if (resultado.erro && !resultado.texto) {
+          console.warn(LOG_MD, "Falha ao extrair texto de", doc.nome, ":", resultado.erro);
+          corpo = `_Não foi possível extrair o texto deste documento (${resultado.erro})._`;
+          avisos.push(`${doc.nome}: ${resultado.erro}`);
+        } else {
+          corpo = resultado.texto || "_(sem texto identificado)_";
+        }
       }
-
-      secoes.push(`## ${numero} — ${doc.nome}\n\n${corpo.trim()}\n`);
-      if (aoProgredir) aoProgredir(i + 1, documentos.length, doc.nome);
+    } catch (e) {
+      console.error(LOG_MD, "Erro processando", doc.nome, ":", e);
+      corpo = `_Não foi possível processar este documento (${String(e)})._`;
+      avisos.push(`${doc.nome}: ${String(e)}`);
     }
-  } finally {
-    console.log(LOG_MD, "Encerrando aba de processamento", aba.id, "...");
-    await chrome.scripting
-      .executeScript({ target: { tabId: aba.id }, func: encerrarTesseractWorkerNaPagina })
-      .catch((e) => console.warn(LOG_MD, "Falha ao encerrar worker do Tesseract:", e));
-    chrome.tabs.remove(aba.id).catch(() => {});
+
+    secoes.push(`## ${numero} — ${doc.nome}\n\n${corpo.trim()}\n`);
+    if (aoProgredir) aoProgredir(i + 1, documentos.length, doc.nome);
   }
 
   console.log(LOG_MD, "Todos os documentos processados. Avisos:", avisos.length);
@@ -869,7 +714,7 @@ async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProces
 
 // ---- Orquestracao geral ----
 
-async function processarFila(numeroProcesso, documentos, opcoes) {
+async function processarFila(numeroProcesso, documentos, opcoes, movimentacao) {
   const pastaBase = `eproc/${sanitizarNomeArquivo(numeroProcesso)}`;
   const erros = [];
 
@@ -974,7 +819,7 @@ async function processarFila(numeroProcesso, documentos, opcoes) {
     };
 
     try {
-      await construirMdUnico(documentos, obterUrlResolvida, pastaBase, numeroProcesso, enviarProgressoMd);
+      await construirMdUnico(documentos, obterUrlResolvida, pastaBase, numeroProcesso, movimentacao, enviarProgressoMd);
     } catch (e) {
       console.error(LOG_MD, "Erro fatal no MD único:", e);
       erros.push({ nome: "MD unico", mensagem: String(e) });
@@ -1510,8 +1355,8 @@ async function abrirRelatorioPreenchido(categoria, situacao, filtro, exportarExc
 
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "BAIXAR_DOCUMENTOS") {
-    const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false };
-    processarFila(mensagem.numeroProcesso, mensagem.documentos, opcoes);
+    const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false, mdUnico: false };
+    processarFila(mensagem.numeroProcesso, mensagem.documentos, opcoes, mensagem.movimentacao);
     sendResponse({ ok: true });
     return true;
   }

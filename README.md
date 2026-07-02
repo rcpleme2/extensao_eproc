@@ -24,7 +24,7 @@ Downloads/eproc/<numero_do_processo>/
   ...
   _indice.json                                       (lista com sequencial, evento, nome, tipo e URL de cada documento)
   <numero_do_processo>_completo.pdf                  (opcional: todos os documentos combinados em um único PDF)
-  <numero_do_processo>_completo_anonimizado.md       (opcional: texto de todos os documentos, com OCR e anonimizado)
+  <numero_do_processo>_completo_anonimizado.md       (opcional: movimentação + texto dos documentos, anonimizado)
 ```
 
 O número no início do nome do arquivo é um sequencial global de 4 dígitos
@@ -60,9 +60,11 @@ demais seguem na ordem em que os documentos foram juntados ao processo.
      documento, como já era feito.
    - **PDF único combinado**: um único PDF com todos os documentos do
      processo, na mesma ordem cronológica (petição inicial primeiro).
-   - **MD único (texto, com OCR e anonimizado)**: um único arquivo
-     Markdown com o texto de todos os documentos, anonimizado
-     automaticamente — ver seção própria abaixo.
+   - **MD único (texto e anonimizado)**: um único arquivo Markdown com a
+     movimentação processual e o texto de todos os documentos,
+     anonimizado automaticamente — ver seção própria abaixo. É o único
+     modo disponível quando o processo não tem nenhum documento anexado
+     (nesse caso, o arquivo sai só com a movimentação).
 5. Clique em **"Baixar"** — gera o modo escolhido em
    `Downloads/eproc/<numero_do_processo>/`.
 6. Acompanhe a barra de progresso no próprio painel.
@@ -110,47 +112,65 @@ Se ainda assim algum documento não puder ser incorporado, a página de
 aviso no PDF único inclui o motivo exato da falha (ex.: tempo esgotado,
 elemento não encontrado), para facilitar o diagnóstico.
 
-## MD único (texto, com OCR e anonimizado)
+## MD único (texto e anonimizado)
 
 Ao escolher o modo "MD único", a extensão monta um único arquivo
-`<numero_do_processo>_completo_anonimizado.md` com o **texto** de todos
-os documentos do processo, na mesma ordem cronológica da numeração
-sequencial, cada um em uma seção própria (`## 0001 — INIC1`, `## 0002 —
-OUT2`, ...).
+`<numero_do_processo>_completo_anonimizado.md` com:
 
-### Extração de texto e OCR
+1. A **movimentação processual** (data/hora e descrição de cada evento),
+   sempre a primeira seção do arquivo — incluída mesmo que o processo não
+   tenha nenhum documento anexado.
+2. O **texto** de cada documento do processo, na mesma ordem cronológica
+   da numeração sequencial, cada um em uma seção própria (`## 0001 —
+   INIC1`, `## 0002 — OUT2`, ...).
+
+Esse modo roda inteiramente **offline, sem OCR e sem nenhuma chamada de
+rede** além do próprio eproc.
+
+### Movimentação processual
+
+A extensão lê a tabela de movimentação da própria página (número do
+evento, data/hora, descrição) e monta uma lista cronológica no topo do
+arquivo, por exemplo:
+
+```
+## Movimentação processual
+
+- **01/07/2026 09:15** — Evento 1: Distribuído por sorteio
+- **02/07/2026 10:30** — Evento 2: Juntada de petição inicial
+```
+
+Essa detecção é **melhor esforço** (baseada em padrões de data/hora e nos
+mesmos identificadores de linha já usados para associar documentos aos
+seus eventos) — não foi validada contra uma amostra real da tabela de
+movimentação de todos os tribunais. Se a lista sair incompleta, fora de
+ordem ou vazia no seu tribunal, um `.mhtml` da tela de detalhes do
+processo (Chrome: Ctrl+S → "Página da Web, completa") permite ajustar a
+detecção com precisão — é o mesmo processo já usado para calibrar outras
+partes desta extensão.
+
+### Extração de texto dos documentos
 
 - **PDF com camada de texto** (a maioria dos documentos gerados
   digitalmente): o texto é extraído diretamente, usando a biblioteca
   [pdf.js](https://mozilla.github.io/pdf.js/) (vendorizada em
-  `libs/pdf.min.js` / `libs/pdf.worker.min.js`).
+  `libs/pdf.min.js` / `libs/pdf.worker.min.js`), rodando dentro do
+  próprio service worker da extensão — sem aba oculta, sem rede.
 - **PDF escaneado ou imagem** (jpg, png, gif, bmp, webp) sem camada de
-  texto (ou com muito pouco texto extraído): a extensão renderiza a
-  página/imagem e roda **OCR automático** nela, usando
-  [Tesseract.js](https://tesseract.projectnaptha.com/) (vendorizado em
-  `libs/tesseract.min.js` / `libs/tesseract-worker.min.js`), configurado
-  para português. Trechos obtidos por OCR vêm marcados no arquivo com um
-  aviso (`⚠️ Texto obtido por OCR...`), já que reconhecimento automático
-  de imagem pode conter erros de leitura, especialmente em documentos
-  escaneados de baixa qualidade.
+  texto: **não há OCR nesta versão** (uma tentativa anterior usando
+  Tesseract.js não funcionou de forma confiável e foi removida). Esses
+  casos entram no arquivo apenas com uma nota indicando que o texto não
+  pôde ser extraído — consulte o arquivo individual (modo "Arquivos
+  individuais") para ver o conteúdo original.
 - **HTML** (certidões, atos ordinatórios, mandados): reaproveita o mesmo
   mecanismo de aba oculta já usado nos outros modos para ler o texto real
-  do documento.
-
-Esse processamento roda numa **aba oculta** própria (não a sua aba
-atual), separada da aba usada para os outros documentos "html". O motor
-de OCR (Tesseract) e os dados do idioma português são baixados de uma CDN
-pública (jsdelivr) na primeira vez que o OCR for usado nesta aba —
-alguns MB, feito uma única vez por sessão de exportação e cacheado pelo
-navegador depois. **Nenhum conteúdo dos seus documentos é enviado para
-fora**: só o motor/dados de OCR (arquivos genéricos, iguais para
-qualquer usuário) são baixados; o reconhecimento de texto em si roda
-inteiramente no seu navegador. Isso é a única parte da extensão que faz
-chamadas de rede além do próprio eproc.
+  do documento (é a única parte deste modo que ainda usa uma aba própria,
+  já que não tem como ler esse conteúdo sem renderizar a página real).
 
 ### Anonimização (melhor esforço)
 
-Antes de salvar, o texto combinado passa por uma anonimização automática:
+Antes de salvar, o texto combinado (movimentação + documentos) passa por
+uma anonimização automática:
 
 - **CPF, CNPJ, telefone e e-mail**: identificados por padrão (regex) e
   substituídos por `[CPF removido]`, `[CNPJ removido]`, etc.
@@ -173,8 +193,6 @@ das partes do processo. Em particular:
   caixa alta geraria muitos falsos positivos.
 - Endereços sem as palavras-chave reconhecidas, ou em formatos atípicos,
   podem não ser detectados.
-- Erros de OCR podem fazer um CPF/nome não bater exatamente com o padrão
-  esperado e escapar da anonimização.
 
 **Sempre revise o arquivo `.md` gerado antes de compartilhar
 externamente** — o aviso já aparece no próprio painel ao escolher esse
@@ -182,33 +200,18 @@ modo e no cabeçalho do arquivo gerado.
 
 ### Se o "MD único" travar ou parecer não avançar
 
-Esse modo tem bem mais partes móveis que os outros dois (pdf.js, OCR via
-Tesseract, uma aba oculta separada, download da CDN) — se algo parar no
-meio, os logs abaixo mostram exatamente onde:
-
-1. **Console do service worker**: em `chrome://extensions`, encontre a
-   extensão e clique em **"service worker"** (ou "Inspect views: service
-   worker"). Isso abre o DevTools do processo principal da extensão, com
-   logs prefixados `[eproc-md]` para cada etapa: abertura da aba,
-   injeção das bibliotecas, início/fim de cada documento, downloads, etc.
-2. **Console da aba oculta**: o processamento de PDF/OCR roda numa aba
-   nova, aberta em segundo plano (ela aparece na barra de abas do
-   navegador, só não fica em primeiro plano). Clique nela e abra o
-   DevTools normalmente (F12) para ver os logs `[eproc-md]` específicos
-   dessa aba (carregamento do pdf.js/Tesseract, página sendo lida,
-   progresso do OCR).
-3. Nenhuma etapa demorada fica presa para sempre: download de documento,
-   abertura de PDF, renderização de página e OCR têm limites de tempo
-   (30s a 180s conforme a etapa) — ao estourar, aparece como um erro
+1. Abra o console do service worker em `chrome://extensions` (clique em
+   **"service worker"** / "Inspect views: service worker" na extensão).
+   Os logs prefixados `[eproc-md]` mostram cada etapa: início/fim de cada
+   documento, páginas de PDF lidas, downloads, etc.
+2. Nenhuma etapa demorada fica presa para sempre: download de documento e
+   abertura de PDF têm limite de tempo (30s) — ao estourar, vira um erro
    tratado normalmente (nos avisos do arquivo final), em vez de travar a
-   exportação inteira. Se mesmo assim parecer travado, os logs acima
-   mostram em qual etapa/documento isso está acontecendo.
-4. A causa mais provável de demora/erro é a **conexão com a CDN do
-   Tesseract** (motor + dados de idioma, baixados na primeira vez que o
-   OCR é usado) — se sua rede bloquear `cdn.jsdelivr.net`, o OCR falha
-   com um erro claro nos logs e nos avisos do documento, mas o restante
-   dos documentos (que não precisam de OCR) continua sendo processado
-   normalmente.
+   exportação inteira.
+3. Documentos "html" ainda usam uma aba oculta própria (visível na barra
+   de abas do navegador, sem ficar em primeiro plano) - se travar
+   especificamente num documento desse tipo, o mecanismo é o mesmo já
+   usado no modo "Arquivos individuais"/"PDF único", não específico do MD.
 
 ## Relatório Geral (conclusos para despacho/sentença)
 
@@ -370,9 +373,7 @@ painel), em vez do ícone genérico de documento usado antes.
   (`.../eproc/controlador.php`), não é restrita a um tribunal específico.
 - Se um download falhar (ex.: link expirado), o erro aparece no painel ao
   final do processo; os demais downloads continuam normalmente.
-- **Único ponto da extensão que acessa a internet além do eproc**: o modo
-  "MD único" baixa o motor de OCR e os dados de idioma (Tesseract) de uma
-  CDN pública (jsdelivr) na primeira vez que o OCR é usado numa aba. Todas
-  as outras funcionalidades (exportar documentos, PDF único, relatórios,
-  regras de automação) funcionam inteiramente offline/local, sem nenhuma
-  chamada de rede além do próprio eproc.
+- Todas as funcionalidades desta extensão (exportar documentos, PDF
+  único, MD único, relatórios, regras de automação) funcionam
+  inteiramente offline/local, sem nenhuma chamada de rede além do próprio
+  eproc.

@@ -21,16 +21,33 @@ const ROTULO_FASE = {
   "md-unico": "MD único",
 };
 
-let estadoAtual = { numeroProcesso: null, documentos: [] };
+let estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [] };
 
 // Os tres modos sao mutuamente exclusivos (radio buttons), entao sempre
-// ha' exatamente um marcado; so' falta ter documentos detectados.
+// ha' exatamente um marcado. O botao "Baixar" fica habilitado se houver
+// documentos OU movimentacao detectados - o "MD único" sozinho consegue
+// gerar um arquivo so' com a movimentação, mesmo sem nenhum documento
+// anexado.
 function atualizarEstadoBotaoBaixar() {
-  btnBaixar.disabled = estadoAtual.documentos.length === 0;
+  const temDocumentos = estadoAtual.documentos.length > 0;
+  const temMovimentacao = estadoAtual.movimentacao.length > 0;
+  btnBaixar.disabled = !temDocumentos && !temMovimentacao;
 }
 
-// O aviso sobre OCR/anonimizacao so' aparece quando esse modo esta'
-// selecionado, para nao poluir a interface quando o usuario nao vai usa-lo.
+// "Arquivos individuais" e "PDF único" não tem o que gerar sem nenhum
+// documento anexado - reaplicado tanto apos detectar quanto apos um
+// download terminar, para nao reabilitar por engano essas duas opcoes
+// quando o processo so' tem movimentação.
+function atualizarEstadoRadiosConformeDocumentos() {
+  const semDocumentos = estadoAtual.documentos.length === 0;
+  radioIndividuais.disabled = semDocumentos;
+  radioPdfUnico.disabled = semDocumentos;
+  radioMdUnico.disabled = false;
+}
+
+// O aviso sobre extração de texto/anonimização so' aparece quando esse
+// modo esta' selecionado, para nao poluir a interface quando o usuario
+// nao vai usa-lo.
 function atualizarAvisoMdUnico() {
   avisoMdUnico.hidden = !radioMdUnico.checked;
 }
@@ -69,11 +86,14 @@ btnDetectar.addEventListener("click", async () => {
     const aba = await getAbaAtiva();
     const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_DOCUMENTOS" });
 
-    if (!resposta || !resposta.documentos || resposta.documentos.length === 0) {
+    const documentos = (resposta && resposta.documentos) || [];
+    const movimentacao = (resposta && resposta.movimentacao) || [];
+
+    if (!resposta || (documentos.length === 0 && movimentacao.length === 0)) {
       setStatus(
-        "Nenhum documento encontrado. Confirme que voce esta na pagina de detalhes do processo no eproc."
+        "Nenhum documento nem movimentação encontrados. Confirme que você está na página de detalhes do processo no eproc."
       );
-      estadoAtual = { numeroProcesso: null, documentos: [] };
+      estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [] };
       atualizarEstadoBotaoBaixar();
       areaProcesso.hidden = true;
       areaOpcoes.hidden = true;
@@ -82,15 +102,36 @@ btnDetectar.addEventListener("click", async () => {
       return;
     }
 
-    estadoAtual = resposta;
+    estadoAtual = { numeroProcesso: resposta.numeroProcesso, documentos, movimentacao };
     numeroProcessoEl.textContent = resposta.numeroProcesso;
-    totalDocumentosEl.textContent = String(resposta.documentos.length);
+    totalDocumentosEl.textContent = String(documentos.length);
     areaProcesso.hidden = false;
     areaOpcoes.hidden = false;
-    listaDocumentosEl.hidden = false;
-    renderizarLista(resposta.documentos);
+
+    // Sem nenhum documento anexado (so' movimentação), os modos
+    // "Arquivos individuais" e "PDF único" não têm o que gerar - só "MD
+    // único" consegue produzir algo (a linha do tempo de movimentação).
+    const semDocumentos = documentos.length === 0;
+    atualizarEstadoRadiosConformeDocumentos();
+    if (semDocumentos) {
+      radioMdUnico.checked = true;
+    }
+    atualizarAvisoMdUnico();
+
+    if (semDocumentos) {
+      listaDocumentosEl.hidden = true;
+      listaDocumentosEl.innerHTML = "";
+    } else {
+      listaDocumentosEl.hidden = false;
+      renderizarLista(documentos);
+    }
+
     atualizarEstadoBotaoBaixar();
-    setStatus("Documentos detectados. Escolha o que baixar e clique em \"Baixar\".");
+    setStatus(
+      semDocumentos
+        ? `Nenhum documento anexado, mas ${movimentacao.length} evento(s) de movimentação encontrado(s) - só "MD único" está disponível.`
+        : 'Documentos detectados. Escolha o que baixar e clique em "Baixar".'
+    );
   } catch (e) {
     setStatus(
       "Nao foi possivel ler a pagina. Verifique se voce esta em uma pagina de processo do eproc e tente novamente."
@@ -99,7 +140,7 @@ btnDetectar.addEventListener("click", async () => {
 });
 
 btnBaixar.addEventListener("click", async () => {
-  if (!estadoAtual.documentos.length) return;
+  if (!estadoAtual.documentos.length && !estadoAtual.movimentacao.length) return;
   const opcoes = {
     individuais: radioIndividuais.checked,
     pdfUnico: radioPdfUnico.checked,
@@ -113,7 +154,7 @@ btnBaixar.addEventListener("click", async () => {
   radioMdUnico.disabled = true;
   areaProgresso.hidden = false;
   barraProgresso.value = 0;
-  barraProgresso.max = estadoAtual.documentos.length;
+  barraProgresso.max = Math.max(estadoAtual.documentos.length, 1);
   textoProgresso.textContent = `0 / ${estadoAtual.documentos.length}`;
   areaErros.hidden = true;
   setStatus("Baixando...");
@@ -122,6 +163,7 @@ btnBaixar.addEventListener("click", async () => {
     tipo: "BAIXAR_DOCUMENTOS",
     numeroProcesso: estadoAtual.numeroProcesso,
     documentos: estadoAtual.documentos,
+    movimentacao: estadoAtual.movimentacao,
     opcoes,
   });
 });
@@ -322,9 +364,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   if (mensagem.tipo === "DOWNLOAD_FINALIZADO") {
     btnBaixar.disabled = false;
     btnDetectar.disabled = false;
-    radioIndividuais.disabled = false;
-    radioPdfUnico.disabled = false;
-    radioMdUnico.disabled = false;
+    atualizarEstadoRadiosConformeDocumentos();
     atualizarEstadoBotaoBaixar();
     setStatus(`Concluido! Arquivos salvos em Downloads/${mensagem.pasta}`);
     if (mensagem.erros && mensagem.erros.length > 0) {

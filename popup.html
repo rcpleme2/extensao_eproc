@@ -41,12 +41,13 @@
       </label>
       <label class="opcao-radio">
         <input type="radio" name="modo-exportacao" id="radio-md-unico" />
-        MD único (texto, com OCR e anonimizado)
+        MD único (texto e anonimizado)
       </label>
       <div id="aviso-md-unico" class="aviso-md-unico" hidden>
-        Extrai o texto de todos os documentos (usa OCR automático para
-        páginas/imagens escaneadas, o que baixa um motor de reconhecimento
-        de ~alguns MB na primeira vez) e remove automaticamente CPF, CNPJ,
+        Extrai o texto de todos os documentos (PDFs com camada de texto e
+        HTML; imagens e PDFs escaneados sem camada de texto entram só com
+        uma nota, sem OCR nesta versão), inclui a movimentação processual
+        numa seção antes dos anexos, e remove automaticamente CPF, CNPJ,
         telefone, e-mail, linhas com possível endereço e abrevia nomes.
         <strong>Isso é um processo de melhor esforço, não uma garantia de
         anonimização completa</strong> — sempre revise o arquivo gerado
