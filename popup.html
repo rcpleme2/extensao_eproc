@@ -58,16 +58,25 @@
   <div id="area-relatorio-info" class="status">
     "Relatórios" consulta em segundo plano (sem alterar sua aba atual)
     quantos processos estão em "MOVIMENTO-AGUARDA DESPACHO" e
-    "MOVIMENTO-AGUARDA SENTENÇA". O ícone ↗ leva direto para a tela do
-    Relatório Geral nesta aba, caso prefira consultar manualmente.
+    "MOVIMENTO-AGUARDA SENTENÇA", e quantos desses são urgentes
+    ("Informação complementar" = "Petição Urgente - Sim"). O ícone ↗ leva
+    direto para a tela do Relatório Geral nesta aba, caso prefira
+    consultar manualmente.
   </div>
   <div id="area-progresso-relatorio" class="progresso-relatorio" hidden>
     <span class="spinner" aria-hidden="true"></span>
     <span id="texto-progresso-relatorio"></span>
   </div>
   <div id="area-relatorio" class="relatorio" hidden>
-    <div>Conclusos para despacho: <strong id="valor-despacho"></strong></div>
-    <div>Conclusos para sentença: <strong id="valor-sentenca"></strong></div>
+    <div>
+      Conclusos para despacho: <strong id="valor-despacho"></strong>
+      (urgentes: <strong id="valor-despacho-urgentes"></strong>)
+    </div>
+    <div>
+      Conclusos para sentença: <strong id="valor-sentenca"></strong>
+      (urgentes: <strong id="valor-sentenca-urgentes"></strong>)
+    </div>
+    <div id="aviso-urgencia" class="aviso-urgencia" hidden></div>
   </div>
 
   <script src="popup.js"></script>

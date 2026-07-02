@@ -522,14 +522,22 @@ const VALOR_SITUACAO_AGUARDA_DESPACHO = "M;22;C";
 const VALOR_SITUACAO_AGUARDA_SENTENCA = "M;21;C";
 
 // Roda inteiramente dentro da pagina "Relatorio Geral de Processos" (via
-// chrome.scripting.executeScript): marca so' a opcao de situacao pedida no
-// select multiplo, dispara "change" (o bootstrap-select e os handlers do
-// eproc dependem desse evento nativo do <select>), clica em "Consultar" e
-// espera o badge de contagem "(N)" mudar antes de ler o numero. Precisa
-// ser uma funcao autocontida: e' serializada e executada no contexto da
-// pagina, sem acesso ao escopo deste arquivo. Chamada uma vez por
-// situacao, para permitir reportar progresso entre uma consulta e outra.
-function consultarSituacaoNaPagina(valorOpcao) {
+// chrome.scripting.executeScript): marca a situacao pedida no select
+// multiplo, consulta o total, depois marca tambem o filtro "Informação
+// complementar" = "Petição Urgente - Sim" (campo Tagify + jQuery UI
+// Autocomplete: id="selDadoComplementar") e consulta de novo para saber
+// quantos desses sao urgentes. Precisa ser autocontida: e' serializada e
+// executada no contexto da pagina, sem acesso ao escopo deste arquivo.
+//
+// A parte de urgencia foi feita por engenharia reversa do HTML estatico
+// da pagina (o campo usa Tagify + jQuery UI Autocomplete, confirmado
+// pelas classes "tagify"/"ui-autocomplete-input" e pelos scripts
+// carregados), mas a lista de sugestoes em si e' gerada dinamicamente
+// (nao aparece no HTML estatico), entao os seletores do dropdown sao uma
+// aposta razoavel, nao uma certeza absoluta. Se a sugestao nao for
+// encontrada, a consulta do total ainda funciona normalmente; so' o
+// numero de urgentes fica nulo com um aviso explicando o motivo.
+function consultarSituacaoComUrgenciaNaPagina(valorOpcao) {
   function aguardar(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -539,26 +547,81 @@ function consultarSituacaoNaPagina(valorOpcao) {
     return m ? Number(m[1]) : null;
   }
 
-  return (async () => {
+  function selecionarSituacao(valorOpcaoSituacao) {
     const select = document.getElementById("selStatusProcesso");
     if (!select) throw new Error('Campo "Situação" não encontrado nesta página.');
 
     let encontrouOpcao = false;
     for (const opcao of select.options) {
-      const selecionada = opcao.value === valorOpcao;
+      const selecionada = opcao.value === valorOpcaoSituacao;
       opcao.selected = selecionada;
       if (selecionada) encontrouOpcao = true;
     }
     if (!encontrouOpcao) {
-      throw new Error(`Opção de situação "${valorOpcao}" não encontrada na lista.`);
+      throw new Error(`Opção de situação "${valorOpcaoSituacao}" não encontrada na lista.`);
     }
     select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
 
-    // Da' tempo do bootstrap-select atualizar visualmente antes de
-    // consultar (nao estritamente necessario, mas mais fiel ao fluxo real
-    // de uso e evita clicar antes do componente terminar de reagir).
+  function limparInformacaoComplementar() {
+    const wrapper = document.getElementById("selDadoComplementar-wrapper");
+    if (!wrapper) return;
+    wrapper.querySelectorAll(".tagify__tag__removeBtn").forEach((botao) => botao.click());
+  }
+
+  async function marcarPeticaoUrgente() {
+    const wrapper = document.getElementById("selDadoComplementar-wrapper");
+    if (!wrapper) {
+      throw new Error('Campo "Informação complementar" não encontrado nesta página.');
+    }
+    const inputSpan = wrapper.querySelector(".tagify__input");
+    const tagsEl = wrapper.querySelector("tags.tagify");
+    if (!inputSpan || !tagsEl) {
+      throw new Error('Estrutura do campo "Informação complementar" não reconhecida.');
+    }
+
+    limparInformacaoComplementar();
+    await aguardar(150);
+
+    const TEXTO_BUSCA = "Petição Urgente";
+    const TEXTO_ALVO = "Petição Urgente - Sim";
+
+    inputSpan.focus();
+    inputSpan.textContent = TEXTO_BUSCA;
+    inputSpan.dispatchEvent(new InputEvent("input", { bubbles: true, data: TEXTO_BUSCA }));
+
+    let itemAlvo = null;
+    for (let tentativa = 0; tentativa < 20; tentativa += 1) {
+      await aguardar(200);
+      const itens = Array.from(
+        document.querySelectorAll("ul.ui-autocomplete li, .ui-autocomplete .ui-menu-item")
+      );
+      itemAlvo =
+        itens.find((li) => (li.textContent || "").trim() === TEXTO_ALVO) ||
+        itens.find((li) => (li.textContent || "").trim().includes(TEXTO_ALVO)) ||
+        itens.find((li) => (li.textContent || "").trim().includes(TEXTO_BUSCA));
+      if (itemAlvo) break;
+    }
+
+    if (!itemAlvo) {
+      throw new Error(
+        `Sugestão "${TEXTO_ALVO}" não encontrada na lista de autocomplete do campo "Informação complementar".`
+      );
+    }
+
+    const alvoClicavel = itemAlvo.querySelector("a, div") || itemAlvo;
+    alvoClicavel.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    alvoClicavel.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    alvoClicavel.click();
+
     await aguardar(200);
 
+    if (tagsEl.querySelectorAll(".tagify__tag").length === 0) {
+      throw new Error('A tag "Petição Urgente - Sim" não foi adicionada ao campo.');
+    }
+  }
+
+  async function clicarConsultarELer() {
     const botaoConsultar = document.querySelector('button.btnConsultar[form="frmProcessoLista"]');
     if (!botaoConsultar) throw new Error('Botão "Consultar" não encontrado nesta página.');
 
@@ -587,6 +650,31 @@ function consultarSituacaoNaPagina(valorOpcao) {
     }
 
     throw new Error("Tempo esgotado esperando o resultado da consulta.");
+  }
+
+  return (async () => {
+    selecionarSituacao(valorOpcao);
+    limparInformacaoComplementar();
+    // Da' tempo do bootstrap-select/tagify atualizarem visualmente antes
+    // de consultar (nao estritamente necessario, mas mais fiel ao fluxo
+    // real de uso e evita clicar antes dos componentes reagirem).
+    await aguardar(200);
+
+    const total = await clicarConsultarELer();
+
+    let urgentes = null;
+    let erroUrgentes = null;
+    try {
+      await marcarPeticaoUrgente();
+      await aguardar(200);
+      urgentes = await clicarConsultarELer();
+    } catch (e) {
+      erroUrgentes = e && e.message ? e.message : String(e);
+    } finally {
+      limparInformacaoComplementar();
+    }
+
+    return { total, urgentes, erroUrgentes };
   })();
 }
 
@@ -640,22 +728,29 @@ async function gerarRelatorioGeral(aoProgredir) {
     // etc.) terminarem de inicializar apos o carregamento.
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    notificar('Consultando situação "MOVIMENTO-AGUARDA DESPACHO"...');
-    const [{ result: conclusosDespacho } = {}] = await chrome.scripting.executeScript({
+    notificar('Consultando "MOVIMENTO-AGUARDA DESPACHO" (total e urgentes)...');
+    const [{ result: resultadoDespacho } = {}] = await chrome.scripting.executeScript({
       target: { tabId: abaOculta.id },
-      func: consultarSituacaoNaPagina,
+      func: consultarSituacaoComUrgenciaNaPagina,
       args: [VALOR_SITUACAO_AGUARDA_DESPACHO],
     });
 
-    notificar('Consultando situação "MOVIMENTO-AGUARDA SENTENÇA"...');
-    const [{ result: conclusosSentenca } = {}] = await chrome.scripting.executeScript({
+    notificar('Consultando "MOVIMENTO-AGUARDA SENTENÇA" (total e urgentes)...');
+    const [{ result: resultadoSentenca } = {}] = await chrome.scripting.executeScript({
       target: { tabId: abaOculta.id },
-      func: consultarSituacaoNaPagina,
+      func: consultarSituacaoComUrgenciaNaPagina,
       args: [VALOR_SITUACAO_AGUARDA_SENTENCA],
     });
 
     notificar("Finalizando...");
-    return { conclusosDespacho, conclusosSentenca };
+    return {
+      conclusosDespacho: resultadoDespacho ? resultadoDespacho.total : null,
+      conclusosDespachoUrgentes: resultadoDespacho ? resultadoDespacho.urgentes : null,
+      avisoUrgenciaDespacho: resultadoDespacho ? resultadoDespacho.erroUrgentes : null,
+      conclusosSentenca: resultadoSentenca ? resultadoSentenca.total : null,
+      conclusosSentencaUrgentes: resultadoSentenca ? resultadoSentenca.urgentes : null,
+      avisoUrgenciaSentenca: resultadoSentenca ? resultadoSentenca.erroUrgentes : null,
+    };
   } finally {
     if (abaOculta && abaOculta.id) {
       chrome.tabs.remove(abaOculta.id).catch(() => {});

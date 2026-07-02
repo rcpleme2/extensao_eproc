@@ -117,10 +117,24 @@ está vendo**:
    preciso simular a expansão do menu "Relatórios" antes).
 2. Nessa aba oculta, no campo "Situação", seleciona **"MOVIMENTO-AGUARDA
    DESPACHO"** e clica em "Consultar", lendo o número de processos
-   encontrados (badge "Processos (N)").
-3. Repete o mesmo passo para **"MOVIMENTO-AGUARDA SENTENÇA"**.
-4. Fecha a aba oculta e mostra os dois números no painel: "Conclusos para
-   despacho: N" e "Conclusos para sentença: N".
+   encontrados (badge "Processos (N)") — esse é o total.
+3. Marca também o campo "Informação complementar" com a tag **"Petição
+   Urgente - Sim"** e consulta de novo, lendo quantos desses são
+   urgentes. Remove essa marcação antes de seguir para não vazar entre
+   as duas situações.
+4. Repete os passos 2 e 3 para **"MOVIMENTO-AGUARDA SENTENÇA"**.
+5. Fecha a aba oculta e mostra os quatro números no painel: "Conclusos
+   para despacho: N (urgentes: N)" e "Conclusos para sentença: N
+   (urgentes: N)".
+
+O campo "Informação complementar" usa um componente de tags
+(Tagify + autocomplete) cuja lista de sugestões é gerada dinamicamente
+pelo eproc — não dá para garantir com 100% de certeza que os seletores
+usados para escolher "Petição Urgente - Sim" na lista vão bater em todas
+as versões da página. Se a extensão não conseguir marcar essa tag, o
+total de conclusos continua aparecendo normalmente; só o número de
+urgentes fica com um aviso explicando o motivo (visível no painel), sem
+travar o resto do relatório.
 
 Como a aba oculta é criada com `active: false`, ela não rouba o foco nem
 troca o que aparece na tela — só pode aparecer brevemente na barra de

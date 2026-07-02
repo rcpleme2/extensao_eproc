@@ -132,6 +132,16 @@ progress {
   padding: 2px 0;
 }
 
+.aviso-urgencia {
+  margin-top: 6px;
+  padding: 6px;
+  background: #fff8e1;
+  border: 1px solid #f0d98c;
+  border-radius: 4px;
+  color: #7a5c00;
+  font-size: 12px;
+}
+
 .btn-icone {
   flex: 0 0 auto;
   width: 34px;

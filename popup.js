@@ -115,6 +115,9 @@ const btnAbrirTelaRelatorio = document.getElementById("btn-abrir-tela-relatorio"
 const areaRelatorio = document.getElementById("area-relatorio");
 const valorDespachoEl = document.getElementById("valor-despacho");
 const valorSentencaEl = document.getElementById("valor-sentenca");
+const valorDespachoUrgentesEl = document.getElementById("valor-despacho-urgentes");
+const valorSentencaUrgentesEl = document.getElementById("valor-sentenca-urgentes");
+const avisoUrgenciaEl = document.getElementById("aviso-urgencia");
 const areaProgressoRelatorio = document.getElementById("area-progresso-relatorio");
 const textoProgressoRelatorio = document.getElementById("texto-progresso-relatorio");
 
@@ -209,9 +212,23 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     btnAbrirTelaRelatorio.disabled = false;
 
     if (mensagem.ok) {
-      valorDespachoEl.textContent = formatarContagem(mensagem.resultado.conclusosDespacho);
-      valorSentencaEl.textContent = formatarContagem(mensagem.resultado.conclusosSentenca);
+      const resultado = mensagem.resultado || {};
+      valorDespachoEl.textContent = formatarContagem(resultado.conclusosDespacho);
+      valorSentencaEl.textContent = formatarContagem(resultado.conclusosSentenca);
+      valorDespachoUrgentesEl.textContent = formatarContagem(resultado.conclusosDespachoUrgentes);
+      valorSentencaUrgentesEl.textContent = formatarContagem(resultado.conclusosSentencaUrgentes);
       areaRelatorio.hidden = false;
+
+      const avisos = [resultado.avisoUrgenciaDespacho, resultado.avisoUrgenciaSentenca].filter(Boolean);
+      if (avisos.length > 0) {
+        avisoUrgenciaEl.hidden = false;
+        avisoUrgenciaEl.textContent = `Não foi possível determinar a urgência em algum caso: ${avisos.join(
+          " | "
+        )}`;
+      } else {
+        avisoUrgenciaEl.hidden = true;
+      }
+
       setStatus("Relatório gerado com sucesso.");
     } else {
       setStatus("Erro ao gerar o relatório.");
