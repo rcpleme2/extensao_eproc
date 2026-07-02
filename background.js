@@ -1761,6 +1761,340 @@ async function abrirRelatorioPreenchido(categoria, situacao, filtro, exportarExc
   }
 }
 
+// ---- Localizadores do Órgão (exportar em PDF/Excel) ----
+
+// Igual a "clicarLinkRelatorioGeralNaPagina": o link para a tela de
+// Localizadores do Órgão ja' existe no DOM (menu lateral), mesmo com o
+// submenu "Localizadores" colapsado - o collapse e' so' visual via CSS.
+// Autocontida, executada via chrome.scripting.executeScript.
+function clicarLinkLocalizadoresNaPagina() {
+  const link = document.querySelector('a[href*="acao=localizador_orgao_listar"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Roda inteiramente dentro da tela "Localizadores do Órgão": raspa a
+// tabela da pagina atual (colunas confirmadas numa pagina real do eproc:
+// [0] checkbox, [1] Localizador, [2] Nome do Localizador, [3] Descrição
+// do Localizador, [4] Localizador Sistema, [5] Data Inclusão, [6] Total
+// de processos, [7] Ações) e, se houver mais paginas
+// (id="lnkInfraProximaPaginaSuperior" sem a classe "disabled"), clica em
+// "Próxima Página" e espera a tabela recarregar via AJAX (detectado pela
+// mudanca no texto do <caption>, ex.: "1 a 50" -> "51 a 100") antes de
+// raspar a proxima. Autocontida, executada via
+// chrome.scripting.executeScript. Nunca lanca excecao: sempre resolve com
+// { itens, erro }, mesmo que erro seja so' parcial (itens ja' coletados
+// ate' a pagina que falhou continuam no resultado).
+function coletarLocalizadoresNaPagina() {
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function localizarTabela() {
+    const tabelas = Array.from(document.querySelectorAll("table.infraTable"));
+    return (
+      tabelas.find((t) => {
+        const caption = t.querySelector("caption");
+        return caption && /localizadores/i.test(caption.textContent || "");
+      }) || null
+    );
+  }
+
+  function textoCaption(tabela) {
+    const caption = tabela.querySelector("caption");
+    return caption ? (caption.textContent || "").trim() : "";
+  }
+
+  function raspar(tabela) {
+    const linhas = Array.from(tabela.querySelectorAll("tr.infraTrClara, tr.infraTrEscura"));
+    const itens = [];
+    for (const tr of linhas) {
+      const celulas = Array.from(tr.querySelectorAll(":scope > td"));
+      if (celulas.length < 8) continue;
+      const nome = (celulas[1].textContent || "").replace(/\s+/g, " ").trim();
+      const descricao = (celulas[3].textContent || "").replace(/\s+/g, " ").trim();
+      const totalTexto = (celulas[6].textContent || "").replace(/\s+/g, " ").trim();
+      const totalMatch = totalTexto.match(/\d+/);
+      itens.push({ nome, descricao, totalProcessos: totalMatch ? Number(totalMatch[0]) : 0 });
+    }
+    return itens;
+  }
+
+  function proximaPaginaDisponivel() {
+    const li = document.getElementById("lnkInfraProximaPaginaSuperior");
+    return !!(li && !li.classList.contains("disabled"));
+  }
+
+  return (async () => {
+    try {
+      let tabela = localizarTabela();
+      if (!tabela) {
+        return { itens: [], erro: "Tabela de Localizadores do Órgão não encontrada nesta página." };
+      }
+
+      const todos = [];
+      let pagina = 1;
+      const LIMITE_PAGINAS = 200; // seguranca contra loop infinito
+
+      while (true) {
+        todos.push(...raspar(tabela));
+
+        if (!proximaPaginaDisponivel() || pagina >= LIMITE_PAGINAS) break;
+
+        const captionAntes = textoCaption(tabela);
+        const link = document.querySelector("#lnkInfraProximaPaginaSuperior a");
+        if (!link) break;
+        link.click();
+
+        let mudou = false;
+        for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+          await aguardar(300);
+          tabela = localizarTabela();
+          if (tabela && textoCaption(tabela) !== captionAntes) {
+            mudou = true;
+            break;
+          }
+        }
+        if (!mudou) {
+          return {
+            itens: todos,
+            erro: `Parou na página ${pagina} - a página seguinte não terminou de carregar a tempo.`,
+          };
+        }
+        pagina += 1;
+      }
+
+      return { itens: todos, erro: null };
+    } catch (e) {
+      return { itens: [], erro: e && e.message ? e.message : String(e) };
+    }
+  })();
+}
+
+// Abre uma aba oculta a partir da URL da aba atual (mesmo padrao ja'
+// usado no Relatório Geral), navega ate' a tela de Localizadores do
+// Órgão e coleta todas as paginas, depois fecha a aba.
+async function abrirAbaEColetarLocalizadores(urlBase) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkLocalizadoresNaPagina,
+    });
+
+    if (!linkEncontrado) {
+      return {
+        itens: [],
+        erro:
+          'Link "Localizadores do Órgão" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: coletarLocalizadoresNaPagina,
+    });
+
+    return result || { itens: [], erro: "Sem resultado retornado pela aba." };
+  } catch (e) {
+    return { itens: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
+}
+
+// Tabela em paginas de PDF (A4 paisagem, para caber a coluna de
+// descricao) com cabecalho repetido em cada pagina - reaproveita
+// "quebrarLinhas" (ja' usado no PDF unico) para cada coluna
+// separadamente, alinhando as colunas por posicao X fixa.
+const PDF_LOCALIZADORES_LARGURA_PAGINA = 841.89; // A4 paisagem
+const PDF_LOCALIZADORES_ALTURA_PAGINA = 595.28;
+const PDF_LOCALIZADORES_MARGEM = 36;
+const PDF_LOCALIZADORES_TAMANHO_FONTE = 9;
+const PDF_LOCALIZADORES_ALTURA_LINHA = PDF_LOCALIZADORES_TAMANHO_FONTE * 1.35;
+
+async function construirPdfLocalizadores(itens, tituloDocumento) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const colunas = [
+    { titulo: "Localizador", largura: larguraUtil * 0.26, campo: "nome" },
+    { titulo: "Descrição", largura: larguraUtil * 0.58, campo: "descricao" },
+    { titulo: "Total de processos", largura: larguraUtil * 0.16, campo: "totalProcessos" },
+  ];
+
+  let pagina = null;
+  let y = 0;
+
+  function desenharCabecalhoColunas() {
+    let x = PDF_LOCALIZADORES_MARGEM;
+    for (const coluna of colunas) {
+      pagina.drawText(sanitizarTextoPdf(coluna.titulo), {
+        x,
+        y,
+        size: PDF_LOCALIZADORES_TAMANHO_FONTE,
+        font: fonteNegrito,
+      });
+      x += coluna.largura;
+    }
+    y -= PDF_LOCALIZADORES_ALTURA_LINHA * 1.6;
+  }
+
+  function novaPagina(comTitulo) {
+    pagina = pdf.addPage([PDF_LOCALIZADORES_LARGURA_PAGINA, PDF_LOCALIZADORES_ALTURA_PAGINA]);
+    y = PDF_LOCALIZADORES_ALTURA_PAGINA - PDF_LOCALIZADORES_MARGEM;
+    if (comTitulo) {
+      pagina.drawText(sanitizarTextoPdf(tituloDocumento), {
+        x: PDF_LOCALIZADORES_MARGEM,
+        y,
+        size: 13,
+        font: fonteNegrito,
+      });
+      y -= PDF_LOCALIZADORES_ALTURA_LINHA * 2.2;
+    }
+    desenharCabecalhoColunas();
+  }
+
+  novaPagina(true);
+
+  for (const item of itens) {
+    const linhasPorColuna = colunas.map((coluna) =>
+      quebrarLinhas(sanitizarTextoPdf(String(item[coluna.campo] ?? "")), fonteNormal, PDF_LOCALIZADORES_TAMANHO_FONTE, coluna.largura - 4)
+    );
+    const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
+
+    if (y - maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA < PDF_LOCALIZADORES_MARGEM) {
+      novaPagina(false);
+    }
+
+    let x = PDF_LOCALIZADORES_MARGEM;
+    for (let i = 0; i < colunas.length; i += 1) {
+      let yColuna = y;
+      for (const linha of linhasPorColuna[i]) {
+        try {
+          pagina.drawText(linha, { x, y: yColuna, size: PDF_LOCALIZADORES_TAMANHO_FONTE, font: fonteNormal });
+        } catch (e) {
+          // Ignora linha que a fonte padrao nao consiga desenhar.
+        }
+        yColuna -= PDF_LOCALIZADORES_ALTURA_LINHA;
+      }
+      x += colunas[i].largura;
+    }
+    y -= maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA + PDF_LOCALIZADORES_ALTURA_LINHA * 0.4;
+  }
+
+  return pdf.save();
+}
+
+// Planilha em formato "Excel XML Spreadsheet" (SpreadsheetML, o mesmo
+// formato de arquivo unico usado pelo Excel 2003-2007 para abrir uma
+// planilha nativa sem precisar gerar um .xlsx de verdade, que e' um zip -
+// nao ha' nenhuma biblioteca de zip vendorizada nesta extensao). E' texto
+// XML puro, salvo com extensao .xls: o Excel reconhece o conteudo pelo
+// cabecalho "mso-application" e abre normalmente, sem aviso de formato
+// incompatível (diferente do truque antigo de salvar uma tabela HTML
+// com extensao .xls, que dispara esse aviso).
+function escaparXml(texto) {
+  return String(texto)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function construirExcelLocalizadores(itens) {
+  const linhaCabecalho = `<Row>
+   <Cell ss:StyleID="Cabecalho"><Data ss:Type="String">Localizador</Data></Cell>
+   <Cell ss:StyleID="Cabecalho"><Data ss:Type="String">Descrição</Data></Cell>
+   <Cell ss:StyleID="Cabecalho"><Data ss:Type="String">Total de processos</Data></Cell>
+  </Row>`;
+
+  const linhasDados = itens
+    .map(
+      (item) => `<Row>
+   <Cell><Data ss:Type="String">${escaparXml(item.nome)}</Data></Cell>
+   <Cell><Data ss:Type="String">${escaparXml(item.descricao)}</Data></Cell>
+   <Cell><Data ss:Type="Number">${Number(item.totalProcessos) || 0}</Data></Cell>
+  </Row>`
+    )
+    .join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Styles>
+  <Style ss:ID="Cabecalho">
+   <Font ss:Bold="1"/>
+  </Style>
+ </Styles>
+ <Worksheet ss:Name="Localizadores">
+  <Table>
+   <Column ss:Width="220"/>
+   <Column ss:Width="420"/>
+   <Column ss:Width="110"/>
+   ${linhaCabecalho}
+${linhasDados}
+  </Table>
+ </Worksheet>
+</Workbook>
+`;
+}
+
+// Orquestra tudo: abre a aba oculta, coleta os localizadores de todas as
+// paginas e gera os formatos marcados (pdf/excel), baixando cada um.
+// Reporta progresso pelo mesmo callback usado no resto da extensao.
+async function exportarLocalizadores(formatos, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  notificar("Abrindo a tela de Localizadores do Órgão...");
+  const { itens, erro } = await abrirAbaEColetarLocalizadores(abaAtual.url);
+
+  if (itens.length === 0) {
+    throw new Error(erro || "Nenhum localizador encontrado.");
+  }
+
+  const tituloDocumento = `Localizadores do Órgão — ${itens.length} registro(s) — gerado em ${new Date().toLocaleString("pt-BR")}`;
+  const nomeBase = `eproc/localizadores_orgao_${new Date().toISOString().slice(0, 10)}`;
+
+  if (formatos.pdf) {
+    notificar("Gerando PDF...");
+    const bytes = await construirPdfLocalizadores(itens, tituloDocumento);
+    await baixarUm(`${nomeBase}.pdf`, construirDataUrlBinario("application/pdf", bytes));
+  }
+
+  if (formatos.excel) {
+    notificar("Gerando planilha Excel...");
+    const xml = construirExcelLocalizadores(itens);
+    await baixarUm(`${nomeBase}.xls`, construirDataUrl("application/vnd.ms-excel", xml));
+  }
+
+  notificar("Finalizando...");
+  return { total: itens.length, erroColeta: erro };
+}
+
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "BAIXAR_DOCUMENTOS") {
     const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false, mdUnico: false };
@@ -1844,6 +2178,31 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
       .open({ tabId })
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_LOCALIZADORES") {
+    // Mesmo padrao de GERAR_RELATORIO: a operacao percorre varias paginas
+    // e demora, entao confirma o recebimento na hora e avisa o resultado
+    // final por uma mensagem separada.
+    exportarLocalizadores(mensagem.formatos, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_LOCALIZADORES", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "LOCALIZADORES_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "LOCALIZADORES_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
     return true;
   }
 

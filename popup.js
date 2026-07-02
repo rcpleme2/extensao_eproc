@@ -634,3 +634,74 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "complete") atualizarEstadoBotaoRegras();
 });
 atualizarEstadoBotaoRegras();
+
+const areaLocalizadoresInfo = document.getElementById("area-localizadores-info");
+const chkLocalizadoresPdf = document.getElementById("chk-localizadores-pdf");
+const chkLocalizadoresExcel = document.getElementById("chk-localizadores-excel");
+const btnExportarLocalizadores = document.getElementById("btn-exportar-localizadores");
+const areaProgressoLocalizadores = document.getElementById("area-progresso-localizadores");
+const textoProgressoLocalizadores = document.getElementById("texto-progresso-localizadores");
+const areaErrosLocalizadores = document.getElementById("area-erros-localizadores");
+
+function setStatusLocalizadores(texto) {
+  areaLocalizadoresInfo.textContent = texto;
+}
+
+btnExportarLocalizadores.addEventListener("click", async () => {
+  const formatos = { pdf: chkLocalizadoresPdf.checked, excel: chkLocalizadoresExcel.checked };
+  if (!formatos.pdf && !formatos.excel) {
+    areaErrosLocalizadores.hidden = false;
+    areaErrosLocalizadores.textContent = "Marque ao menos um formato (PDF ou Excel).";
+    return;
+  }
+
+  btnExportarLocalizadores.disabled = true;
+  areaErrosLocalizadores.hidden = true;
+  areaProgressoLocalizadores.hidden = false;
+  textoProgressoLocalizadores.textContent = "Iniciando...";
+  setStatusLocalizadores(
+    "Exportando localizadores em segundo plano (percorrendo todas as páginas da listagem)..."
+  );
+
+  // Mesmo padrao de GERAR_RELATORIO: so' confirma que comecou; o
+  // resultado final chega pela mensagem LOCALIZADORES_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_LOCALIZADORES", formatos });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
+    }
+  } catch (e) {
+    setStatusLocalizadores("Erro ao iniciar a exportação.");
+    areaErrosLocalizadores.hidden = false;
+    areaErrosLocalizadores.textContent = e && e.message ? e.message : String(e);
+    areaProgressoLocalizadores.hidden = true;
+    btnExportarLocalizadores.disabled = false;
+  }
+});
+
+chrome.runtime.onMessage.addListener((mensagem) => {
+  if (!mensagem) return;
+
+  if (mensagem.tipo === "PROGRESSO_LOCALIZADORES") {
+    textoProgressoLocalizadores.textContent = mensagem.texto || "Processando...";
+    setStatusLocalizadores(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "LOCALIZADORES_FINALIZADO") {
+    areaProgressoLocalizadores.hidden = true;
+    btnExportarLocalizadores.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      setStatusLocalizadores(
+        `Concluído! ${resultado.total || 0} localizador(es) exportado(s) para Downloads/eproc/.` +
+          (resultado.erroColeta ? ` Aviso: ${resultado.erroColeta}` : "")
+      );
+    } else {
+      setStatusLocalizadores("Erro ao exportar os localizadores.");
+      areaErrosLocalizadores.hidden = false;
+      areaErrosLocalizadores.textContent =
+        mensagem.erro || "Falha desconhecida ao exportar os localizadores.";
+    }
+  }
+});

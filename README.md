@@ -411,6 +411,36 @@ permanece aberto). Ao clicar:
    cartão para editar aquela regra ou ver seu histórico diretamente no
    eproc.
 
+## Localizadores do Órgão (exportar em PDF/Excel)
+
+O cartão **"Localizadores do Órgão"** exporta a lista completa de
+Localizadores do Órgão (tela `acao=localizador_orgao_listar` do eproc) em
+PDF e/ou planilha Excel, com três colunas: **Localizador** (nome), a
+**Descrição do Localizador** e o **Total de processos**.
+
+Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
+
+1. A extensão abre uma aba oculta a partir da URL da aba atual e clica no
+   link "Localizadores do Órgão" do menu lateral (funciona mesmo com o
+   submenu colapsado, já que o link já existe no DOM independente do
+   estado visual do menu).
+2. Raspa a tabela da página atual e, enquanto o botão "Próxima Página"
+   estiver habilitado, clica nele e espera a tabela recarregar (detectado
+   pela mudança no texto da legenda da tabela, ex.: "1 a 50" → "51 a
+   100") antes de raspar a página seguinte — cobrindo listas com
+   qualquer quantidade de páginas.
+3. Gera os arquivos marcados em `Downloads/eproc/`:
+   - **PDF**: tabela paginada (A4 paisagem), com cabeçalho repetido em
+     cada página e as colunas de nome/descrição quebradas em várias
+     linhas quando o texto for longo, para nunca cortar conteúdo.
+   - **Excel**: arquivo `.xls` no formato nativo "Excel XML Spreadsheet"
+     (texto XML puro, sem precisar de nenhuma biblioteca de compressão
+     ZIP) — abre diretamente no Excel/LibreOffice como uma planilha
+     comum, sem aviso de formato incompatível.
+
+A aba oculta usada para navegar e coletar os dados é fechada
+automaticamente ao final, sem interferir na aba que você está usando.
+
 ## Abrir o painel a partir da própria página
 
 Além do ícone da extensão na barra de ferramentas (que em instalações
