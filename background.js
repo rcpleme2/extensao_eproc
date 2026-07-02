@@ -567,12 +567,26 @@ async function adicionarDocumentoAoPdf(pdfFinal, fonteTexto, doc, urlReal) {
   );
 }
 
-async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProcesso, aoProgredir) {
+// Rotulo de uma linha de movimentacao, reaproveitado tanto na secao de
+// movimentacao do MD quanto nas paginas divisorias de evento do PDF
+// unico, para manter os dois formatos consistentes entre si.
+function rotuloEvento(evento) {
+  const numero = evento.numeroEvento != null ? `Evento ${evento.numeroEvento}` : "Evento";
+  return `${numero} — ${evento.dataHora} — ${evento.descricao || "(sem descrição)"}`;
+}
+
+// Igual a "agruparDocumentosPorEvento" (definida mais abaixo, junto do MD
+// unico) - agrupa os documentos por evento e devolve tambem os que nao
+// tem evento correspondente, para o PDF unico nao ordenar/juntar tudo
+// numa lista so'.
+async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProcesso, movimentacao, aoProgredir) {
   const pdfFinal = await PDFDocument.create();
   const fonteTexto = await pdfFinal.embedFont(StandardFonts.Helvetica);
 
-  for (let i = 0; i < documentos.length; i += 1) {
-    const doc = documentos[i];
+  const total = documentos.length;
+  let concluidos = 0;
+
+  async function processarDocumento(doc) {
     try {
       const urlReal = await resolverUrl(doc);
       await adicionarDocumentoAoPdf(pdfFinal, fonteTexto, doc, urlReal);
@@ -584,7 +598,36 @@ async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProce
         `Nao foi possivel incorporar o documento "${doc.nome}" ao PDF unico (${String(e)}). Consulte o arquivo individual.`
       );
     }
-    if (aoProgredir) aoProgredir(i + 1, documentos.length);
+    concluidos += 1;
+    if (aoProgredir) aoProgredir(concluidos, total);
+  }
+
+  if (movimentacao && movimentacao.length > 0) {
+    const { porEvento, semEvento } = agruparDocumentosPorEvento(documentos, movimentacao);
+
+    for (const evento of movimentacao) {
+      const docsDoEvento = evento.numeroEvento != null ? porEvento.get(evento.numeroEvento) || [] : [];
+      adicionarTextoComoPaginas(
+        pdfFinal,
+        fonteTexto,
+        rotuloEvento(evento),
+        docsDoEvento.length === 0 ? "Nenhum documento anexado a este evento." : ""
+      );
+      for (const doc of docsDoEvento) {
+        await processarDocumento(doc);
+      }
+    }
+
+    if (semEvento.length > 0) {
+      adicionarTextoComoPaginas(pdfFinal, fonteTexto, "Documentos sem evento identificado", "");
+      for (const doc of semEvento) {
+        await processarDocumento(doc);
+      }
+    }
+  } else {
+    for (const doc of documentos) {
+      await processarDocumento(doc);
+    }
   }
 
   const bytesFinais = await pdfFinal.save();
@@ -1025,8 +1068,7 @@ async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProces
 
     if (movimentacao && movimentacao.length > 0) {
       for (const evento of movimentacao) {
-        const rotuloEvento = evento.numeroEvento != null ? `Evento ${evento.numeroEvento}` : "Evento";
-        const linhas = [`### ${rotuloEvento} — ${evento.dataHora} — ${evento.descricao || "(sem descrição)"}`, ""];
+        const linhas = [`### ${rotuloEvento(evento)}`, ""];
 
         const docsDoEvento = evento.numeroEvento != null ? porEvento.get(evento.numeroEvento) || [] : [];
         if (docsDoEvento.length === 0) {
@@ -1156,7 +1198,7 @@ async function processarFila(numeroProcesso, documentos, opcoes, movimentacao) {
     };
 
     try {
-      await construirPdfUnico(documentos, obterUrlResolvida, pastaBase, numeroProcesso, enviarProgressoPdf);
+      await construirPdfUnico(documentos, obterUrlResolvida, pastaBase, numeroProcesso, movimentacao, enviarProgressoPdf);
     } catch (e) {
       erros.push({ nome: "PDF unico", mensagem: String(e) });
     }

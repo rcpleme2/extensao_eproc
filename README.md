@@ -88,6 +88,18 @@ biblioteca [pdf-lib](https://pdf-lib.js.org/) (vendorizada em
 `libs/pdf-lib.min.js`), rodando inteiramente dentro da extensão — nenhum
 arquivo é enviado para servidores externos.
 
+Assim como no MD único, os documentos são organizados por evento da
+movimentação processual: para cada evento detectado na página, o PDF
+recebe uma página divisória só com o texto do evento (número, data/hora e
+descrição), seguida dos documentos vinculados a ele (na mesma ordem
+cronológica de sempre). Eventos sem nenhum documento anexado ainda
+recebem sua página divisória, com uma nota indicando isso. Documentos
+cujo evento não foi identificado (ou não bate com nenhum evento
+detectado na página) entram por último, numa seção "Documentos sem
+evento identificado". Se a movimentação não puder ser detectada na
+página, o PDF volta ao formato antigo (documentos em sequência, sem
+divisórias de evento).
+
 Cada tipo de documento entra no PDF único de um jeito diferente:
 - **PDF**: as páginas do documento original são copiadas para o PDF final,
   sem perda de qualidade.
