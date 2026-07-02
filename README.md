@@ -459,6 +459,47 @@ Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
 A aba oculta usada para navegar e coletar os dados é fechada
 automaticamente ao final, sem interferir na aba que você está usando.
 
+## Busca específica de localizadores
+
+O cartão **"Busca específica de localizadores"** carrega os
+Localizadores do Órgão com pelo menos um processo atribuído e permite ir
+direto até a lista de processos de um deles, ou exportar um relatório
+desses processos - sem precisar abrir a tela de Localizadores
+manualmente e procurar a linha certa.
+
+Ao clicar em **"Carregar localizadores"**:
+
+1. A extensão roda a mesma coleta multi-página usada pela exportação em
+   PDF/Excel (aba oculta, volta para a página 1 se necessário, percorre
+   todas as páginas da listagem).
+2. Filtra para manter só os localizadores com **pelo menos 1 processo**
+   atribuído — os demais não têm para onde navegar, já que o número da
+   coluna "Total de processos" só é um link quando maior que zero.
+3. Preenche um menu suspenso com esses localizadores (nome e total de
+   processos entre parênteses), ordenados alfabeticamente.
+
+Ao **escolher um localizador** no menu, aparecem duas ações (a escolha
+no menu sozinha não navega nem exporta nada — é preciso clicar em um dos
+botões):
+
+a. **"Ir para o relatório"**: navega a aba em que o painel foi aberto
+   diretamente para `acao=localizador_processos_lista` daquele
+   localizador — a mesma página que abriria clicando no número da coluna
+   "Total de processos" na listagem (URL já capturada, com sessão/hash
+   inclusos, durante a coleta).
+b. **"Exportar processos deste localizador"** (com PDF e/ou planilha
+   Excel marcados): gera um relatório só com os processos desse
+   localizador, com três colunas: **Número Processo**, **Classe** e
+   **Inclusão no localizador**. O relatório é gerado em segundo plano
+   (percorrendo todas as páginas da listagem de processos, com a mesma
+   correção de "volta pra página 1" já usada na exportação de
+   Localizadores) e ordenado pela **Inclusão no localizador da data mais
+   antiga para a mais nova**. Os arquivos saem em `Downloads/eproc/`
+   como `processos_localizador_<nome_do_localizador>_<data>.pdf`/`.xls`.
+
+Se precisar carregar a lista de novo (por exemplo, depois que os números
+mudarem), basta clicar em "Carregar localizadores" novamente.
+
 ## Abrir o painel a partir da própria página
 
 Além do ícone da extensão na barra de ferramentas (que em instalações

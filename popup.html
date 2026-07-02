@@ -192,6 +192,54 @@
     <div id="area-erros-localizadores" class="erros" hidden></div>
   </section>
 
+  <section class="card">
+    <h2 class="card-titulo">
+      <span class="card-icone" aria-hidden="true">🔎</span>
+      Busca específica de localizadores
+    </h2>
+
+    <div id="area-nav-localizadores-info" class="status">
+      Carrega os Localizadores do Órgão que têm pelo menos um processo
+      atribuído. Depois de escolher um, você decide se quer ir até a
+      lista de processos dele ou exportar um relatório em PDF/Excel.
+    </div>
+
+    <div class="botoes">
+      <button id="btn-carregar-localizadores">Carregar localizadores</button>
+    </div>
+
+    <div id="area-progresso-nav-localizadores" class="progresso-relatorio" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="texto-progresso-nav-localizadores"></span>
+    </div>
+
+    <div class="opcoes" id="area-select-localizador" hidden>
+      <select id="select-localizador-processos">
+        <option value="" selected disabled>Selecione um localizador...</option>
+      </select>
+    </div>
+
+    <div class="opcoes" id="area-acoes-localizador" hidden>
+      <button id="btn-ir-para-processos-localizador">Ir para o relatório</button>
+      <label class="opcao-radio">
+        <input type="checkbox" id="chk-processos-localizador-pdf" checked />
+        PDF
+      </label>
+      <label class="opcao-radio">
+        <input type="checkbox" id="chk-processos-localizador-excel" />
+        Planilha Excel
+      </label>
+      <button id="btn-exportar-processos-localizador">Exportar processos deste localizador</button>
+    </div>
+
+    <div id="area-progresso-processos-localizador" class="progresso-relatorio" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="texto-progresso-processos-localizador"></span>
+    </div>
+
+    <div id="area-erros-nav-localizadores" class="erros" hidden></div>
+  </section>
+
   <div id="modal-escolha-relatorio" class="modal-overlay" hidden>
     <div class="modal-caixa">
       <p class="modal-texto">O que você deseja fazer com esse valor?</p>
