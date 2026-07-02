@@ -573,7 +573,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       const resultado = mensagem.resultado || {};
       const localizadores = resultado.localizadores || [];
       localizadoresCarregados = localizadores;
-      areaExportarProcessosLocalizador.hidden = true;
+      areaAcoesLocalizador.hidden = true;
 
       selectLocalizadorProcessos.innerHTML =
         '<option value="" selected disabled>Selecione um localizador...</option>';
@@ -633,7 +633,8 @@ const textoProgressoNavLocalizadores = document.getElementById("texto-progresso-
 const areaSelectLocalizador = document.getElementById("area-select-localizador");
 const selectLocalizadorProcessos = document.getElementById("select-localizador-processos");
 const areaErrosNavLocalizadores = document.getElementById("area-erros-nav-localizadores");
-const areaExportarProcessosLocalizador = document.getElementById("area-exportar-processos-localizador");
+const areaAcoesLocalizador = document.getElementById("area-acoes-localizador");
+const btnIrParaProcessosLocalizador = document.getElementById("btn-ir-para-processos-localizador");
 const chkProcessosLocalizadorPdf = document.getElementById("chk-processos-localizador-pdf");
 const chkProcessosLocalizadorExcel = document.getElementById("chk-processos-localizador-excel");
 const btnExportarProcessosLocalizador = document.getElementById("btn-exportar-processos-localizador");
@@ -653,7 +654,7 @@ btnCarregarLocalizadores.addEventListener("click", async () => {
   btnCarregarLocalizadores.disabled = true;
   areaErrosNavLocalizadores.hidden = true;
   areaSelectLocalizador.hidden = true;
-  areaExportarProcessosLocalizador.hidden = true;
+  areaAcoesLocalizador.hidden = true;
   areaProgressoNavLocalizadores.hidden = false;
   textoProgressoNavLocalizadores.textContent = "Iniciando...";
   setStatusNavLocalizadores(
@@ -676,19 +677,25 @@ btnCarregarLocalizadores.addEventListener("click", async () => {
   }
 });
 
-// Ao escolher um localizador no dropdown: a) navega a aba ATUAL (a mesma
-// de onde o painel foi aberto) direto para a lista de processos daquele
-// localizador - a URL ja' vem absoluta e pronta (com hash/sessao
-// inclusos) da propria raspagem feita na aba oculta; e b) libera a opcao
-// de exportar um relatorio (PDF/Excel) so' com os processos desse
-// localizador.
-selectLocalizadorProcessos.addEventListener("change", async () => {
+// Ao escolher um localizador no dropdown, so' libera as duas acoes
+// disponiveis para ele (ir para o relatorio / exportar) - a navegacao em
+// si so' acontece quando o usuario clica em "Ir para o relatório"
+// (nunca automaticamente so' por selecionar a opcao).
+selectLocalizadorProcessos.addEventListener("change", () => {
+  const url = selectLocalizadorProcessos.value;
+  areaErrosNavLocalizadores.hidden = true;
+  areaAcoesLocalizador.hidden = !url || !localizadoresCarregados.some((loc) => loc.urlProcessos === url);
+});
+
+// Navega a aba ATUAL (a mesma de onde o painel foi aberto) direto para a
+// lista de processos do localizador selecionado - a URL ja' vem absoluta
+// e pronta (com hash/sessao inclusos) da propria raspagem feita na aba
+// oculta.
+btnIrParaProcessosLocalizador.addEventListener("click", async () => {
   const url = selectLocalizadorProcessos.value;
   if (!url) return;
 
   areaErrosNavLocalizadores.hidden = true;
-  areaExportarProcessosLocalizador.hidden = !localizadoresCarregados.some((loc) => loc.urlProcessos === url);
-
   try {
     const aba = await getAbaAtiva();
     if (!aba || !aba.id) {

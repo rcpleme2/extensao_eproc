@@ -195,14 +195,13 @@
   <section class="card">
     <h2 class="card-titulo">
       <span class="card-icone" aria-hidden="true">🔎</span>
-      Ir para processos de um Localizador
+      Busca específica de localizadores
     </h2>
 
     <div id="area-nav-localizadores-info" class="status">
       Carrega os Localizadores do Órgão que têm pelo menos um processo
-      atribuído. Ao escolher um, a aba atual navega direto até a lista de
-      processos dele - e fica disponível a opção de exportar esses
-      mesmos processos em PDF/Excel.
+      atribuído. Depois de escolher um, você decide se quer ir até a
+      lista de processos dele ou exportar um relatório em PDF/Excel.
     </div>
 
     <div class="botoes">
@@ -220,7 +219,8 @@
       </select>
     </div>
 
-    <div class="opcoes" id="area-exportar-processos-localizador" hidden>
+    <div class="opcoes" id="area-acoes-localizador" hidden>
+      <button id="btn-ir-para-processos-localizador">Ir para o relatório</button>
       <label class="opcao-radio">
         <input type="checkbox" id="chk-processos-localizador-pdf" checked />
         PDF
