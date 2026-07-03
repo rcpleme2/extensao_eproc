@@ -1980,182 +1980,6 @@ async function abrirAbaEConsultarSituacoesGrupo(urlBase, valorOrgaoJuizo, grupo)
   }
 }
 
-// ---- Relatório de Remessas em Aberto (Corregedoria) ----
-
-// O link para "Relatório de remessas em aberto" (menu lateral:
-// Relatórios > Relatório de remessas em aberto) ja' existe no DOM mesmo
-// com o menu colapsado - mesmo padrao ja' usado para os demais links de
-// menu desta extensao. Autocontida, executada via
-// chrome.scripting.executeScript.
-function clicarLinkRemessasEmAbertoNaPagina() {
-  const link = document.querySelector('a[href*="acao=relatorio_remessas_em_aberto/listar"]');
-  if (!link) return false;
-  link.click();
-  return true;
-}
-
-// Seleciona uma unidade no filtro "Órgão Julgador"
-// (select#IdOrgaoSecretaria) da tela de Remessas em Aberto - esse
-// select usa um espaco de IDs totalmente diferente do
-// #selIdOrgaoJuizo/#selInfraUnidades (numericos, proprios dessa tela) e
-// so' lista as unidades pelo NOME DESCRITIVO (sem a sigla/abreviacao),
-// entao a selecao e' feita comparando o TEXTO da opcao (normalizado),
-// nao por valor. Autocontida, executada via
-// chrome.scripting.executeScript.
-function selecionarOrgaoSecretariaRemessasNaPagina(nomeDescritivoUnidade) {
-  const select = document.getElementById("IdOrgaoSecretaria");
-  if (!select) {
-    return { ok: false, erro: 'Campo "Órgão Julgador" (#IdOrgaoSecretaria) não encontrado nesta página.' };
-  }
-
-  const normalizar = (s) => (s || "").trim().toLowerCase();
-  const alvo = normalizar(nomeDescritivoUnidade);
-
-  let opcaoEncontrada = null;
-  for (const opcao of select.options) {
-    if (normalizar(opcao.textContent) === alvo) {
-      opcaoEncontrada = opcao;
-      break;
-    }
-  }
-  if (!opcaoEncontrada) {
-    return {
-      ok: false,
-      erro: `Unidade "${nomeDescritivoUnidade}" não encontrada no filtro "Órgão Julgador" da tela de Remessas em Aberto.`,
-    };
-  }
-
-  for (const opcao of select.options) opcao.selected = opcao === opcaoEncontrada;
-  select.dispatchEvent(new Event("change", { bubbles: true }));
-  return { ok: true, erro: null };
-}
-
-// Clica em "Consultar" e le' o resultado direto da API do DataTables
-// (jQuery.fn.DataTable) que alimenta a tabela "#tbl_remessas_em_aberto" -
-// mais confiavel que raspar o DOM renderizado, ja' que os dados brutos
-// de cada linha (NomePessoa, NumProcesso, DesClasseJudicial, Inclusao,
-// DiasRemessa) ficam disponiveis direto no objeto de dados do
-// DataTables, sem precisar esperar/parsear a renderizacao de cada
-// celula. Troca a paginacao para "mostrar tudo" (page.len(-1)) antes de
-// ler, para nao precisar navegar entre paginas. Autocontida, executada
-// via chrome.scripting.executeScript. Nunca lanca excecao: sempre
-// resolve com { itens, erro }.
-function extrairRemessasEmAbertoNaPagina() {
-  function aguardar(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  function textoDeHtml(html) {
-    const div = document.createElement("div");
-    div.innerHTML = html || "";
-    return (div.textContent || "").trim();
-  }
-
-  return (async () => {
-    try {
-      const botaoConsultar = document.querySelector('button[onclick="submeterFrmFiltroRemessasEmAberto()"]');
-      if (!botaoConsultar) {
-        return { itens: [], erro: 'Botão "Consultar" não encontrado nesta página.' };
-      }
-
-      if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
-        return { itens: [], erro: "jQuery DataTables não disponível nesta página." };
-      }
-
-      const tabelaEl = jQuery("#tbl_remessas_em_aberto");
-      if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tbl_remessas_em_aberto")) {
-        return { itens: [], erro: 'Tabela "#tbl_remessas_em_aberto" não encontrada ou ainda não inicializada.' };
-      }
-      const dt = tabelaEl.DataTable();
-
-      const aguardarRedesenho = () =>
-        Promise.race([
-          new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true))),
-          aguardar(20000).then(() => false),
-        ]);
-
-      const promessaConsulta = aguardarRedesenho();
-      botaoConsultar.click();
-      await promessaConsulta;
-
-      // Mostra todas as linhas de uma vez, sem paginacao do DataTables.
-      const promessaMostrarTudo = aguardarRedesenho();
-      dt.page.len(-1).draw(false);
-      await promessaMostrarTudo;
-
-      const linhas = dt.rows({ search: "applied" }).data().toArray();
-      const itens = linhas.map((linha) => ({
-        juizLeigo: (linha.NomePessoa || "").trim(),
-        processo: textoDeHtml(linha.LinkProcesso) || (linha.NumProcesso != null ? String(linha.NumProcesso) : ""),
-        classeJudicial: (linha.DesClasseJudicial || "").trim(),
-        dataRemessa: (linha.Inclusao || "").slice(0, 10),
-        diasRemessa: linha.DiasRemessa != null ? Number(linha.DiasRemessa) : null,
-      }));
-
-      return { itens, erro: null };
-    } catch (e) {
-      return { itens: [], erro: e && e.message ? e.message : String(e) };
-    }
-  })();
-}
-
-// Abre uma aba oculta, navega ate' o Relatório de Remessas em Aberto,
-// seleciona a unidade no filtro "Órgão Julgador" (por nome descritivo -
-// ver comentario de "selecionarOrgaoSecretariaRemessasNaPagina") e le' o
-// resultado da consulta.
-async function abrirAbaEExtrairRemessasEmAberto(urlBase, nomeDescritivoUnidade) {
-  let aba;
-  try {
-    aba = await chrome.tabs.create({ url: urlBase, active: false });
-    await aguardarCarregamentoAba(aba.id);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: clicarLinkRemessasEmAbertoNaPagina,
-    });
-
-    if (!linkEncontrado) {
-      return {
-        itens: [],
-        erro:
-          'Link "Relatório de remessas em aberto" não encontrado na página atual (menu lateral: Relatórios > Relatório de remessas em aberto). Abra uma página do eproc com o menu lateral e tente novamente.',
-      };
-    }
-
-    await aguardarCarregamentoAba(aba.id);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    if (nomeDescritivoUnidade) {
-      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
-        target: { tabId: aba.id },
-        func: selecionarOrgaoSecretariaRemessasNaPagina,
-        args: [nomeDescritivoUnidade],
-      });
-
-      if (!resultadoSelecao || !resultadoSelecao.ok) {
-        return {
-          itens: [],
-          erro: (resultadoSelecao && resultadoSelecao.erro) || 'Falha ao selecionar a unidade no filtro "Órgão Julgador".',
-        };
-      }
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    }
-
-    const [{ result } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: extrairRemessasEmAbertoNaPagina,
-    });
-
-    return result || { itens: [], erro: "Sem resultado ao ler o relatório de remessas em aberto." };
-  } catch (e) {
-    return { itens: [], erro: e && e.message ? e.message : String(e) };
-  } finally {
-    if (aba && aba.id) {
-      chrome.tabs.remove(aba.id).catch(() => {});
-    }
-  }
-}
 
 // ---- Relatório Geral da Corregedoria (panorama de todas as unidades) ----
 
@@ -2685,23 +2509,10 @@ function lerUnidadesRelatorioGeralNaPagina() {
   }
   const unidades = Array.from(select.options)
     .filter((opcao) => opcao.value && opcao.value !== "null")
-    .map((opcao) => {
-      // O atributo "title" desse select traz o nome descritivo completo
-      // da unidade, no formato "Nome Descritivo - SIGLA/ABREVIACAO" (o
-      // mesmo formato usado no seletor de perfil #selInfraUnidades). Ja'
-      // o filtro "Órgão Julgador" da tela de Remessas em Aberto usa
-      // outro espaco de IDs (numericos, sem relacao com o valor deste
-      // select) e lista as unidades so' pelo nome descritivo - por isso
-      // guardamos essa parte separada, para conseguir casar as duas
-      // telas por nome em vez de por ID.
-      const title = (opcao.getAttribute("title") || "").trim();
-      const nomeDescritivo = title.includes(" - ") ? title.slice(0, title.lastIndexOf(" - ")).trim() : title;
-      return {
-        valor: opcao.value,
-        texto: (opcao.textContent || title || "").trim(),
-        nomeDescritivo: nomeDescritivo || null,
-      };
-    });
+    .map((opcao) => ({
+      valor: opcao.value,
+      texto: (opcao.textContent || opcao.getAttribute("title") || "").trim(),
+    }));
   return { unidades, erro: null };
 }
 
@@ -2757,10 +2568,6 @@ async function listarUnidadesRelatorioGeral(aoProgredir) {
 // DIAS_LIMITE_ATRASO de 30 dias usado no relatorio "rapido" do painel -
 // aqui o pedido foi especificamente "aguardando há mais de 90 dias").
 const DIAS_LIMITE_ATRASO_UNIDADE = 90;
-
-// Faixas de idade (em anos desde a autuação) usadas na seção "Acervo
-// antigo em tramitação" do Relatório da Unidade.
-const ANOS_ACERVO_ANTIGO = [2, 5];
 
 // Dias sem movimentação usados no panorama de todas as varas (Relatório
 // Geral da Corregedoria).
@@ -2864,12 +2671,10 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   conclusosSentenca: true,
   semMovimentacao: true,
   suspensos: true,
-  acervoAntigo: true,
   localizadores: true,
-  remessas: true,
 };
 
-async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nomeDescritivoUnidade, opcoes, aoProgredir) {
+async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opcoes, aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
   };
@@ -2953,32 +2758,6 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
     }
   }
 
-  // Acervo antigo em tramitação: grupo "M" (MOVIMENTO) + limite superior
-  // na data de autuação (autuados ha' mais de N anos e ainda tramitando).
-  function dataAnosAtras(anos) {
-    const d = new Date();
-    d.setFullYear(d.getFullYear() - anos);
-    const dia = String(d.getDate()).padStart(2, "0");
-    const mes = String(d.getMonth() + 1).padStart(2, "0");
-    return `${dia}/${mes}/${d.getFullYear()}`;
-  }
-
-  const acervoAntigo = { erros: [] };
-  if (opcoesFinais.acervoAntigo) {
-    for (const anos of ANOS_ACERVO_ANTIGO) {
-      notificar(`Consultando processos em tramitação autuados há mais de ${anos} ano(s)...`);
-      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-        grupoSituacao: "M",
-        urgente: false,
-        diasSituacao: null,
-        dataAutuacaoFim: dataAnosAtras(anos),
-        valorOrgaoJuizo: valorUnidade,
-      });
-      acervoAntigo[`anos${anos}`] = r.contagem;
-      if (r.erro) acervoAntigo.erros.push(`${anos} ano(s): ${r.erro}`);
-    }
-  }
-
   let localizadoresOrdenados = [];
   let erroLocalizadores = null;
   if (opcoesFinais.localizadores) {
@@ -2990,26 +2769,17 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
     erroLocalizadores = resultado.erro;
   }
 
-  let remessas = [];
-  let erroRemessas = null;
-  if (opcoesFinais.remessas) {
-    notificar("Abrindo o Relatório de Remessas em Aberto...");
-    const resultado = await abrirAbaEExtrairRemessasEmAberto(abaAtual.url, nomeDescritivoUnidade || nomeUnidade);
-    remessas = resultado.itens;
-    erroRemessas = resultado.erro;
-  }
-
   notificar("Gerando PDF...");
 
   const dataInformacao = new Date().toLocaleString("pt-BR");
   const linhasBloco = (bloco) => [
-    { rotulo: "Total", valor: bloco.total == null ? "?" : bloco.total },
     { rotulo: "Urgentes", valor: bloco.urgentes == null ? "?" : bloco.urgentes },
     { rotulo: "Não urgentes", valor: bloco.naoUrgentes == null ? "?" : bloco.naoUrgentes },
     {
       rotulo: `Aguardando há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`,
       valor: bloco.mais90Dias == null ? "?" : bloco.mais90Dias,
     },
+    { rotulo: "Total", valor: bloco.total == null ? "?" : bloco.total },
   ];
 
   // So' entram no PDF as seções que o usuario marcou - nao so' esconder o
@@ -3036,28 +2806,13 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
     secoesResumo.push({
       titulo: "SUSPENSOS / SOBRESTADOS",
       linhas: [
-        { rotulo: "Total", valor: suspensos.total == null ? "?" : suspensos.total },
         {
           rotulo: `Suspensos há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`,
           valor: suspensos.mais90Dias == null ? "?" : suspensos.mais90Dias,
         },
         ...(suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem })),
+        { rotulo: "Total", valor: suspensos.total == null ? "?" : suspensos.total },
       ],
-    });
-  }
-  if (opcoesFinais.acervoAntigo) {
-    secoesResumo.push({
-      titulo: "ACERVO ANTIGO EM TRAMITAÇÃO",
-      linhas: ANOS_ACERVO_ANTIGO.map((anos) => ({
-        rotulo: `Autuados há mais de ${anos} ano(s)`,
-        valor: acervoAntigo[`anos${anos}`] == null ? "?" : acervoAntigo[`anos${anos}`],
-      })),
-    });
-  }
-  if (opcoesFinais.remessas) {
-    secoesResumo.push({
-      titulo: "REMESSAS EM ABERTO",
-      linhas: [{ rotulo: "Total de processos", valor: remessas.length }],
     });
   }
 
@@ -3074,9 +2829,6 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
   if (opcoesFinais.suspensos && suspensos.erros.length > 0) {
     avisos.push(`Suspensos/sobrestados: ${suspensos.erros.join(" | ")}`);
   }
-  if (opcoesFinais.acervoAntigo && acervoAntigo.erros.length > 0) {
-    avisos.push(`Acervo antigo: ${acervoAntigo.erros.join(" | ")}`);
-  }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
   if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
     avisos.push(
@@ -3085,7 +2837,6 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
         'do Órgão" do painel.'
     );
   }
-  if (opcoesFinais.remessas && erroRemessas) avisos.push(`Remessas em Aberto: ${erroRemessas}`);
 
   const nomesLocalizadores = opcoesFinais.localizadores ? localizadoresOrdenados.map((l) => l.nome) : [];
   const bytesCapa = await construirCapaRelatorioGerencial(
@@ -3100,16 +2851,6 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
   const paginasCapa = await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices());
   paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
 
-  if (opcoesFinais.remessas && remessas.length > 0) {
-    const bytesRemessas = await construirPdfRemessasEmAberto(
-      remessas,
-      `Remessas em Aberto da unidade "${nomeUnidade}" — ${remessas.length} processo(s)`
-    );
-    const pdfRemessas = await PDFDocument.load(bytesRemessas);
-    const paginasCopiadas = await pdfFinal.copyPages(pdfRemessas, pdfRemessas.getPageIndices());
-    paginasCopiadas.forEach((pagina) => pdfFinal.addPage(pagina));
-  }
-
   const bytesFinais = await pdfFinal.save();
   const nomeArquivo = `eproc/relatorio_gerencial_${sanitizarNomeArquivo(nomeUnidade)}_${new Date()
     .toISOString()
@@ -3120,7 +2861,6 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
   return {
     unidade: nomeUnidade,
     totalLocalizadores: localizadoresOrdenados.length,
-    totalRemessas: remessas.length,
   };
 }
 
@@ -3856,18 +3596,6 @@ function construirPdfProcessosLocalizador(itens, tituloDocumento) {
     { titulo: "Número Processo", largura: larguraUtil * 0.28, campo: "numeroProcesso" },
     { titulo: "Classe", largura: larguraUtil * 0.52, campo: "classe" },
     { titulo: "Inclusão no localizador", largura: larguraUtil * 0.2, campo: "inclusao" },
-  ];
-  return construirPdfTabela(itens, colunas, tituloDocumento);
-}
-
-function construirPdfRemessasEmAberto(itens, tituloDocumento) {
-  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
-  const colunas = [
-    { titulo: "Juiz Leigo", largura: larguraUtil * 0.22, campo: "juizLeigo" },
-    { titulo: "Processo", largura: larguraUtil * 0.2, campo: "processo" },
-    { titulo: "Classe Judicial", largura: larguraUtil * 0.31, campo: "classeJudicial" },
-    { titulo: "Data Remessa", largura: larguraUtil * 0.14, campo: "dataRemessa" },
-    { titulo: "Dias da Remessa", largura: larguraUtil * 0.13, campo: "diasRemessa" },
   ];
   return construirPdfTabela(itens, colunas, tituloDocumento);
 }
@@ -4835,7 +4563,6 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     exportarRelatorioGerencialUnidade(
       mensagem.valorUnidade,
       mensagem.nomeUnidade,
-      mensagem.nomeDescritivoUnidade,
       mensagem.opcoes,
       (texto) => {
         chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_GERENCIAL", texto }).catch(() => {});

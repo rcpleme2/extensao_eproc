@@ -92,18 +92,17 @@ navegação/recarregamento daquela página).
 ## Configurações
 
 O ícone de engrenagem (⚙) discreto no canto superior direito do painel
-abre um pequeno modal com duas opções, salvas em `chrome.storage.local`
-(preferências deste navegador, não sincronizadas entre máquinas):
+abre um pequeno modal com uma opção, salva em `chrome.storage.local`
+(preferência deste navegador, não sincronizada entre máquinas):
 
 - **"Substituir a sigla do usuário pelo nome e cargo na movimentação"**
   (ligado por padrão): controla a troca descrita na seção "Nomes de
   usuário na movimentação" acima.
-- **"Classificar em ordem alfabética as listas em dropdowns"** (ligado
-  por padrão): controla se os menus suspensos preenchidos pela extensão
-  (unidades do Relatório da Unidade, localizadores da "Busca específica
-  de localizadores") aparecem em ordem alfabética ou na ordem em que o
-  eproc os devolveu. Não afeta o conteúdo de nenhum PDF/planilha
-  exportado — só os dropdowns do próprio painel.
+
+Os menus suspensos preenchidos pela extensão (unidades do Relatório da
+Unidade, localizadores da "Busca específica de localizadores") sempre
+aparecem em ordem alfabética — não é uma opção configurável, é aplicado
+automaticamente.
 
 Cada opção salva assim que marcada/desmarcada (sem precisar de um botão
 "Salvar" separado); o botão "Fechar" só esconde o modal.
@@ -430,7 +429,7 @@ tabelas (best-effort): preenche o campo de dias se existir, clica em
 e senão pela maior tabela HTML com dados, com logs `[eproc]` detalhados.
 Se a detecção automática falhar em alguma das telas, o PDF sai com um
 aviso no lugar — nesse caso, envie o HTML da tela para calibrar a
-extração (mesmo processo usado nas Remessas em Aberto).
+extração.
 
 ### Relatório da Unidade
 
@@ -439,11 +438,10 @@ extração (mesmo processo usado nas Remessas em Aberto).
    e lê todas as opções do filtro "Órgão/Juízo" dessa tela — visualmente
    um dropdown do bootstrap-select, mas a leitura é feita direto no
    `<select id="selIdOrgaoJuizo">` nativo por trás dele — preenchendo um
-   menu suspenso no painel, em **ordem alfabética** (respeita a
-   configuração "Classificar em ordem alfabética as listas em dropdowns"
-   — ver seção "Configurações" abaixo). O botão **some assim que
-   clicado** — ele só serve para um carregamento inicial, e só volta a
-   aparecer se o carregamento falhar (para tentar de novo).
+   menu suspenso no painel, sempre em **ordem alfabética**. O botão
+   **some assim que clicado** — ele só serve para um carregamento
+   inicial, e só volta a aparecer se o carregamento falhar (para tentar
+   de novo).
 2. Ao **escolher uma unidade** no menu, o painel mostra "Informações
    serão extraídas de: `<nome da unidade>`" e libera a lista **"Itens a
    incluir no PDF"** (7 checkboxes, um por seção do relatório — todos
@@ -457,34 +455,29 @@ extração (mesmo processo usado nas Remessas em Aberto).
 3. **"Exportar Relatório da Unidade (PDF)"** gera, filtrado pela unidade
    escolhida e pelos itens marcados, um único PDF com:
    - Nome da unidade e data/hora da extração.
-   - Conclusos para decisão e para sentença: Total, Urgentes, Não
-     urgentes (calculado como Total − Urgentes, sem precisar de uma
-     consulta a mais) e Aguardando há mais de 90 dias.
+   - Conclusos para decisão e para sentença: Urgentes, Não urgentes
+     (calculado como Total − Urgentes, sem precisar de uma consulta a
+     mais), Aguardando há mais de 90 dias e, **por último, o Total**.
    - Processos sem movimentação há mais de 30, 90 e 120 dias.
-   - **Suspensos/sobrestados**: total e há mais de 90 dias (grupo inteiro
-     do filtro "Situação" — os values de `#selStatusProcesso` seguem o
-     formato `status;codigo;grupo`; o grupo SUSPENSÃO é o sufixo `;S`) e,
-     abaixo desses dois números, um **detalhamento por situação
-     específica**: cada uma das ~40 opções do grupo é consultada
-     individualmente, mas só entram no relatório as que têm pelo menos 1
-     processo (ex.: "SUSPENSAO: 12", "SOBRESTADO CONVÊNIO: 3") — as
-     dezenas de variantes zeradas ficam de fora, para não poluir o
-     relatório.
-   - **Acervo antigo em tramitação**: processos do grupo MOVIMENTO
-     autuados há mais de 2 e 5 anos, preenchendo o limite superior da
-     data de autuação (`#txtDataAutuacaoFim`).
+   - **Suspensos/sobrestados**: há mais de 90 dias (grupo inteiro do
+     filtro "Situação" — os values de `#selStatusProcesso` seguem o
+     formato `status;codigo;grupo`; o grupo SUSPENSÃO é o sufixo `;S`) e
+     um **detalhamento por situação específica**: cada uma das ~40
+     opções do grupo é consultada individualmente, mas só entram no
+     relatório as que têm pelo menos 1 processo (ex.: "SUSPENSAO: 12",
+     "SOBRESTADO CONVÊNIO: 3") — as dezenas de variantes zeradas ficam de
+     fora, para não poluir o relatório. O **Total** vem por último,
+     depois de todos os processos individuais listados acima.
    - O **nome de cada Localizador** da unidade, em ordem alfabética
      (**sem** o total de processos — ver aviso abaixo).
-   - As Remessas em Aberto da unidade: Juiz Leigo, Processo, Classe
-     Judicial, Data Remessa e Dias da Remessa.
 
    Desmarcar um item pula tanto a(s) consulta(s) dele quanto o trecho
    correspondente no PDF — não é só uma questão de esconder o resultado,
    a consulta daquele item nem chega a rodar. Como cada seção equivale a
    uma ou mais consultas no Relatório Geral (cada uma com sua própria aba
-   oculta), desmarcar itens que a unidade não precisa (ex.: uma vara sem
-   Remessas em Aberto, ou que não quer o detalhamento de suspensos)
-   também deixa a exportação mais rápida.
+   oculta), desmarcar itens que a unidade não precisa (ex.: uma vara que
+   não quer o detalhamento de suspensos) também deixa a exportação mais
+   rápida.
 
    Tudo isso reaproveita as funções já existentes no painel: as mesmas
    consultas do Relatório Geral (agora com um filtro extra de
@@ -496,7 +489,7 @@ extração (mesmo processo usado nas Remessas em Aberto).
    cabeçalho **"TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ · Sistema eProc"**
    repetido no topo de cada página, capa com os números organizados em
    seções coloridas (rótulo/valor, uma por bloco: decisão, sentença, sem
-   movimentação, remessas), rodapé com numeração de página e aviso de
+   movimentação, suspensos), rodapé com numeração de página e aviso de
    que o documento foi gerado pela extensão. A lista de Localizadores
    **não** vira uma tabela em página virada (paisagem) à parte — os
    nomes entram **um por linha** (com um marcador "-" e recuo pendurado
@@ -505,12 +498,10 @@ extração (mesmo processo usado nas Remessas em Aberto).
    processos — bem mais fácil de escanear visualmente do que um
    parágrafo corrido com todos os nomes separados por vírgula. Continua
    em novas páginas (sempre com o mesmo cabeçalho/rodapé) só se a lista
-   for grande demais para caber no que sobrou da página. Já a tabela de
-   Remessas em Aberto usa página virada com a mesma paleta (cabeçalho de
-   coluna com fundo escuro e texto branco, linhas com listras zebradas) —
-   essa identidade visual também vale para os PDFs de Localizadores/
-   Processos por Localizador exportados fora do painel da Corregedoria,
-   já que reaproveitam o mesmo gerador de tabela.
+   for grande demais para caber no que sobrou da página. Essa mesma
+   identidade visual também vale para os PDFs de Localizadores/Processos
+   por Localizador exportados fora do painel da Corregedoria, já que
+   reaproveitam o mesmo gerador de tabela.
 
    A extração dos Localizadores **não** usa a tela "Localizadores do
    Órgão" (diferente do resto do painel) — o Relatório Geral tem seu
@@ -540,22 +531,6 @@ extração (mesmo processo usado nas Remessas em Aberto).
    própria unidade e usar a ferramenta **"Localizadores do Órgão"** do
    painel (que já mostra esse total, já que ali a extração é direto da
    tabela da tela, sem precisar de nenhuma consulta a mais).
-
-   As Remessas em Aberto vêm de uma tela separada, acessada pelo menu
-   lateral **Relatórios → Relatório de remessas em aberto**
-   (`acao=relatorio_remessas_em_aberto/listar`). Diferente do resto do
-   painel, essa tela filtra a unidade por um select próprio
-   (`#IdOrgaoSecretaria`, rotulado "Órgão Julgador"), que usa um espaço
-   de identificadores totalmente diferente do `#selIdOrgaoJuizo`/
-   `#selInfraUnidades` e só lista as unidades pelo **nome descritivo**
-   (sem a sigla) — por isso a extensão guarda esse nome descritivo (lido
-   do atributo `title` das opções do Relatório Geral, no formato "Nome
-   Descritivo - SIGLA") ao carregar as unidades, e usa esse nome (não o
-   ID) para selecionar a unidade certa nessa tela. A tabela de resultado
-   é um DataTable carregado via AJAX; a extensão lê os dados direto pela
-   API do DataTables (em vez de raspar as células renderizadas) e muda a
-   paginação para "mostrar tudo" antes de ler, evitando ter que navegar
-   entre páginas.
 
 ## Regras de Automação
 
@@ -659,9 +634,7 @@ Ao clicar em **"Carregar localizadores"**:
    atribuído — os demais não têm para onde navegar, já que o número da
    coluna "Total de processos" só é um link quando maior que zero.
 3. Preenche um menu suspenso com esses localizadores (nome e total de
-   processos entre parênteses), em ordem alfabética por padrão (respeita
-   a configuração "Classificar em ordem alfabética as listas em
-   dropdowns" — ver seção "Configurações" abaixo).
+   processos entre parênteses), sempre em ordem alfabética.
 
 Ao **escolher um localizador** no menu, aparecem duas ações (a escolha
 no menu sozinha não navega nem exporta nada — é preciso clicar em um dos

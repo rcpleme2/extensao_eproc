@@ -22,14 +22,15 @@ const ROTULO_FASE = {
 };
 
 // Configurações do painel (engrenagem no cabeçalho) - guardadas em
-// chrome.storage.local (não sync: são preferências locais deste
-// navegador, não precisam seguir o usuário entre máquinas). Os valores
-// padrão preservam o comportamento de antes dessas opções existirem
-// (substituir a sigla já era feito sempre; ordenar listas alfabeticamente
-// também já era o padrão nas listas que já existiam).
+// chrome.storage.local (não sync: é preferência local deste navegador,
+// não precisa seguir o usuário entre máquinas). O valor padrão preserva
+// o comportamento de antes dessa opção existir (substituir a sigla já
+// era feito sempre). A ordenação alfabética das listas em dropdowns NÃO
+// é configurável - é sempre aplicada, direto onde cada dropdown é
+// preenchido (handlers de UNIDADES_RELATORIO_FINALIZADO e
+// LISTAR_LOCALIZADORES_FINALIZADO mais abaixo).
 const CONFIG_PADRAO = {
   substituirSigla: true,
-  ordenarListas: true,
 };
 
 function obterConfiguracoes() {
@@ -45,22 +46,16 @@ function salvarConfiguracao(chave, valor) {
 const btnAbrirConfiguracoes = document.getElementById("btn-abrir-configuracoes");
 const modalConfiguracoes = document.getElementById("modal-configuracoes");
 const chkConfigSubstituirSigla = document.getElementById("chk-config-substituir-sigla");
-const chkConfigOrdenarListas = document.getElementById("chk-config-ordenar-listas");
 const modalConfigFechar = document.getElementById("modal-config-fechar");
 
 btnAbrirConfiguracoes.addEventListener("click", async () => {
   const config = await obterConfiguracoes();
   chkConfigSubstituirSigla.checked = config.substituirSigla;
-  chkConfigOrdenarListas.checked = config.ordenarListas;
   modalConfiguracoes.hidden = false;
 });
 
 chkConfigSubstituirSigla.addEventListener("change", () => {
   salvarConfiguracao("substituirSigla", chkConfigSubstituirSigla.checked);
-});
-
-chkConfigOrdenarListas.addEventListener("change", () => {
-  salvarConfiguracao("ordenarListas", chkConfigOrdenarListas.checked);
 });
 
 modalConfigFechar.addEventListener("click", () => {
@@ -430,9 +425,7 @@ const chkRelConclusosDecisao = document.getElementById("chk-rel-conclusos-decisa
 const chkRelConclusosSentenca = document.getElementById("chk-rel-conclusos-sentenca");
 const chkRelSemMovimentacao = document.getElementById("chk-rel-sem-movimentacao");
 const chkRelSuspensos = document.getElementById("chk-rel-suspensos");
-const chkRelAcervoAntigo = document.getElementById("chk-rel-acervo-antigo");
 const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
-const chkRelRemessas = document.getElementById("chk-rel-remessas");
 const areaBtnExportarGerencial = document.getElementById("area-btn-exportar-gerencial");
 const btnExportarRelatorioGerencial = document.getElementById("btn-exportar-relatorio-gerencial");
 const areaProgressoRelatorioGerencial = document.getElementById("area-progresso-relatorio-gerencial");
@@ -534,7 +527,6 @@ selectUnidadeRelatorio.addEventListener("change", () => {
   unidadeSelecionadaCorregedoria = {
     valor,
     nome: opcaoSelecionada.textContent,
-    nomeDescritivo: opcaoSelecionada.dataset.nomeDescritivo || null,
   };
   areaUnidadeSelecionada.hidden = false;
   areaUnidadeSelecionada.textContent = `Informações serão extraídas de: ${unidadeSelecionadaCorregedoria.nome}`;
@@ -542,7 +534,7 @@ selectUnidadeRelatorio.addEventListener("change", () => {
   areaBtnExportarGerencial.hidden = false;
 });
 
-// Le' o estado atual dos 7 checkboxes de "Itens a incluir no PDF" - as
+// Le' o estado atual dos checkboxes de "Itens a incluir no PDF" - as
 // chaves batem exatamente com as de "OPCOES_RELATORIO_UNIDADE_PADRAO" no
 // background.js, entao a mensagem so' precisa repassar esse objeto sem
 // nenhuma traducao a mais.
@@ -552,9 +544,7 @@ function lerOpcoesRelatorioUnidade() {
     conclusosSentenca: chkRelConclusosSentenca.checked,
     semMovimentacao: chkRelSemMovimentacao.checked,
     suspensos: chkRelSuspensos.checked,
-    acervoAntigo: chkRelAcervoAntigo.checked,
     localizadores: chkRelLocalizadores.checked,
-    remessas: chkRelRemessas.checked,
   };
 }
 
@@ -592,7 +582,6 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
       tipo: "EXPORTAR_RELATORIO_GERENCIAL_UNIDADE",
       valorUnidade: unidade.valor,
       nomeUnidade: unidade.nome,
-      nomeDescritivoUnidade: unidade.nomeDescritivo,
       opcoes,
     });
     if (!resposta || !resposta.ok) {
@@ -640,7 +629,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 atualizarCardCorregedoria();
 
-chrome.runtime.onMessage.addListener(async (mensagem) => {
+chrome.runtime.onMessage.addListener((mensagem) => {
   if (!mensagem) return;
 
   if (mensagem.tipo === "PROGRESSO_DOWNLOAD") {
@@ -742,21 +731,13 @@ chrome.runtime.onMessage.addListener(async (mensagem) => {
 
     if (mensagem.ok) {
       const unidades = (mensagem.resultado && mensagem.resultado.unidades) || [];
-      const config = await obterConfiguracoes();
-      const unidadesExibidas = config.ordenarListas
-        ? [...unidades].sort((a, b) => a.texto.localeCompare(b.texto, "pt-BR"))
-        : unidades;
+      const unidadesExibidas = [...unidades].sort((a, b) => a.texto.localeCompare(b.texto, "pt-BR"));
 
       selectUnidadeRelatorio.innerHTML = '<option value="" selected disabled>Selecione uma unidade...</option>';
       for (const unidade of unidadesExibidas) {
         const opcao = document.createElement("option");
         opcao.value = unidade.valor;
         opcao.textContent = unidade.texto;
-        // Guardado para o Relatório de Remessas em Aberto, que usa um
-        // filtro de unidade próprio (baseado no nome descritivo, não no
-        // mesmo ID do Relatório Geral) - ver comentário em
-        // "lerUnidadesRelatorioGeralNaPagina" no background.js.
-        if (unidade.nomeDescritivo) opcao.dataset.nomeDescritivo = unidade.nomeDescritivo;
         selectUnidadeRelatorio.appendChild(opcao);
       }
       areaSelectUnidade.hidden = unidadesExibidas.length === 0;
@@ -793,7 +774,7 @@ chrome.runtime.onMessage.addListener(async (mensagem) => {
       setStatusCorregedoria(
         `Concluído! Relatório Gerencial de "${resultado.unidade || ""}" salvo em Downloads/eproc/ (${
           resultado.totalLocalizadores || 0
-        } localizador(es), ${resultado.totalRemessas || 0} remessa(s) em aberto).`,
+        } localizador(es)).`,
         "ok"
       );
     } else {
@@ -905,7 +886,7 @@ btnExportarLocalizadores.addEventListener("click", async () => {
   }
 });
 
-chrome.runtime.onMessage.addListener(async (mensagem) => {
+chrome.runtime.onMessage.addListener((mensagem) => {
   if (!mensagem) return;
 
   if (mensagem.tipo === "PROGRESSO_LOCALIZADORES") {
@@ -960,10 +941,9 @@ chrome.runtime.onMessage.addListener(async (mensagem) => {
 
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
-      const config = await obterConfiguracoes();
-      const localizadores = config.ordenarListas
-        ? [...(resultado.localizadores || [])].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
-        : resultado.localizadores || [];
+      const localizadores = [...(resultado.localizadores || [])].sort((a, b) =>
+        a.nome.localeCompare(b.nome, "pt-BR")
+      );
       localizadoresCarregados = localizadores;
       areaAcoesLocalizador.hidden = true;
 

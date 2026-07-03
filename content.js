@@ -416,14 +416,27 @@ function adicionarBotaoAbrirPainel() {
 // tambem escuta mudancas (chrome.storage.onChanged) para reagir na hora
 // se o usuario alternar a opcao com esta mesma aba do eproc ja' aberta,
 // sem precisar recarregar a pagina.
+//
+// "configuracaoSiglaCarregada" existe para evitar uma corrida: o
+// MutationObserver logo abaixo comeca a observar de forma SINCRONA,
+// muito antes do "chrome.storage.local.get" (assincrono) responder - o
+// carregamento inicial da pagina do eproc dispara varias mutacoes no DOM
+// nesse meio-tempo, e sem essa guarda o observer chamava
+// "substituirSiglaPorNomeUsuario()" usando o valor padrao (true) mesmo
+// quando o usuario tinha desligado a opcao, ja' que o valor real ainda
+// nao tinha chegado. Enquanto essa flag for false, nenhuma chamada faz
+// efeito; assim que o valor real chega, ela vira true e roda uma vez
+// (cobrindo o que ja mudou no DOM nesse meio-tempo).
 let configSubstituirSiglaAtivo = true;
+let configuracaoSiglaCarregada = false;
 
 function aplicarSubstituicaoSiglaSeAtivo() {
-  if (configSubstituirSiglaAtivo) substituirSiglaPorNomeUsuario();
+  if (configuracaoSiglaCarregada && configSubstituirSiglaAtivo) substituirSiglaPorNomeUsuario();
 }
 
 chrome.storage.local.get({ substituirSigla: true }, (itens) => {
   configSubstituirSiglaAtivo = itens.substituirSigla;
+  configuracaoSiglaCarregada = true;
   aplicarSubstituicaoSiglaSeAtivo();
 });
 
