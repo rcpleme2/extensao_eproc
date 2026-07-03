@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Extensão Auxiliar eProc",
-  "version": "1.0.0",
-  "description": "Identifica e baixa em lote todos os documentos de um processo no sistema eproc (TJPR, TJSC, TJAL, Justiça Federal, etc.).",
+  "version": "2.0",
+  "description": "Extensão para auxiliar no uso e extração de relatórios do eProc",
   "permissions": ["downloads", "activeTab", "scripting", "tabs", "sidePanel"],
   "host_permissions": ["*://*/eproc/*"],
   "side_panel": {
     "default_path": "popup.html"
   },
   "action": {
-    "default_title": "Extensão Auxiliar eProc",
+    "default_title": "Extensão eProc",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
