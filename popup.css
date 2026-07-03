@@ -185,9 +185,12 @@ body {
   padding: var(--espaco-2) 12px 12px;
 }
 
-/* Cartão condicional/privilegiado (Corregedoria): borda esquerda na cor
-   primária + selo no cabeçalho, sinalizando que só aparece para um
-   perfil específico. */
+/* Cartão "de perfil" (Corregedoria, Gestão da Unidade, Magistrado):
+   borda esquerda na cor primária + selo no cabeçalho, sinalizando a qual
+   perfil aquela funcionalidade se destina. Só o cartão Corregedoria é
+   condicional (só aparece para esse perfil ativo) - os demais ficam
+   sempre visíveis, independente do perfil logado; o selo aqui é só
+   indicativo/organizacional. */
 .card--privilegiado {
   border-left: 3px solid var(--cor-primaria);
 }

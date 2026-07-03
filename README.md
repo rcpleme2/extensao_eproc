@@ -10,6 +10,16 @@ cada cartão expande ao clicar no título, e reabre sozinho quando alguma
 operação dele progride, conclui ou falha. Sucessos aparecem em verde e
 erros em vermelho na linha de status de cada cartão.
 
+Além do cartão **Corregedoria** (único que é realmente condicional - só
+aparece quando esse é o perfil ativo, ver seção própria abaixo), os
+demais cartões trazem um selo indicando a qual perfil a funcionalidade
+se destina, **apenas como indicação organizacional** - continuam sempre
+visíveis e utilizáveis por qualquer perfil:
+
+- **perfil MAGISTRADO**: Exportar Documentos.
+- **perfil GESTÃO DA UNIDADE**: Relatórios, Regras de Automação,
+  Localizadores do Órgão e Busca específica de localizadores.
+
 ## Exportar Documentos
 
 Na página de detalhes de um processo no eproc, cada documento (`INIC1`,
