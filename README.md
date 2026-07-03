@@ -2,8 +2,13 @@
 
 Extensão para Chrome/Edge com funcionalidades para o sistema **eproc**
 (usado por diversos tribunais brasileiros: TJPR, TJSC, TJAL, Justiça Federal,
-etc.), organizadas em três cartões separados no painel: **Exportar
-Documentos**, **Relatórios** e **Regras de Automação**.
+etc.), organizadas em cartões colapsáveis no painel lateral: **Exportar
+Documentos**, **Relatórios**, **Corregedoria** (só para esse perfil),
+**Regras de Automação**, **Localizadores do Órgão** e **Busca específica
+de localizadores**. O painel abre enxuto (só o primeiro cartão expandido);
+cada cartão expande ao clicar no título, e reabre sozinho quando alguma
+operação dele progride, conclui ou falha. Sucessos aparecem em verde e
+erros em vermelho na linha de status de cada cartão.
 
 ## Exportar Documentos
 
@@ -379,30 +384,58 @@ especificamente).
 Quando o perfil ativo (select de perfil no cabeçalho do eproc,
 `#selInfraUnidades`) é **"CORREGEDORIA"**, um cartão exclusivo
 **"Corregedoria"** aparece no painel (fica oculto para qualquer outro
-perfil). Fluxo:
+perfil), com selo e borda destacada indicando que é condicional. Ele
+oferece **dois relatórios independentes**, com botões e PDFs separados:
 
-1. **"Carregar unidades do Relatório Geral"**: navega a aba atual até o
-   Relatório Geral (mesmo mecanismo do botão "↗" do cartão Relatórios) e
-   lê todas as opções do filtro "Órgão/Juízo" dessa tela — visualmente um
-   dropdown do bootstrap-select, mas a leitura é feita direto no
-   `<select id="selIdOrgaoJuizo">` nativo por trás dele, sem precisar
-   simular a abertura do menu visual — preenchendo um menu suspenso no
-   painel.
+### Relatório Geral (todas as unidades)
+
+Botão direto, sem precisar escolher unidade. Gera
+`relatorio_geral_corregedoria_<data>.pdf` com capa institucional e duas
+tabelas panorâmicas, extraídas de telas próprias do menu lateral:
+
+- **Processos sem Movimentação N Dias (todas as varas)**
+  (`acao=relatorio_sem_movimentacao_listar_geral`), preenchendo 90 dias —
+  visão comparativa de todas as unidades de uma vez.
+- **Relatório de Atuação Conciliador/Juiz Leigo**
+  (`acao=relatorio_atuacao_auxiliar_justica`), sem filtro de unidade.
+
+Como essas duas telas ainda não foram calibradas contra uma amostra HTML
+real (diferente das demais), a extração usa um leitor genérico de
+tabelas (best-effort): preenche o campo de dias se existir, clica em
+"Consultar" se existir, e lê o resultado primeiro pela API do DataTables
+e senão pela maior tabela HTML com dados, com logs `[eproc]` detalhados.
+Se a detecção automática falhar em alguma das telas, o PDF sai com um
+aviso no lugar — nesse caso, envie o HTML da tela para calibrar a
+extração (mesmo processo usado nas Remessas em Aberto).
+
+### Relatório da Unidade
+
+1. **"Carregar unidades (Relatório da Unidade)"**: navega a aba atual até
+   o Relatório Geral (mesmo mecanismo do botão "↗" do cartão Relatórios)
+   e lê todas as opções do filtro "Órgão/Juízo" dessa tela — visualmente
+   um dropdown do bootstrap-select, mas a leitura é feita direto no
+   `<select id="selIdOrgaoJuizo">` nativo por trás dele — preenchendo um
+   menu suspenso no painel.
 2. Ao **escolher uma unidade** no menu, o painel mostra "Informações
    serão extraídas de: `<nome da unidade>`" e libera o botão
-   **"Exportar Relatório Gerencial da Unidade (PDF)"**. Todo relatório
-   deste cartão (hoje só este; qualquer outro que vier a ser adicionado
-   aqui segue a mesma regra) confere se uma unidade foi escolhida antes
-   de rodar — sem isso, mostra o erro "Selecione uma unidade na lista
-   antes de gerar este relatório." em vez de seguir sem saber de onde
-   extrair os dados.
-3. **"Exportar Relatório Gerencial da Unidade (PDF)"** gera, filtrado
-   pela unidade escolhida, um único PDF com:
+   **"Exportar Relatório da Unidade (PDF)"**. Esse relatório sempre
+   confere se uma unidade foi escolhida antes de rodar — sem isso,
+   mostra o erro "Selecione uma unidade na lista antes de gerar este
+   relatório." em vez de seguir sem saber de onde extrair os dados.
+3. **"Exportar Relatório da Unidade (PDF)"** gera, filtrado pela unidade
+   escolhida, um único PDF com:
    - Nome da unidade e data/hora da extração.
    - Conclusos para decisão e para sentença: Total, Urgentes, Não
      urgentes (calculado como Total − Urgentes, sem precisar de uma
      consulta a mais) e Aguardando há mais de 90 dias.
    - Processos sem movimentação há mais de 30, 90 e 120 dias.
+   - **Suspensos/sobrestados**: total e há mais de 90 dias — seleciona de
+     uma vez todas as ~40 opções do grupo SUSPENSÃO do filtro "Situação"
+     (os values de `#selStatusProcesso` seguem o formato
+     `status;codigo;grupo`; o grupo é o sufixo `;S`).
+   - **Acervo antigo em tramitação**: processos do grupo MOVIMENTO
+     autuados há mais de 2 e 5 anos, preenchendo o limite superior da
+     data de autuação (`#txtDataAutuacaoFim`).
    - O total de processos de cada Localizador da unidade, ordenado do
      maior para o menor total.
    - As Remessas em Aberto da unidade: Juiz Leigo, Processo, Classe

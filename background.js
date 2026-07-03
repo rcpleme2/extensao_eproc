@@ -3393,8 +3393,11 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
       x += coluna.largura;
     }
     // Gap extra apos a faixa do cabecalho, para a primeira linha de
-    // dados nunca encostar/sobrepor visualmente na faixa colorida.
-    y -= alturaFaixa + 6;
+    // dados nunca encostar/sobrepor visualmente na faixa colorida - o
+    // "y" das linhas e' a BASELINE do texto, e os ascendentes sobem
+    // ~7pt acima dela na fonte de 9pt, entao o gap precisa ser maior
+    // que isso.
+    y -= alturaFaixa + 11;
     indiceLinhaZebra = 0;
   }
 
