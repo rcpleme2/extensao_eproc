@@ -21,6 +21,42 @@ const COR_CINZA_BORDA = rgb(0.82, 0.85, 0.87);
 const COR_BRANCO = rgb(1, 1, 1);
 const COR_ALERTA_VERMELHO = rgb(0.75, 0.1, 0.1);
 
+// ---- Semáforo global de abas ocultas ----
+//
+// O Relatório da Unidade (e outras rotinas desta extensão) abre várias
+// abas ocultas em paralelo (uma por consulta/bloco) para ir mais rápido.
+// Sem um limite, nada impede dezenas de abas serem abertas ao mesmo
+// tempo, o que pode sobrecarregar o navegador e, principalmente, fazer o
+// próprio eproc bloquear/atrasar por excesso de requisições simultâneas
+// da mesma sessão. Este semáforo é compartilhado por TODA função que
+// abre uma aba oculta (chrome.tabs.create) neste arquivo: cada uma
+// adquire um "lugar" antes de criar a aba e libera assim que termina
+// (finally), nunca deixando mais de LIMITE_ABAS_SIMULTANEAS rodando ao
+// mesmo tempo - o excesso simplesmente espera na fila, na ordem de
+// chegada.
+const LIMITE_ABAS_SIMULTANEAS = 9;
+let abasOcultasEmUso = 0;
+const filaDeEsperaPorAba = [];
+
+function adquirirSlotDeAbaOculta() {
+  if (abasOcultasEmUso < LIMITE_ABAS_SIMULTANEAS) {
+    abasOcultasEmUso += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => filaDeEsperaPorAba.push(resolve));
+}
+
+function liberarSlotDeAbaOculta() {
+  const proximo = filaDeEsperaPorAba.shift();
+  if (proximo) {
+    // Repassa o lugar direto para quem esta' esperando ha' mais tempo,
+    // sem decrementar o contador (o lugar nunca ficou de fato livre).
+    proximo();
+  } else {
+    abasOcultasEmUso = Math.max(0, abasOcultasEmUso - 1);
+  }
+}
+
 // Abre o painel lateral (side panel) ao clicar no icone da extensao, em
 // vez do popup efemero padrao, para que ele permaneca visivel enquanto o
 // usuario navega entre paginas/abas do eproc.
@@ -1890,6 +1926,7 @@ function buscarLocalizadoresViaFetchNaPagina() {
 async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJuizo) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1950,6 +1987,7 @@ async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJui
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -1980,6 +2018,7 @@ function listarSituacoesDoGrupoNaPagina(grupo) {
 async function abrirAbaEListarSituacoesDoGrupo(urlBase, valorOrgaoJuizo, grupo) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -2021,6 +2060,7 @@ async function abrirAbaEListarSituacoesDoGrupo(urlBase, valorOrgaoJuizo, grupo) 
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -2099,7 +2139,7 @@ function consultarSituacoesEspecificasNaPagina(opcoesDoBloco) {
     // teria que abandonar esta chamada inteira e descartar TODO o progresso
     // do bloco - mesmo os itens que ja' tinham sido consultados com sucesso
     // antes do estouro.
-    const ORCAMENTO_BLOCO_MS = 20000;
+    const ORCAMENTO_BLOCO_MS = 60000;
     const inicioBloco = Date.now();
 
     const itens = [];
@@ -2149,15 +2189,16 @@ function consultarSituacoesEspecificasNaPagina(opcoesDoBloco) {
 // demais blocos que estao rodando ao mesmo tempo em outras abas.
 async function abrirAbaEConsultarSituacoesEspecificas(urlBase, valorOrgaoJuizo, opcoesDoBloco) {
   // So' uma rede de seguranca para casos realmente travados (pagina que
-  // nunca recarrega, clique que nunca dispara nada): o orcamento de 20s
+  // nunca recarrega, clique que nunca dispara nada): o orcamento de 60s
   // DENTRO de "consultarSituacoesEspecificasNaPagina" e' quem normalmente
   // decide quando parar, devolvendo o progresso parcial ja' apurado. Esse
   // timeout aqui fica um pouco acima dele de proposito (raramente deve
   // disparar) - se disparar mesmo assim, e' so' esse bloco especifico que
   // sai vazio, sem afetar os demais blocos rodando em paralelo.
-  const TIMEOUT_BLOCO_MS = 28000;
+  const TIMEOUT_BLOCO_MS = 75000;
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -2204,6 +2245,7 @@ async function abrirAbaEConsultarSituacoesEspecificas(urlBase, valorOrgaoJuizo, 
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -2219,19 +2261,25 @@ function dividirEmBlocos(lista, numBlocos) {
   return blocos.filter((bloco) => bloco.length > 0);
 }
 
-const NUM_BLOCOS_PARALELOS_SITUACOES = 5;
+// Mesmo valor de LIMITE_ABAS_SIMULTANEAS: o detalhamento de suspensos e'
+// so' mais um consumidor do semaforo global de abas ocultas, entao pode
+// pedir ate' o maximo permitido de blocos/abas simultaneas sem estourar
+// o limite combinado com as demais consultas do relatório.
+const NUM_BLOCOS_PARALELOS_SITUACOES = LIMITE_ABAS_SIMULTANEAS;
 
 // Detalha todas as situações especificas de um grupo (ex.: cada variante
 // de suspensão/sobrestamento dentro do grupo "S") em PARALELO: primeiro
 // lista as opcoes do grupo (uma aba rapida, so' leitura), depois divide
-// em ate' 5 blocos e consulta cada bloco numa aba PROPRIA, todas ao mesmo
-// tempo (Promise.all) - em vez de uma unica aba consultando as ~40
-// opcoes uma de cada vez. Cada bloco tem um orcamento interno de 20s
-// (verificado ENTRE um item e outro, preservando o que ja' foi apurado) e
-// um timeout externo de 28s como rede de seguranca; se algum bloco nao
-// terminar a tempo, o resultado sai "parcial" (com o que os demais blocos
-// conseguiram apurar), mas nunca trava a exportação - o TOTAL de
-// suspensos (consultado à parte, fora desta função) nunca é afetado por
+// em ate' NUM_BLOCOS_PARALELOS_SITUACOES blocos e consulta cada bloco
+// numa aba PROPRIA, todas ao mesmo tempo (Promise.all, respeitando o
+// semaforo global de abas ocultas) - em vez de uma unica aba consultando
+// as ~40 opcoes uma de cada vez. Cada bloco tem um orcamento interno de
+// 60s (verificado ENTRE um item e outro, preservando o que ja' foi
+// apurado) e um timeout externo de 75s como rede de seguranca; se algum
+// bloco nao terminar a tempo, o resultado sai "parcial" (com o que os
+// demais blocos conseguiram apurar), mas nunca trava a exportação - o
+// TOTAL de suspensos (consultado à parte, fora desta função) nunca é
+// afetado por
 // esse limite.
 async function abrirAbaEConsultarSituacoesGrupo(urlBase, valorOrgaoJuizo, grupo) {
   const { opcoes, erro: erroListagem } = await abrirAbaEListarSituacoesDoGrupo(urlBase, valorOrgaoJuizo, grupo);
@@ -2430,6 +2478,7 @@ function extrairTabelaGenericaNaPagina(diasPreencher) {
 async function abrirAbaEExtrairTabelaRelatorio(urlBase, funcClicarLink, nomeRelatorio, diasPreencher) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -2485,6 +2534,7 @@ async function abrirAbaEExtrairTabelaRelatorio(urlBase, funcClicarLink, nomeRela
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -2663,6 +2713,7 @@ function exportarExcelNaPagina() {
 async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -2699,6 +2750,7 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -2712,82 +2764,62 @@ async function gerarRelatorioGeral(aoProgredir) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
 
+  // Cada bloco (despacho/sentença) tem 3 sub-consultas independentes,
+  // rodando em paralelo entre si - e os proprios blocos, mais o
+  // demonstrativo de sem movimentação e os totais de ativos/suspensos,
+  // tambem rodam todos ao mesmo tempo (Promise.all), respeitando o
+  // semaforo global de abas ocultas (LIMITE_ABAS_SIMULTANEAS) - bem mais
+  // rapido que consultar uma coisa de cada vez.
   async function consultarBloco(nomeSituacao, valorSituacao) {
     const bloco = { total: null, urgentes: null, mais30Dias: null, erros: [] };
 
-    notificar(`Consultando ${nomeSituacao}: total...`);
-    let r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      valorSituacao,
-      urgente: false,
-      diasSituacao: null,
-    });
-    bloco.total = r.contagem;
-    if (r.erro) bloco.erros.push(`total: ${r.erro}`);
+    const [rTotal, rUrgentes, rAtraso] = await Promise.all([
+      abrirAbaEConsultarUmaVez(abaAtual.url, { valorSituacao, urgente: false, diasSituacao: null }),
+      abrirAbaEConsultarUmaVez(abaAtual.url, { valorSituacao, urgente: true, diasSituacao: null }),
+      abrirAbaEConsultarUmaVez(abaAtual.url, { valorSituacao, urgente: false, diasSituacao: DIAS_LIMITE_ATRASO }),
+    ]);
 
-    notificar(`Consultando ${nomeSituacao}: urgentes...`);
-    r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      valorSituacao,
-      urgente: true,
-      diasSituacao: null,
-    });
-    bloco.urgentes = r.contagem;
-    if (r.erro) bloco.erros.push(`urgentes: ${r.erro}`);
-
-    notificar(`Consultando ${nomeSituacao}: há mais de ${DIAS_LIMITE_ATRASO} dias...`);
-    r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      valorSituacao,
-      urgente: false,
-      diasSituacao: DIAS_LIMITE_ATRASO,
-    });
-    bloco.mais30Dias = r.contagem;
-    if (r.erro) bloco.erros.push(`+${DIAS_LIMITE_ATRASO} dias: ${r.erro}`);
+    bloco.total = rTotal.contagem;
+    if (rTotal.erro) bloco.erros.push(`total: ${rTotal.erro}`);
+    bloco.urgentes = rUrgentes.contagem;
+    if (rUrgentes.erro) bloco.erros.push(`urgentes: ${rUrgentes.erro}`);
+    bloco.mais30Dias = rAtraso.contagem;
+    if (rAtraso.erro) bloco.erros.push(`+${DIAS_LIMITE_ATRASO} dias: ${rAtraso.erro}`);
 
     return bloco;
   }
 
-  const despacho = await consultarBloco("MOVIMENTO-AGUARDA DESPACHO", VALOR_SITUACAO_AGUARDA_DESPACHO);
-  const sentenca = await consultarBloco("MOVIMENTO-AGUARDA SENTENÇA", VALOR_SITUACAO_AGUARDA_SENTENCA);
+  notificar("Consultando conclusos, sem movimentação, ativos e suspensos...");
+  const [despacho, sentenca, resultadosSemMovimentacao, rAtivos, rSuspensos] = await Promise.all([
+    consultarBloco("MOVIMENTO-AGUARDA DESPACHO", VALOR_SITUACAO_AGUARDA_DESPACHO),
+    consultarBloco("MOVIMENTO-AGUARDA SENTENÇA", VALOR_SITUACAO_AGUARDA_SENTENCA),
+    Promise.all(
+      FAIXAS_DIAS_SEM_MOVIMENTACAO.map((dias) =>
+        abrirAbaEConsultarUmaVez(abaAtual.url, {
+          valorSituacao: null,
+          urgente: false,
+          diasSituacao: null,
+          diasSemMovimentacao: dias,
+        })
+      )
+    ),
+    // Relação de processos ativos e suspensos/sobrestados - so' o total
+    // (sem "relação de processos"), na unidade atual (sem filtro de
+    // Órgão/Juízo: esse relatório roda sempre na unidade ja' habilitada
+    // no perfil logado).
+    abrirAbaEConsultarUmaVez(abaAtual.url, { valorSituacao: null, urgente: false, diasSituacao: null }),
+    abrirAbaEConsultarUmaVez(abaAtual.url, { grupoSituacao: "S", urgente: false, diasSituacao: null }),
+  ]);
 
   const semMovimentacao = { erros: [] };
-  for (const dias of FAIXAS_DIAS_SEM_MOVIMENTACAO) {
-    notificar(`Consultando processos sem movimentação há mais de ${dias} dias...`);
-    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      valorSituacao: null,
-      urgente: false,
-      diasSituacao: null,
-      diasSemMovimentacao: dias,
-    });
+  FAIXAS_DIAS_SEM_MOVIMENTACAO.forEach((dias, indice) => {
+    const r = resultadosSemMovimentacao[indice];
     semMovimentacao[`dias${dias}`] = r.contagem;
     if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
-  }
+  });
 
-  // Relação de processos ativos e suspensos/sobrestados - so' o total
-  // (sem "relação de processos"), na unidade atual (sem filtro de
-  // Órgão/Juízo: esse relatório roda sempre na unidade ja' habilitada no
-  // perfil logado).
-  const processosAtivos = { total: null, erros: [] };
-  notificar("Consultando a relação de processos ativos...");
-  {
-    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      valorSituacao: null,
-      urgente: false,
-      diasSituacao: null,
-    });
-    processosAtivos.total = r.contagem;
-    if (r.erro) processosAtivos.erros.push(r.erro);
-  }
-
-  const suspensos = { total: null, erros: [] };
-  notificar("Consultando suspensos/sobrestados...");
-  {
-    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      grupoSituacao: "S",
-      urgente: false,
-      diasSituacao: null,
-    });
-    suspensos.total = r.contagem;
-    if (r.erro) suspensos.erros.push(r.erro);
-  }
+  const processosAtivos = { total: rAtivos.contagem, erros: rAtivos.erro ? [rAtivos.erro] : [] };
+  const suspensos = { total: rSuspensos.contagem, erros: rSuspensos.erro ? [rSuspensos.erro] : [] };
 
   notificar("Finalizando...");
   return { despacho, sentenca, semMovimentacao, processosAtivos, suspensos };
@@ -2903,39 +2935,33 @@ const DIAS_PANORAMA_SEM_MOVIMENTACAO = 90;
 async function consultarBlocoUnidade(urlBase, valorOrgaoJuizo, nomeSituacao, valorSituacao, notificar) {
   const bloco = { total: null, urgentes: null, naoUrgentes: null, mais90Dias: null, erros: [] };
 
-  notificar(`Consultando ${nomeSituacao}: total...`);
-  let r = await abrirAbaEConsultarUmaVez(urlBase, {
-    valorSituacao,
-    urgente: false,
-    diasSituacao: null,
-    valorOrgaoJuizo,
-  });
-  bloco.total = r.contagem;
-  if (r.erro) bloco.erros.push(`total: ${r.erro}`);
+  // As 3 consultas sao independentes entre si (cada uma abre sua propria
+  // aba oculta) - rodam em PARALELO via Promise.all em vez de uma de cada
+  // vez, respeitando o semaforo global de abas ocultas (LIMITE_ABAS_SIMULTANEAS).
+  notificar(`Consultando ${nomeSituacao}: total, urgentes e atraso...`);
+  const [rTotal, rUrgentes, rAtraso] = await Promise.all([
+    abrirAbaEConsultarUmaVez(urlBase, { valorSituacao, urgente: false, diasSituacao: null, valorOrgaoJuizo }),
+    abrirAbaEConsultarUmaVez(urlBase, { valorSituacao, urgente: true, diasSituacao: null, valorOrgaoJuizo }),
+    abrirAbaEConsultarUmaVez(urlBase, {
+      valorSituacao,
+      urgente: false,
+      diasSituacao: DIAS_LIMITE_ATRASO_UNIDADE,
+      valorOrgaoJuizo,
+    }),
+  ]);
 
-  notificar(`Consultando ${nomeSituacao}: urgentes...`);
-  r = await abrirAbaEConsultarUmaVez(urlBase, {
-    valorSituacao,
-    urgente: true,
-    diasSituacao: null,
-    valorOrgaoJuizo,
-  });
-  bloco.urgentes = r.contagem;
-  if (r.erro) bloco.erros.push(`urgentes: ${r.erro}`);
+  bloco.total = rTotal.contagem;
+  if (rTotal.erro) bloco.erros.push(`total: ${rTotal.erro}`);
+
+  bloco.urgentes = rUrgentes.contagem;
+  if (rUrgentes.erro) bloco.erros.push(`urgentes: ${rUrgentes.erro}`);
 
   if (bloco.total != null && bloco.urgentes != null) {
     bloco.naoUrgentes = Math.max(0, bloco.total - bloco.urgentes);
   }
 
-  notificar(`Consultando ${nomeSituacao}: há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias...`);
-  r = await abrirAbaEConsultarUmaVez(urlBase, {
-    valorSituacao,
-    urgente: false,
-    diasSituacao: DIAS_LIMITE_ATRASO_UNIDADE,
-    valorOrgaoJuizo,
-  });
-  bloco.mais90Dias = r.contagem;
-  if (r.erro) bloco.erros.push(`+${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${r.erro}`);
+  bloco.mais90Dias = rAtraso.contagem;
+  if (rAtraso.erro) bloco.erros.push(`+${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${rAtraso.erro}`);
 
   return bloco;
 }
@@ -3089,6 +3115,7 @@ async function extrairLinhasRemessasJuizesLeigosNaPagina() {
 async function consultarRemessasJuizesLeigosUmaVez(urlBase, valorUnidade) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -3134,6 +3161,7 @@ async function consultarRemessasJuizesLeigosUmaVez(urlBase, valorUnidade) {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -3349,28 +3377,14 @@ function paraDataOrdenavel(texto) {
 // Autuação do mais antigo para o mais novo. Casa cada campo pelo texto
 // do cabecalho (nao pela posicao), para nao depender da ordem exata das
 // colunas na tela.
-async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
-  const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
-  const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
-  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
-  const idxClasse = indiceColunaPorCabecalho(tabela.cabecalhos, /classe/i);
-  const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
-
-  const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
-  const itens = tabela.linhas
-    .map((linha) => {
-      const autuacao = valorDe(linha, idxAutuacao);
-      return {
-        processo: valorDe(linha, idxProcesso),
-        autuacao,
-        situacao: valorDe(linha, idxSituacao),
-        classe: valorDe(linha, idxClasse),
-        ultimoEvento: valorDe(linha, idxEvento),
-        autuacaoOrdenavel: paraDataOrdenavel(autuacao),
-      };
-    })
-    .sort((a, b) => a.autuacaoOrdenavel - b.autuacaoOrdenavel);
-
+// Gerador generico de PDF (A4 RETRATO) para uma "relação de processos"
+// curada: recebe os ITENS ja' prontos (um objeto por linha, com as
+// chaves batendo com "campo" de cada coluna) e as definicoes de coluna
+// (titulo + largura em pontos), desenha titulo + tabela com cabecalho
+// repetido/zebrado, igual as demais tabelas desta extensao - reaproveitado
+// por "construirPdfProcessosAtivos" e "construirPdfSuspensos" para nao
+// duplicar a logica de desenho.
+async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
   const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -3381,14 +3395,6 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
   const larguraUtil = largura - margem * 2;
   const TAMANHO_FONTE = 8.5;
   const ALTURA_LINHA = TAMANHO_FONTE * 1.35;
-
-  const colunas = [
-    { titulo: "Nº do Processo", largura: larguraUtil * 0.23, campo: "processo" },
-    { titulo: "Data da Autuação", largura: larguraUtil * 0.15, campo: "autuacao" },
-    { titulo: "Situação", largura: larguraUtil * 0.22, campo: "situacao" },
-    { titulo: "Classe", largura: larguraUtil * 0.2, campo: "classe" },
-    { titulo: "Último Evento", largura: larguraUtil * 0.2, campo: "ultimoEvento" },
-  ];
 
   let pagina = null;
   let y = 0;
@@ -3427,13 +3433,8 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
 
   novaPagina();
 
-  const tituloAtivos = quebrarLinhas(
-    `Processos ativos da unidade "${sanitizarTextoPdf(nomeUnidade)}" — ${itens.length} processo(s), do mais antigo ao mais novo`,
-    fonteNegrito,
-    13,
-    larguraUtil
-  );
-  for (const linhaTitulo of tituloAtivos) {
+  const linhasTitulo = quebrarLinhas(sanitizarTextoPdf(tituloDocumento), fonteNegrito, 13, larguraUtil);
+  for (const linhaTitulo of linhasTitulo) {
     pagina.drawText(linhaTitulo, { x: margem, y, size: 13, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
     y -= 17;
   }
@@ -3483,6 +3484,84 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
   desenharRodapePaginas(pdf, fonteNormal, largura, margem);
 
   return pdf.save();
+}
+
+// Monta o PDF (A4 RETRATO) da relação de processos ativos: so' os 5
+// campos pedidos (Nº do Processo, Data da Autuação, Situação, Classe e
+// Último Evento - o "#tblProcessoLista" real traz mais colunas, como
+// Sigilo e Localizador, que ficam de fora aqui), ordenados pela Data de
+// Autuação do mais antigo para o mais novo. Casa cada campo pelo texto
+// do cabecalho (nao pela posicao), para nao depender da ordem exata das
+// colunas na tela.
+async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
+  const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
+  const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxClasse = indiceColunaPorCabecalho(tabela.cabecalhos, /classe/i);
+  const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
+
+  const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
+  const itens = tabela.linhas
+    .map((linha) => {
+      const autuacao = valorDe(linha, idxAutuacao);
+      return {
+        processo: valorDe(linha, idxProcesso),
+        autuacao,
+        situacao: valorDe(linha, idxSituacao),
+        classe: valorDe(linha, idxClasse),
+        ultimoEvento: valorDe(linha, idxEvento),
+        autuacaoOrdenavel: paraDataOrdenavel(autuacao),
+      };
+    })
+    .sort((a, b) => a.autuacaoOrdenavel - b.autuacaoOrdenavel);
+
+  const colunas = [
+    { titulo: "Nº do Processo", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.23, campo: "processo" },
+    { titulo: "Data da Autuação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.15, campo: "autuacao" },
+    { titulo: "Situação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.22, campo: "situacao" },
+    { titulo: "Classe", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.2, campo: "classe" },
+    { titulo: "Último Evento", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.2, campo: "ultimoEvento" },
+  ];
+
+  return construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Processos ativos da unidade "${nomeUnidade}" — ${itens.length} processo(s), do mais antigo ao mais novo`
+  );
+}
+
+// Monta o PDF (A4 RETRATO) da relação de suspensos/sobrestados: so' os 4
+// campos pedidos (Nº do Processo, Data da Autuação, Situação e
+// Localizador - a tabela real do "#tblProcessoLista" traz mais colunas,
+// como Sigilo e Classe, que ficam de fora aqui). Mesma tecnica de casar
+// pelo texto do cabecalho usada em "construirPdfProcessosAtivos".
+async function construirPdfSuspensos(tabela, nomeUnidade) {
+  const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
+  const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
+
+  const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
+  const itens = tabela.linhas.map((linha) => ({
+    processo: valorDe(linha, idxProcesso),
+    autuacao: valorDe(linha, idxAutuacao),
+    situacao: valorDe(linha, idxSituacao),
+    localizador: valorDe(linha, idxLocalizador),
+  }));
+
+  const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+  const colunas = [
+    { titulo: "Nº do Processo", largura: larguraUtil * 0.28, campo: "processo" },
+    { titulo: "Data da Autuação", largura: larguraUtil * 0.18, campo: "autuacao" },
+    { titulo: "Situação", largura: larguraUtil * 0.27, campo: "situacao" },
+    { titulo: "Localizador", largura: larguraUtil * 0.27, campo: "localizador" },
+  ];
+
+  return construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Suspensos/sobrestados da unidade "${nomeUnidade}" — ${itens.length} processo(s)`
+  );
 }
 
 // Le' os nomes dos Localizadores de uma unidade - DIFERENTE do resto do
@@ -3639,27 +3718,41 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     }
   }
 
-  const despacho = opcoesFinais.conclusosDecisao
-    ? await consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para decisão", VALOR_SITUACAO_AGUARDA_DESPACHO, notificar)
-    : blocoVazio();
-  const sentenca = opcoesFinais.conclusosSentenca
-    ? await consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para sentença", VALOR_SITUACAO_AGUARDA_SENTENCA, notificar)
-    : blocoVazio();
+  // Despacho e sentença sao blocos independentes entre si (cada um com
+  // suas proprias 3 consultas, ja' paralelizadas dentro de
+  // "consultarBlocoUnidade") - rodam em paralelo um com o outro tambem,
+  // sempre respeitando o semaforo global de abas ocultas.
+  notificar("Consultando conclusos para decisão e para sentença...");
+  const [despacho, sentenca] = await Promise.all([
+    opcoesFinais.conclusosDecisao
+      ? consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para decisão", VALOR_SITUACAO_AGUARDA_DESPACHO, notificar)
+      : Promise.resolve(blocoVazio()),
+    opcoesFinais.conclusosSentenca
+      ? consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para sentença", VALOR_SITUACAO_AGUARDA_SENTENCA, notificar)
+      : Promise.resolve(blocoVazio()),
+  ]);
 
   const semMovimentacao = { erros: [] };
   if (opcoesFinais.semMovimentacao) {
-    for (const dias of FAIXAS_DIAS_SEM_MOVIMENTACAO) {
-      notificar(`Consultando processos sem movimentação há mais de ${dias} dias...`);
-      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-        valorSituacao: null,
-        urgente: false,
-        diasSituacao: null,
-        diasSemMovimentacao: dias,
-        valorOrgaoJuizo: valorUnidade,
-      });
+    notificar("Consultando processos sem movimentação (30/90/120 dias)...");
+    // As 3 faixas de dias sao consultas independentes - em paralelo em
+    // vez de uma de cada vez.
+    const resultadosPorFaixa = await Promise.all(
+      FAIXAS_DIAS_SEM_MOVIMENTACAO.map((dias) =>
+        abrirAbaEConsultarUmaVez(abaAtual.url, {
+          valorSituacao: null,
+          urgente: false,
+          diasSituacao: null,
+          diasSemMovimentacao: dias,
+          valorOrgaoJuizo: valorUnidade,
+        })
+      )
+    );
+    FAIXAS_DIAS_SEM_MOVIMENTACAO.forEach((dias, indice) => {
+      const r = resultadosPorFaixa[indice];
       semMovimentacao[`dias${dias}`] = r.contagem;
       if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
-    }
+    });
   }
 
   // Remessas aos juízes leigos: tela própria (menu "Relatórios" >
@@ -3770,13 +3863,6 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     avisos.push(`Remessas aos juízes leigos: ${remessasJuizesLeigos.erros.join(" | ")}`);
   }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
-  if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
-    avisos.push(
-      "Localizadores: a lista abaixo traz só os nomes - por enquanto, a única forma de obter o total de " +
-        'processos de cada localizador é se habilitar na própria unidade e usar a ferramenta "Localizadores ' +
-        'do Órgão" do painel.'
-    );
-  }
 
   const bytesCapa = await construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoesResumo, avisos);
   const pdfCapa = await PDFDocument.load(bytesCapa);
@@ -3798,11 +3884,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
   }
   if (opcoesFinais.suspensos && suspensos.tabela && suspensos.tabela.linhas.length > 0) {
-    const bytesTabela = await construirPdfTabelaDinamica(
-      suspensos.tabela.cabecalhos,
-      suspensos.tabela.linhas,
-      `Suspensos/sobrestados da unidade "${nomeUnidade}" — ${suspensos.tabela.linhas.length} processo(s)`
-    );
+    const bytesTabela = await construirPdfSuspensos(suspensos.tabela, nomeUnidade);
     const pdfTabela = await PDFDocument.load(bytesTabela);
     const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
@@ -4306,6 +4388,7 @@ async function coletarTodasPaginasInfraTable(tabId, funcRaspar) {
 async function abrirAbaEColetarLocalizadores(urlBase) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -4333,6 +4416,7 @@ async function abrirAbaEColetarLocalizadores(urlBase) {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -4345,6 +4429,7 @@ async function abrirAbaEColetarLocalizadores(urlBase) {
 async function abrirAbaEColetarProcessosDoLocalizador(urlProcessos) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlProcessos, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -4356,6 +4441,7 @@ async function abrirAbaEColetarProcessosDoLocalizador(urlProcessos) {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -4761,7 +4847,33 @@ async function construirPaginaListaLocalizadores(nomeUnidade, localizadores) {
     });
     y -= 16;
   }
-  y -= 4;
+  y -= 2;
+
+  // Subtitulo discreto (sem destaque, fonte pequena e cinza) explicando a
+  // limitação desta lista - antes ficava misturado na seção "Avisos" no
+  // início do relatório; agora fica junto da própria seção que ele
+  // explica, sem chamar mais atenção do que o necessário.
+  const subtituloLocalizadores = quebrarLinhas(
+    "A lista abaixo traz só os nomes - por enquanto, a única forma de obter o total de processos de cada " +
+      'localizador é se habilitar na própria unidade e usar a ferramenta "Localizadores do Órgão" do painel.',
+    fonteNormal,
+    8.5,
+    larguraUtil
+  );
+  for (const linhaSubtitulo of subtituloLocalizadores) {
+    if (y - 12 < PDF_ALTURA_RODAPE + margem) {
+      ({ pagina, y } = novaPagina());
+    }
+    pagina.drawText(linhaSubtitulo, {
+      x: margem,
+      y,
+      size: 8.5,
+      font: fonteNormal,
+      color: COR_CINZA_TEXTO,
+    });
+    y -= 12;
+  }
+  y -= 6;
 
   const alturaLinha = 12;
   // Um localizador por linha, com um marcador "-" e recuo pendurado
@@ -5028,6 +5140,7 @@ async function exportarProcessosDoLocalizador(nomeLocalizador, urlProcessos, for
 async function abrirAbaEListarDocumentosDoProcesso(urlProcesso) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlProcesso, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -5045,6 +5158,7 @@ async function abrirAbaEListarDocumentosDoProcesso(urlProcesso) {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -5156,6 +5270,7 @@ function clicarLinkAutomatizarLocalizadoresNaPagina() {
 async function abrirAbaEListarRegrasAutomacao(urlBase) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -5192,6 +5307,7 @@ async function abrirAbaEListarRegrasAutomacao(urlBase) {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 

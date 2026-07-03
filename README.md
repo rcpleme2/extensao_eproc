@@ -434,29 +434,14 @@ especificamente).
 Quando o perfil ativo (select de perfil no cabeçalho do eproc,
 `#selInfraUnidades`) é **"CORREGEDORIA"**, um cartão exclusivo
 **"Corregedoria"** aparece no painel (fica oculto para qualquer outro
-perfil), com selo e borda destacada indicando que é condicional. Ele
-oferece **dois relatórios independentes**, com botões e PDFs separados:
+perfil), com selo e borda destacada indicando que é condicional. Por
+enquanto ele só mostra o **Relatório da Unidade** (ver abaixo).
 
-### Relatório Geral (todas as unidades)
-
-Botão direto, sem precisar escolher unidade. Gera
-`relatorio_geral_corregedoria_<data>.pdf` com capa institucional e duas
-tabelas panorâmicas, extraídas de telas próprias do menu lateral:
-
-- **Processos sem Movimentação N Dias (todas as varas)**
-  (`acao=relatorio_sem_movimentacao_listar_geral`), preenchendo 90 dias —
-  visão comparativa de todas as unidades de uma vez.
-- **Relatório de Atuação Conciliador/Juiz Leigo**
-  (`acao=relatorio_atuacao_auxiliar_justica`), sem filtro de unidade.
-
-Como essas duas telas ainda não foram calibradas contra uma amostra HTML
-real (diferente das demais), a extração usa um leitor genérico de
-tabelas (best-effort): preenche o campo de dias se existir, clica em
-"Consultar" se existir, e lê o resultado primeiro pela API do DataTables
-e senão pela maior tabela HTML com dados, com logs `[eproc]` detalhados.
-Se a detecção automática falhar em alguma das telas, o PDF sai com um
-aviso no lugar — nesse caso, envie o HTML da tela para calibrar a
-extração.
+> **Relatório Geral (todas as unidades)** — desativado temporariamente.
+> O botão, a área de progresso e toda a lógica (`exportarRelatorioPanoramico`
+> em `background.js`) continuam no código, só comentados/ocultos em
+> `popup.html`/`popup.js` — a ideia é melhorar esse relatório antes de
+> voltar a expô-lo no painel.
 
 ### Relatório da Unidade
 
@@ -514,28 +499,35 @@ extração.
      "SOBRESTADO CONVÊNIO: 3") — as dezenas de variantes zeradas ficam de
      fora, para não poluir o relatório. O **Total** vem por último,
      depois de todos os processos individuais listados acima. Além do
-     total, o relatório também traz a **relação de processos** (linhas
-     reais do resultado, não só a contagem) numa tabela em página à
-     parte. Esse detalhamento é a parte mais demorada do relatório (uma
+     total, o relatório também traz a **relação de processos**, em
+     **página retrato**, com só os campos **Nº do Processo, Data da
+     Autuação, Situação e Localizador** (a tabela real do eproc traz mais
+     colunas, como Sigilo e Classe, que ficam de fora aqui) — casados
+     pelo texto do cabeçalho, igual à relação de processos ativos. Esse
+     detalhamento por situação é a parte mais demorada do relatório (uma
      consulta por situação), então roda **em paralelo**: a lista de ~40
-     situações do grupo é dividida em **5 blocos** (de ~8 cada) e cada
-     bloco é consultado numa **aba oculta própria, simultaneamente** às
-     demais (em vez de uma única aba consultando as ~40 situações uma de
-     cada vez) — na prática, ~5x mais rápido que o modelo sequencial
-     anterior. Cada bloco tem um orçamento interno de 20s (verificado
-     ENTRE uma situação e outra, preservando o que já foi apurado até
-     ali) e um timeout externo de 28s como rede de segurança; se algum
-     bloco não terminar a tempo (ou falhar por qualquer motivo), o
-     relatório sai com o que os demais blocos conseguiram apurar e um
-     aviso discreto do tipo "Consulta em paralelo (5 bloco(s)
-     simultâneos) não concluiu a tempo - N de 40 situação(ões) não
-     consultada(s)." — o **Total geral de suspensos** (que vem de uma
-     consulta separada, à parte) nunca é afetado por esse limite, só o
-     detalhamento por situação específica fica incompleto.
+     situações do grupo é dividida em **9 blocos** (o máximo de abas
+     ocultas simultâneas permitido, ver "Limite de abas ocultas
+     simultâneas" abaixo) e cada bloco é consultado numa **aba oculta
+     própria, simultaneamente** às demais (em vez de uma única aba
+     consultando as ~40 situações uma de cada vez). Cada bloco tem um
+     orçamento interno de 60s (verificado ENTRE uma situação e outra,
+     preservando o que já foi apurado até ali) e um timeout externo de
+     75s como rede de segurança; se algum bloco não terminar a tempo (ou
+     falhar por qualquer motivo), o relatório sai com o que os demais
+     blocos conseguiram apurar e um aviso discreto do tipo "Consulta em
+     paralelo (9 bloco(s) simultâneos) não concluiu a tempo - N de 40
+     situação(ões) não consultada(s)." — o **Total geral de suspensos**
+     (que vem de uma consulta separada, à parte) nunca é afetado por
+     esse limite, só o detalhamento por situação específica fica
+     incompleto.
    - Conclusos para decisão e para sentença: Urgentes, Não urgentes
      (calculado como Total − Urgentes, sem precisar de uma consulta a
-     mais), Aguardando há mais de 90 dias e, **por último, o Total**.
-   - Processos sem movimentação há mais de 30, 90 e 120 dias.
+     mais), Aguardando há mais de 90 dias e, **por último, o Total**. As 3
+     sub-consultas de cada bloco (total/urgentes/atraso), e os dois
+     blocos (decisão e sentença) entre si, rodam **em paralelo**.
+   - Processos sem movimentação há mais de 30, 90 e 120 dias — as 3
+     faixas também consultadas **em paralelo**.
    - **Remessas aos juízes leigos**: extraída da tela própria do menu
      lateral "Relatórios → Relatório de remessas em aberto"
      (`acao=relatorio_remessas_em_aberto/listar`), preenchendo o filtro
@@ -553,9 +545,29 @@ extração.
      e o motivo da prioridade **entre parênteses** logo depois (ex.:
      "0000001-11.2024.8.16.0001 (Idoso)"), com uma legenda no topo da
      página explicando a cor sempre que houver ao menos um caso.
-   - O **nome de cada Localizador** da unidade, em ordem alfabética
-     (**sem** o total de processos — ver aviso abaixo), em páginas
-     próprias no **final do PDF**, depois de todas as demais seções.
+   - O **nome de cada Localizador** da unidade, em ordem alfabética, em
+     páginas próprias no **final do PDF**, depois de todas as demais
+     seções. Logo abaixo do título dessa seção, um **subtítulo discreto**
+     (fonte pequena, sem destaque) avisa que a lista traz só os nomes —
+     por enquanto, a única forma de obter o total de processos de cada
+     localizador é se habilitar na própria unidade e usar a ferramenta
+     "Localizadores do Órgão" do painel. Essa observação fica junto da
+     seção que ela explica (não mais misturada com os "Avisos" gerais no
+     início do relatório).
+
+   **Limite de abas ocultas simultâneas**: todo o Relatório da Unidade
+   (e as demais rotinas desta extensão que abrem abas ocultas - Localizadores
+   do Órgão, Busca específica de localizadores, Regras de Automação etc.)
+   compartilha um **semáforo global** que nunca deixa mais de **9 abas
+   ocultas** abertas ao mesmo tempo - o excesso espera na fila, na ordem
+   de chegada, e ganha um "lugar" assim que uma aba anterior termina e
+   fecha. Esse limite existe para não sobrecarregar o navegador nem fazer
+   o próprio eproc atrasar/bloquear por excesso de requisições simultâneas
+   da mesma sessão. Graças a esse limite compartilhado, várias partes do
+   relatório (ex.: conclusos para decisão e para sentença, cada uma com
+   suas 3 sub-consultas, mais as 3 faixas de sem movimentação) podem
+   disparar suas consultas **todas ao mesmo tempo** sem risco de abrir
+   dezenas de abas de uma vez - o semáforo escalona automaticamente.
 
    As "relações de processos" (ativos e suspensos) usam a API do
    DataTables só para **mostrar tudo de uma vez** (sem paginação) na
@@ -605,17 +617,16 @@ extração.
    "-" e recuo pendurado para nomes longos que precisem quebrar em mais
    de uma linha) em página(s) retrato próprias, no final do PDF — bem
    mais fácil de escanear visualmente do que um parágrafo corrido com
-   todos os nomes separados por vírgula. A relação de **processos ativos**
-   usa página **retrato**, com as 5 colunas curadas descritas acima. A
-   relação de **suspensos/sobrestados** usa página virada (paisagem), com
-   colunas dinâmicas de acordo com o que a própria tela do eproc mostrar
-   (até 8 colunas). Já a relação de remessas aos juízes leigos usa página
-   **retrato**, agrupada por juiz leigo (ver acima), com destaque em
-   vermelho para prioridades legais. Título, cabeçalho e zebrado seguem a
-   mesma identidade visual em todas as tabelas. Essa mesma identidade
-   visual também vale para os PDFs de Localizadores/Processos por
-   Localizador exportados fora do painel da Corregedoria, já que
-   reaproveitam o mesmo gerador de
+   todos os nomes separados por vírgula. As relações de **processos
+   ativos** e de **suspensos/sobrestados** usam página **retrato**, com
+   colunas curadas (casadas pelo texto do cabeçalho, não pela posição, e
+   por isso imunes a mudanças na ordem das colunas reais da tela). Já a
+   relação de remessas aos juízes leigos usa página **retrato**, agrupada
+   por juiz leigo (ver acima), com destaque em vermelho para prioridades
+   legais. Título, cabeçalho e zebrado seguem a mesma identidade visual em
+   todas as tabelas. Essa mesma identidade visual também vale para os
+   PDFs de Localizadores/Processos por Localizador exportados fora do
+   painel da Corregedoria, já que reaproveitam o mesmo gerador de
    tabela.
 
    A extração dos Localizadores **não** usa a tela "Localizadores do

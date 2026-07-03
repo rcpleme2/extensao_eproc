@@ -436,9 +436,12 @@ const areaBtnExportarGerencial = document.getElementById("area-btn-exportar-gere
 const btnExportarRelatorioGerencial = document.getElementById("btn-exportar-relatorio-gerencial");
 const areaProgressoRelatorioGerencial = document.getElementById("area-progresso-relatorio-gerencial");
 const textoProgressoRelatorioGerencial = document.getElementById("texto-progresso-relatorio-gerencial");
-const btnRelatorioPanoramico = document.getElementById("btn-relatorio-panoramico");
-const areaProgressoPanoramico = document.getElementById("area-progresso-panoramico");
-const textoProgressoPanoramico = document.getElementById("texto-progresso-panoramico");
+// Relatório Geral (panorama) desativado por enquanto - ver comentário em
+// popup.html no lugar do botão. Refs comentadas junto para não quebrar
+// (document.getElementById de um id que não existe mais no DOM).
+// const btnRelatorioPanoramico = document.getElementById("btn-relatorio-panoramico");
+// const areaProgressoPanoramico = document.getElementById("area-progresso-panoramico");
+// const textoProgressoPanoramico = document.getElementById("texto-progresso-panoramico");
 const areaErrosCorregedoria = document.getElementById("area-erros-corregedoria");
 
 // A unidade escolhida no dropdown (nome + valor do filtro Órgão/Juízo) -
@@ -665,32 +668,32 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
   }
 });
 
-// Relatório Geral da Corregedoria (panorama de TODAS as unidades) - nao
-// exige unidade escolhida, roda direto (diferente do Relatório da
-// Unidade acima).
-btnRelatorioPanoramico.addEventListener("click", async () => {
-  areaErrosCorregedoria.hidden = true;
-  btnRelatorioPanoramico.disabled = true;
-  areaProgressoPanoramico.hidden = false;
-  textoProgressoPanoramico.textContent = "Iniciando...";
-  setStatusCorregedoria("Gerando o Relatório Geral (todas as unidades) em segundo plano...");
-
-  // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
-  // comecou; o resultado final chega pela mensagem
-  // RELATORIO_PANORAMICO_FINALIZADO.
-  try {
-    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_RELATORIO_PANORAMICO" });
-    if (!resposta || !resposta.ok) {
-      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
-    }
-  } catch (e) {
-    setStatusCorregedoria("Erro ao gerar o relatório geral.", "erro");
-    areaErrosCorregedoria.hidden = false;
-    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
-    areaProgressoPanoramico.hidden = true;
-    btnRelatorioPanoramico.disabled = false;
-  }
-});
+// Relatório Geral da Corregedoria (panorama de TODAS as unidades) -
+// desativado por enquanto (precisa de melhorias antes de voltar). Handler
+// inteiro comentado junto com o botão em popup.html.
+// btnRelatorioPanoramico.addEventListener("click", async () => {
+//   areaErrosCorregedoria.hidden = true;
+//   btnRelatorioPanoramico.disabled = true;
+//   areaProgressoPanoramico.hidden = false;
+//   textoProgressoPanoramico.textContent = "Iniciando...";
+//   setStatusCorregedoria("Gerando o Relatório Geral (todas as unidades) em segundo plano...");
+//
+//   // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
+//   // comecou; o resultado final chega pela mensagem
+//   // RELATORIO_PANORAMICO_FINALIZADO.
+//   try {
+//     const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_RELATORIO_PANORAMICO" });
+//     if (!resposta || !resposta.ok) {
+//       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
+//     }
+//   } catch (e) {
+//     setStatusCorregedoria("Erro ao gerar o relatório geral.", "erro");
+//     areaErrosCorregedoria.hidden = false;
+//     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+//     areaProgressoPanoramico.hidden = true;
+//     btnRelatorioPanoramico.disabled = false;
+//   }
+// });
 
 chrome.tabs.onActivated.addListener(atualizarCardCorregedoria);
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -870,30 +873,34 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     }
   }
 
-  if (mensagem.tipo === "PROGRESSO_RELATORIO_PANORAMICO") {
-    textoProgressoPanoramico.textContent = mensagem.texto || "Processando...";
-    setStatusCorregedoria(mensagem.texto || "Processando...");
-  }
-
-  if (mensagem.tipo === "RELATORIO_PANORAMICO_FINALIZADO") {
-    areaProgressoPanoramico.hidden = true;
-    btnRelatorioPanoramico.disabled = false;
-
-    if (mensagem.ok) {
-      const resultado = mensagem.resultado || {};
-      setStatusCorregedoria(
-        `Concluído! Relatório Geral salvo em Downloads/eproc/ (${
-          resultado.totalSemMovimentacao || 0
-        } linha(s) de sem movimentação, ${resultado.totalAtuacao || 0} linha(s) de atuação).`,
-        "ok"
-      );
-    } else {
-      setStatusCorregedoria("Erro ao gerar o relatório geral.", "erro");
-      areaErrosCorregedoria.hidden = false;
-      areaErrosCorregedoria.textContent =
-        mensagem.erro || "Falha desconhecida ao gerar o relatório geral.";
-    }
-  }
+  // Relatório Geral (panorama) desativado por enquanto - ver comentário
+  // acima do botão em popup.html. Como nada mais envia
+  // "EXPORTAR_RELATORIO_PANORAMICO", estas mensagens nunca chegam, mas
+  // ficam comentadas junto por clareza/consistência.
+  // if (mensagem.tipo === "PROGRESSO_RELATORIO_PANORAMICO") {
+  //   textoProgressoPanoramico.textContent = mensagem.texto || "Processando...";
+  //   setStatusCorregedoria(mensagem.texto || "Processando...");
+  // }
+  //
+  // if (mensagem.tipo === "RELATORIO_PANORAMICO_FINALIZADO") {
+  //   areaProgressoPanoramico.hidden = true;
+  //   btnRelatorioPanoramico.disabled = false;
+  //
+  //   if (mensagem.ok) {
+  //     const resultado = mensagem.resultado || {};
+  //     setStatusCorregedoria(
+  //       `Concluído! Relatório Geral salvo em Downloads/eproc/ (${
+  //         resultado.totalSemMovimentacao || 0
+  //       } linha(s) de sem movimentação, ${resultado.totalAtuacao || 0} linha(s) de atuação).`,
+  //       "ok"
+  //     );
+  //   } else {
+  //     setStatusCorregedoria("Erro ao gerar o relatório geral.", "erro");
+  //     areaErrosCorregedoria.hidden = false;
+  //     areaErrosCorregedoria.textContent =
+  //       mensagem.erro || "Falha desconhecida ao gerar o relatório geral.";
+  //   }
+  // }
 });
 
 const areaRegrasInfo = document.getElementById("area-regras-info");
