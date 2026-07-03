@@ -473,13 +473,15 @@ extração (mesmo processo usado nas Remessas em Aberto).
    busca — até que o botão **"Listar todos"** (companion do `<select
    id="selLocalizadorPrincipal">` por baixo do Tagify) seja clicado; a
    extensão clica nele automaticamente antes de ler ou selecionar
-   qualquer opção do campo. A extensão lê essa lista de sugestões e, um
-   de cada vez, seleciona cada localizador no campo e roda a consulta,
-   anotando o total de processos do resultado — uma aba nova por
-   localizador, seguindo o mesmo padrão de estabilidade já usado para o
-   campo Tagify de "Informação complementar" (reaproveitar a mesma aba
-   para duas interações seguidas com esse tipo de campo se mostrou
-   instável nos testes anteriores).
+   qualquer opção do campo. Cada item do dropdown já vem com o total de
+   processos junto do nome (ex.: "GABINETE (42)") — a extensão lê esse
+   número direto do texto do item, **sem precisar abrir uma aba nem
+   rodar consulta nenhuma** para a maioria dos localizadores. Só cai para
+   o modo antigo (abrir uma aba nova, selecionar aquele localizador
+   específico no campo e rodar a consulta, um de cada vez — mesmo padrão
+   de estabilidade já usado para o campo Tagify de "Informação
+   complementar") nos itens em que esse número não vier junto no texto
+   do dropdown, o que deixa a extração bem mais rápida no caso comum.
 
    As Remessas em Aberto vêm de uma tela separada, acessada pelo menu
    lateral **Relatórios → Relatório de remessas em aberto**

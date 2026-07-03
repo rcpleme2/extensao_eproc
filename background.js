@@ -1639,10 +1639,28 @@ function listarLocalizadoresNoFiltroRelatorioGeralNaPagina() {
         return { opcoes: [], erro: 'Nenhum localizador encontrado no campo "Localizador" (dropdown vazio).' };
       }
 
-      const opcoes = itens.map((el) => ({
-        valor: el.getAttribute("value") || (el.textContent || "").trim(),
-        texto: (el.textContent || "").trim(),
-      }));
+      // O eproc costuma mostrar o total de processos junto do nome no
+      // proprio item do dropdown (ex.: "GABINETE (42)") - quando isso
+      // acontece, nao e' preciso abrir uma aba e rodar uma consulta a
+      // mais so' para descobrir esse numero: ele ja' vem pronto aqui.
+      // "contagem" fica null quando o texto nao tem esse sufixo (ex.:
+      // eproc mudou o formato, ou esse item em especifico nao tem o
+      // numero) - nesse caso quem chama decide se consulta por fora.
+      // "texto" continua sendo o texto completo do item (com o numero,
+      // se houver) - e' o que "selecionarTagify" usa para digitar e
+      // reencontrar esse mesmo item depois, entao nao pode mudar; "nome"
+      // e' so' o rotulo sem o numero, para exibir no relatório.
+      const opcoes = itens.map((el) => {
+        const textoCompleto = (el.textContent || "").trim();
+        const valorAttr = el.getAttribute("value");
+        const matchContagem = textoCompleto.match(/\((\d+)\)\s*$/);
+        return {
+          valor: valorAttr || textoCompleto,
+          texto: textoCompleto,
+          nome: matchContagem ? textoCompleto.slice(0, matchContagem.index).trim() : textoCompleto,
+          contagem: matchContagem ? Number(matchContagem[1]) : null,
+        };
+      });
 
       return { opcoes, erro: null };
     } catch (e) {
@@ -2722,18 +2740,33 @@ async function consultarLocalizadoresUnidadeViaRelatorioGeral(urlBase, valorOrga
 
   const localizadores = [];
   const erros = [];
-  for (let i = 0; i < opcoes.length; i += 1) {
-    const opcao = opcoes[i];
-    notificar(`Consultando localizador ${i + 1}/${opcoes.length}: ${opcao.texto}...`);
-    const r = await abrirAbaEConsultarUmaVez(urlBase, {
-      valorSituacao: null,
-      urgente: false,
-      diasSituacao: null,
-      valorOrgaoJuizo,
-      valorLocalizador: opcao.texto,
-    });
-    localizadores.push({ nome: opcao.texto, totalProcessos: r.contagem || 0 });
-    if (r.erro) erros.push(`${opcao.texto}: ${r.erro}`);
+
+  // Quando o proprio item do dropdown ja' traz o total entre parenteses
+  // (ex.: "GABINETE (42)"), usa esse numero direto - nao precisa abrir
+  // uma aba e rodar uma consulta a mais so' para descobrir algo que a
+  // pagina ja' mostrou. So' cai para a consulta individual (mais lenta,
+  // uma aba por localizador) os itens em que esse numero nao veio junto.
+  const comContagemPronta = opcoes.filter((o) => o.contagem != null);
+  const semContagem = opcoes.filter((o) => o.contagem == null);
+
+  for (const opcao of comContagemPronta) {
+    localizadores.push({ nome: opcao.nome, totalProcessos: opcao.contagem });
+  }
+
+  if (semContagem.length > 0) {
+    for (let i = 0; i < semContagem.length; i += 1) {
+      const opcao = semContagem[i];
+      notificar(`Consultando localizador ${i + 1}/${semContagem.length}: ${opcao.nome}...`);
+      const r = await abrirAbaEConsultarUmaVez(urlBase, {
+        valorSituacao: null,
+        urgente: false,
+        diasSituacao: null,
+        valorOrgaoJuizo,
+        valorLocalizador: opcao.texto,
+      });
+      localizadores.push({ nome: opcao.nome, totalProcessos: r.contagem || 0 });
+      if (r.erro) erros.push(`${opcao.nome}: ${r.erro}`);
+    }
   }
 
   return { localizadores, erro: erros.length > 0 ? erros.join(" | ") : null };
