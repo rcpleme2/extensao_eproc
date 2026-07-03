@@ -419,6 +419,7 @@ progress {
   border-radius: var(--raio);
   padding: 8px;
   color: var(--cor-erro);
+  white-space: pre-line;
 }
 
 /* ---- Tabelas do relatório rápido ---- */

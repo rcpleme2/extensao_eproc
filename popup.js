@@ -918,6 +918,37 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         mensagem.erro || "Falha desconhecida ao exportar os processos do localizador.";
     }
   }
+
+  if (mensagem.tipo === "PROGRESSO_DOCUMENTOS_LOCALIZADOR") {
+    textoProgressoDocumentosLocalizador.textContent = mensagem.texto || "Processando...";
+    setStatusNavLocalizadores(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "DOCUMENTOS_LOCALIZADOR_FINALIZADO") {
+    areaProgressoDocumentosLocalizador.hidden = true;
+    btnExportarDocumentosLocalizador.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      const erros = resultado.erros || [];
+      setStatusNavLocalizadores(
+        `Concluído! ${resultado.concluidos || 0} de ${resultado.total || 0} processo(s) processado(s) para Downloads/eproc/` +
+          (erros.length > 0 ? ` (${erros.length} com aviso/erro - veja abaixo).` : "."),
+        erros.length > 0 ? "erro" : "ok"
+      );
+      if (erros.length > 0 || resultado.erroColeta) {
+        areaErrosNavLocalizadores.hidden = false;
+        const linhas = erros.map((e) => `${e.nome}: ${e.mensagem}`);
+        if (resultado.erroColeta) linhas.unshift(`Aviso: ${resultado.erroColeta}`);
+        areaErrosNavLocalizadores.textContent = linhas.join("\n");
+      }
+    } else {
+      setStatusNavLocalizadores("Erro ao exportar os documentos dos processos.", "erro");
+      areaErrosNavLocalizadores.hidden = false;
+      areaErrosNavLocalizadores.textContent =
+        mensagem.erro || "Falha desconhecida ao exportar os documentos dos processos.";
+    }
+  }
 });
 
 const areaNavLocalizadoresInfo = document.getElementById("area-nav-localizadores-info");
@@ -934,6 +965,9 @@ const chkProcessosLocalizadorExcel = document.getElementById("chk-processos-loca
 const btnExportarProcessosLocalizador = document.getElementById("btn-exportar-processos-localizador");
 const areaProgressoProcessosLocalizador = document.getElementById("area-progresso-processos-localizador");
 const textoProgressoProcessosLocalizador = document.getElementById("texto-progresso-processos-localizador");
+const btnExportarDocumentosLocalizador = document.getElementById("btn-exportar-documentos-localizador");
+const areaProgressoDocumentosLocalizador = document.getElementById("area-progresso-documentos-localizador");
+const textoProgressoDocumentosLocalizador = document.getElementById("texto-progresso-documentos-localizador");
 
 // Guarda a ultima lista carregada (nome + urlProcessos de cada
 // localizador) para poder identificar qual localizador esta' selecionado
@@ -1044,5 +1078,43 @@ btnExportarProcessosLocalizador.addEventListener("click", async () => {
     areaErrosNavLocalizadores.textContent = e && e.message ? e.message : String(e);
     areaProgressoProcessosLocalizador.hidden = true;
     btnExportarProcessosLocalizador.disabled = false;
+  }
+});
+
+// Exporta, para cada processo do localizador selecionado, um PDF unico
+// combinado com todos os documentos do processo - uma pasta por processo
+// (nome = numero do processo), o arquivo dentro dela nomeado com o
+// localizador escolhido. Roda um processo de cada vez, entao pode
+// demorar bastante para localizadores com muitos processos.
+btnExportarDocumentosLocalizador.addEventListener("click", async () => {
+  const url = selectLocalizadorProcessos.value;
+  const localizador = localizadoresCarregados.find((loc) => loc.urlProcessos === url);
+  if (!localizador) return;
+
+  btnExportarDocumentosLocalizador.disabled = true;
+  areaErrosNavLocalizadores.hidden = true;
+  areaProgressoDocumentosLocalizador.hidden = false;
+  textoProgressoDocumentosLocalizador.textContent = "Iniciando...";
+  setStatusNavLocalizadores(
+    `Exportando os documentos de cada processo de "${localizador.nome}" em segundo plano (pode demorar)...`
+  );
+
+  // Mesmo padrao das demais exportacoes: so' confirma que comecou; o
+  // resultado final chega pela mensagem DOCUMENTOS_LOCALIZADOR_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "EXPORTAR_DOCUMENTOS_LOCALIZADOR",
+      nomeLocalizador: localizador.nome,
+      urlProcessos: localizador.urlProcessos,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
+    }
+  } catch (e) {
+    setStatusNavLocalizadores("Erro ao iniciar a exportação.", "erro");
+    areaErrosNavLocalizadores.hidden = false;
+    areaErrosNavLocalizadores.textContent = e && e.message ? e.message : String(e);
+    areaProgressoDocumentosLocalizador.hidden = true;
+    btnExportarDocumentosLocalizador.disabled = false;
   }
 });

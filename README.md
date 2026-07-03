@@ -609,6 +609,23 @@ b. **"Exportar processos deste localizador"** (com PDF e/ou planilha
    Localizadores) e ordenado pela **Inclusão no localizador da data mais
    antiga para a mais nova**. Os arquivos saem em `Downloads/eproc/`
    como `processos_localizador_<nome_do_localizador>_<data>.pdf`/`.xls`.
+c. **"Exportar documentos de cada processo (PDF único)"**: entra, um de
+   cada vez, em CADA processo da lista do localizador escolhido (numa
+   aba oculta controlada pela própria extensão) e monta, para cada um,
+   um PDF único combinado com todos os seus documentos — mesmo formato
+   do modo "PDF único combinado" do cartão "Exportar Documentos", com a
+   movimentação intercalada entre os documentos de cada evento. Como
+   processa um processo inteiro por vez (abrir a aba, ler os documentos,
+   baixar cada um, montar o PDF), pode demorar bastante para
+   localizadores com muitos processos — o progresso mostra qual
+   processo e documento estão sendo tratados no momento. Os arquivos
+   saem em `Downloads/eproc/documentos_localizador_<nome_do_localizador>/`,
+   **uma pasta por processo (nome da pasta = número do processo)**,
+   contendo um único arquivo `<nome_do_localizador>.pdf` — assim,
+   exportar o mesmo processo por localizadores diferentes não sobrescreve
+   nada, cada exportação fica em seu próprio arquivo dentro da pasta do
+   processo. Processos sem nenhum documento ou com falha ao abrir são
+   pulados e aparecem como aviso ao final, sem interromper os demais.
 
 Se precisar carregar a lista de novo (por exemplo, depois que os números
 mudarem), basta clicar em "Carregar localizadores" novamente.

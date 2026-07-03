@@ -602,7 +602,12 @@ function listarDocumentosDoEvento(docs) {
 // unico) - agrupa os documentos por evento e devolve tambem os que nao
 // tem evento correspondente, para o PDF unico nao ordenar/juntar tudo
 // numa lista so'.
-async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProcesso, movimentacao, aoProgredir) {
+// So' monta os bytes do PDF unico (sem baixar nada) - usado tanto por
+// "construirPdfUnico" (exportacao normal, um processo por vez, nome de
+// arquivo fixo) quanto pela exportacao em lote por localizador (varios
+// processos, cada um com nome de pasta/arquivo proprios), para nao
+// duplicar a logica de montagem em dois lugares.
+async function montarBytesPdfUnico(documentos, resolverUrl, movimentacao, aoProgredir) {
   const pdfFinal = await PDFDocument.create();
   const fonteTexto = await pdfFinal.embedFont(StandardFonts.Helvetica);
 
@@ -653,10 +658,32 @@ async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProce
     }
   }
 
-  const bytesFinais = await pdfFinal.save();
+  return pdfFinal.save();
+}
+
+async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProcesso, movimentacao, aoProgredir) {
+  const bytesFinais = await montarBytesPdfUnico(documentos, resolverUrl, movimentacao, aoProgredir);
   const dataUrl = construirDataUrlBinario("application/pdf", bytesFinais);
   const nomeArquivo = `${pastaBase}/${sanitizarNomeArquivo(numeroProcesso)}_completo.pdf`;
   await baixarUm(nomeArquivo, dataUrl);
+}
+
+// Cria um resolvedor de URL com cache proprio (mesma logica ja' usada em
+// "processarFila": documentos "html" nunca sao cacheados, pois a segunda
+// camada deles parece nao aceitar ser acessada duas vezes com a mesma URL
+// resolvida). Extraido para ser reaproveitado pela exportacao em lote por
+// localizador, que monta um PDF unico por processo, um processo de cada vez.
+function criarResolvedorUrlDocumento() {
+  const urlsResolvidas = new Map();
+  return async function obterUrlResolvida(doc) {
+    if (doc.mimetype === "html") {
+      return resolverUrlReal(doc.href);
+    }
+    if (urlsResolvidas.has(doc.idDocumento)) return urlsResolvidas.get(doc.idDocumento);
+    const urlReal = await resolverUrlReal(doc.href);
+    urlsResolvidas.set(doc.idDocumento, urlReal);
+    return urlReal;
+  };
 }
 
 // ---- Construcao do MD unico (texto + anonimizacao "melhor esforco") ----
@@ -1146,16 +1173,7 @@ async function processarFila(numeroProcesso, documentos, opcoes, movimentacao) {
   // AJAX) parece nao aceitar bem ser acessada duas vezes com a mesma URL
   // resolvida (a segunda tentativa fica vazia); resolver de novo a cada
   // uso evita reaproveitar uma URL que a outra fase ja tenha consumido.
-  const urlsResolvidas = new Map();
-  async function obterUrlResolvida(doc) {
-    if (doc.mimetype === "html") {
-      return resolverUrlReal(doc.href);
-    }
-    if (urlsResolvidas.has(doc.idDocumento)) return urlsResolvidas.get(doc.idDocumento);
-    const urlReal = await resolverUrlReal(doc.href);
-    urlsResolvidas.set(doc.idDocumento, urlReal);
-    return urlReal;
-  }
+  const obterUrlResolvida = criarResolvedorUrlDocumento();
 
   if (opcoes.individuais) {
     const total = documentos.length;
@@ -3007,6 +3025,10 @@ function raspaerProcessosDoLocalizadorNaPagina() {
     const numeroProcesso = (linkProcesso ? linkProcesso.textContent : celulas[1].textContent || "")
       .replace(/\s+/g, " ")
       .trim();
+    // "linkProcesso.href" (e nao getAttribute) para pegar a URL ja'
+    // absoluta (com sessao/hash inclusos), pronta para abrir numa aba
+    // oculta sem depender de nenhum contexto de navegacao adicional.
+    const url = linkProcesso ? linkProcesso.href : "";
 
     const spanClasse = celulas[2].querySelector(".span-classe-judicial-contraste");
     const classe = (spanClasse ? spanClasse.textContent : celulas[2].textContent || "")
@@ -3015,7 +3037,7 @@ function raspaerProcessosDoLocalizadorNaPagina() {
 
     const inclusao = (celulas[7].textContent || "").replace(/\s+/g, " ").trim();
 
-    itens.push({ numeroProcesso, classe, inclusao });
+    itens.push({ numeroProcesso, classe, inclusao, url });
   }
 
   const caption = tabela.querySelector("caption");
@@ -3843,6 +3865,120 @@ async function exportarProcessosDoLocalizador(nomeLocalizador, urlProcessos, for
   return { total: itensOrdenados.length, erroColeta: erro };
 }
 
+// Abre um processo numa aba oculta e pede ao content script (ja' injetado
+// automaticamente por ser controlador.php) a lista de documentos - mesma
+// mensagem "LISTAR_DOCUMENTOS" usada quando o usuario clica em "Detectar
+// documentos" com o processo aberto na aba ativa, so' que aqui a aba e'
+// controlada inteiramente pela extensao. Espera um pouco apos o
+// carregamento porque a tabela de eventos/documentos e' montada por
+// JavaScript da propria pagina do eproc, nao esta' pronta no instante
+// exato do "complete".
+async function abrirAbaEListarDocumentosDoProcesso(urlProcesso) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlProcesso, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_DOCUMENTOS" });
+    return {
+      numeroProcesso: (resposta && resposta.numeroProcesso) || "",
+      documentos: (resposta && resposta.documentos) || [],
+      movimentacao: (resposta && resposta.movimentacao) || [],
+      erro: null,
+    };
+  } catch (e) {
+    return { numeroProcesso: "", documentos: [], movimentacao: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
+}
+
+// Exportacao em lote: para cada processo da lista de UM localizador
+// (recebida do painel, ja' capturada durante a listagem de "Processos
+// por Localizador"), abre o processo numa aba oculta, coleta todos os
+// documentos e monta um PDF unico combinado (mesma logica de
+// "construirPdfUnico"/"processarFila", com movimentacao intercalada entre
+// os documentos). Ao contrario da exportacao "Arquivos individuais"/"PDF
+// unico" de um processo so' (que roda na aba ativa, ja' aberta pelo
+// usuario), aqui cada processo e' navegado pela propria extensao, um de
+// cada vez (nunca em paralelo, para nao sobrecarregar o eproc nem abrir
+// dezenas de abas ocultas simultaneas).
+//
+// Estrutura de pastas pedida: uma pasta por processo (nome = numero do
+// processo) e, dentro dela, um unico arquivo cujo nome e' o do
+// localizador escolhido - assim, ao exportar o mesmo localizador mais de
+// uma vez (ou localizadores diferentes para o mesmo processo), cada
+// exportacao fica em seu proprio arquivo dentro da pasta do processo, sem
+// sobrescrever a anterior.
+async function exportarDocumentosProcessosLocalizador(nomeLocalizador, urlProcessos, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  if (!urlProcessos) {
+    throw new Error("URL do localizador não informada.");
+  }
+
+  notificar(`Abrindo a lista de processos de "${nomeLocalizador}"...`);
+  const { itens, erro: erroColeta } = await abrirAbaEColetarProcessosDoLocalizador(urlProcessos);
+
+  if (itens.length === 0) {
+    throw new Error(erroColeta || "Nenhum processo encontrado para esse localizador.");
+  }
+
+  const nomeLocalizadorArquivo = sanitizarNomeArquivo(nomeLocalizador);
+  const pastaRaiz = `eproc/documentos_localizador_${nomeLocalizadorArquivo}`;
+  const total = itens.length;
+  const erros = [];
+  let concluidos = 0;
+
+  for (const item of itens) {
+    const numeroProcesso = item.numeroProcesso || `processo_${concluidos + 1}`;
+    notificar(`Processando processo ${concluidos + 1} de ${total}: ${numeroProcesso}...`);
+
+    if (!item.url) {
+      erros.push({ nome: numeroProcesso, mensagem: "Link do processo não encontrado na listagem." });
+      concluidos += 1;
+      continue;
+    }
+
+    try {
+      const { documentos, movimentacao, erro: erroAba } = await abrirAbaEListarDocumentosDoProcesso(item.url);
+
+      if (erroAba) {
+        erros.push({ nome: numeroProcesso, mensagem: erroAba });
+        concluidos += 1;
+        continue;
+      }
+      if (documentos.length === 0) {
+        erros.push({ nome: numeroProcesso, mensagem: "Nenhum documento encontrado neste processo." });
+        concluidos += 1;
+        continue;
+      }
+
+      const obterUrlResolvida = criarResolvedorUrlDocumento();
+      const bytesFinais = await montarBytesPdfUnico(documentos, obterUrlResolvida, movimentacao, (feitosDoc, totalDoc) => {
+        notificar(
+          `Processando processo ${concluidos + 1} de ${total}: ${numeroProcesso} (documento ${feitosDoc} de ${totalDoc})...`
+        );
+      });
+
+      const nomeArquivo = `${pastaRaiz}/${sanitizarNomeArquivo(numeroProcesso)}/${nomeLocalizadorArquivo}.pdf`;
+      await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytesFinais));
+    } catch (e) {
+      erros.push({ nome: numeroProcesso, mensagem: e && e.message ? e.message : String(e) });
+    }
+
+    concluidos += 1;
+  }
+
+  notificar("Finalizando...");
+  return { total, concluidos, erros, erroColeta };
+}
+
 // ---- Regras de Automação (exportar sem precisar estar na página) ----
 
 // O link para "Automatizar Localizadores do Órgão" (menu Localizadores >
@@ -4231,6 +4367,32 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({
             tipo: "PROCESSOS_LOCALIZADOR_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_DOCUMENTOS_LOCALIZADOR") {
+    // Mesmo padrao das demais exportacoes em segundo plano; pode demorar
+    // bastante (um processo de cada vez, cada um com sua propria aba
+    // oculta), entao confirma o recebimento na hora e avisa o resultado
+    // final por uma mensagem separada.
+    exportarDocumentosProcessosLocalizador(mensagem.nomeLocalizador, mensagem.urlProcessos, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_DOCUMENTOS_LOCALIZADOR", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "DOCUMENTOS_LOCALIZADOR_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "DOCUMENTOS_LOCALIZADOR_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })
