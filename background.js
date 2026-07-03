@@ -3087,21 +3087,18 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
   }
   if (opcoesFinais.remessas && erroRemessas) avisos.push(`Remessas em Aberto: ${erroRemessas}`);
 
-  const bytesCapa = await construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoesResumo, avisos);
+  const nomesLocalizadores = opcoesFinais.localizadores ? localizadoresOrdenados.map((l) => l.nome) : [];
+  const bytesCapa = await construirCapaRelatorioGerencial(
+    nomeUnidade,
+    dataInformacao,
+    secoesResumo,
+    avisos,
+    nomesLocalizadores
+  );
   const pdfCapa = await PDFDocument.load(bytesCapa);
   const pdfFinal = await PDFDocument.create();
   const paginasCapa = await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices());
   paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
-
-  if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
-    const bytesLocalizadores = await construirPdfListaLocalizadores(
-      localizadoresOrdenados,
-      `Localizadores da unidade "${nomeUnidade}" — ${localizadoresOrdenados.length} registro(s) (sem total de processos - ver aviso)`
-    );
-    const pdfLocalizadores = await PDFDocument.load(bytesLocalizadores);
-    const paginasCopiadas = await pdfFinal.copyPages(pdfLocalizadores, pdfLocalizadores.getPageIndices());
-    paginasCopiadas.forEach((pagina) => pdfFinal.addPage(pagina));
-  }
 
   if (opcoesFinais.remessas && remessas.length > 0) {
     const bytesRemessas = await construirPdfRemessasEmAberto(
@@ -3853,19 +3850,6 @@ function construirPdfLocalizadores(itens, tituloDocumento) {
   return construirPdfTabela(itens, colunas, tituloDocumento);
 }
 
-// Usada so' pelo Relatório da Unidade: diferente de
-// "construirPdfLocalizadores" (usada pela tela "Localizadores do Órgão",
-// que tem descricao e total de processos disponiveis), aqui a extracao
-// via Relatório Geral so' traz o nome de cada localizador (ver
-// "consultarLocalizadoresUnidadeViaRelatorioGeral") - entao a tabela tem
-// uma unica coluna, sem colunas vazias de "Descrição"/"Total de
-// processos" que nunca seriam preenchidas.
-function construirPdfListaLocalizadores(itens, tituloDocumento) {
-  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
-  const colunas = [{ titulo: "Localizador", largura: larguraUtil, campo: "nome" }];
-  return construirPdfTabela(itens, colunas, tituloDocumento);
-}
-
 function construirPdfProcessosLocalizador(itens, tituloDocumento) {
   const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
   const colunas = [
@@ -3944,7 +3928,7 @@ function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, lar
 // parte (bytes), depois copiado para dentro do PDF final junto com as
 // tabelas de Localizadores/Remessas - mesmo padrao ja' usado para
 // combinar os PDFs de cada secao num unico arquivo.
-async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoes, avisos) {
+async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoes, avisos, localizadores) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
   const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -4007,6 +3991,43 @@ async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, seco
         pagina.drawText(linhaAviso, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
         y -= 11;
       }
+    }
+  }
+
+  // Lista de nomes dos Localizadores - texto corrido (nao tabela em
+  // pagina virada), continuando na MESMA pagina do aviso acima que avisa
+  // sobre a ausencia do total de processos. Pode ter dezenas de nomes,
+  // entao "quebrarLinhas" cuida de nao estourar a largura da pagina e o
+  // laco abaixo cuida de nao estourar a altura (cria uma pagina nova, com
+  // o mesmo cabecalho institucional, sempre que a proxima linha nao
+  // couber mais antes do rodape) - diferente do laco de avisos acima, que
+  // so' confere a altura estimada UMA vez no inicio.
+  if (localizadores && localizadores.length > 0) {
+    const alturaLinha = 11;
+    if (y - (14 + alturaLinha) < PDF_ALTURA_RODAPE + margem) {
+      ({ pagina, y } = novaPagina());
+    }
+    pagina.drawText(`Localizadores da unidade (${localizadores.length})`, {
+      x: margem,
+      y,
+      size: 10,
+      font: fonteNegrito,
+      color: COR_PRIMARIA_ESCURA,
+    });
+    y -= 14;
+
+    const linhasLocalizadores = quebrarLinhas(
+      sanitizarTextoPdf(localizadores.join(", ")),
+      fonteNormal,
+      8.5,
+      larguraUtil
+    );
+    for (const linha of linhasLocalizadores) {
+      if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
+        ({ pagina, y } = novaPagina());
+      }
+      pagina.drawText(linha, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+      y -= alturaLinha;
     }
   }
 

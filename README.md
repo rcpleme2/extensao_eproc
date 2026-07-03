@@ -469,12 +469,18 @@ extração (mesmo processo usado nas Remessas em Aberto).
    repetido no topo de cada página, capa com os números organizados em
    seções coloridas (rótulo/valor, uma por bloco: decisão, sentença, sem
    movimentação, remessas), rodapé com numeração de página e aviso de
-   que o documento foi gerado pela extensão. As tabelas de Localizadores/
-   Processos/Remessas usam a mesma paleta (cabeçalho de coluna com fundo
-   escuro e texto branco, linhas com listras zebradas para facilitar a
-   leitura). Essa mesma identidade visual vale para os PDFs de
-   Localizadores/Processos por Localizador exportados fora do painel da
-   Corregedoria também, já que reaproveitam o mesmo gerador de tabela.
+   que o documento foi gerado pela extensão. A lista de Localizadores
+   **não** vira uma tabela em página virada (paisagem) à parte — os
+   nomes entram como texto corrido na mesma página retrato da capa, logo
+   abaixo do aviso sobre o total de processos, com quebra de linha
+   automática dentro da margem e continuando em novas páginas (sempre com
+   o mesmo cabeçalho/rodapé) só se a lista for grande demais para caber
+   no que sobrou da página. Já a tabela de Remessas em Aberto usa página
+   virada com a mesma paleta (cabeçalho de coluna com fundo escuro e
+   texto branco, linhas com listras zebradas) — essa identidade visual
+   também vale para os PDFs de Localizadores/Processos por Localizador
+   exportados fora do painel da Corregedoria, já que reaproveitam o mesmo
+   gerador de tabela.
 
    A extração dos Localizadores **não** usa a tela "Localizadores do
    Órgão" (diferente do resto do painel) — o Relatório Geral tem seu
@@ -498,12 +504,12 @@ extração (mesmo processo usado nas Remessas em Aberto).
    de uma consulta no Relatório Geral, não é um dado fixo do localizador
    em si). Descobrir esse número um por um (uma aba nova por localizador)
    ficava lento demais para unidades com muitos localizadores, então **o
-   relatório, por ora, traz só a lista de nomes** — o PDF sempre inclui
-   um aviso explicando que a única forma de obter o total de processos de
-   um localizador específico é se habilitar na própria unidade e usar a
-   ferramenta **"Localizadores do Órgão"** do painel (que já mostra esse
-   total, já que ali a extração é direto da tabela da tela, sem precisar
-   de nenhuma consulta a mais).
+   relatório, por ora, traz só a lista de nomes** (em ordem alfabética) —
+   o PDF sempre inclui um aviso explicando que a única forma de obter o
+   total de processos de um localizador específico é se habilitar na
+   própria unidade e usar a ferramenta **"Localizadores do Órgão"** do
+   painel (que já mostra esse total, já que ali a extração é direto da
+   tabela da tela, sem precisar de nenhuma consulta a mais).
 
    As Remessas em Aberto vêm de uma tela separada, acessada pelo menu
    lateral **Relatórios → Relatório de remessas em aberto**
