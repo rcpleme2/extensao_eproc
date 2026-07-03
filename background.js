@@ -1536,8 +1536,16 @@ function consultarUmaVezNaPagina(parametros) {
       // Usado pelo Relatório Gerencial da Unidade (Corregedoria): filtra
       // a consulta por um Localizador especifico (campo Tagify
       // "Localizador", que so' lista os localizadores da unidade depois
-      // que um Órgão/Juízo foi selecionado no outro filtro).
+      // que um Órgão/Juízo foi selecionado no outro filtro). O Tagify
+      // comeca sem nenhuma sugestao carregada - e' preciso clicar em
+      // "Listar todos" (id="selLocalizadorPrincipal-listAll") antes,
+      // senao nenhum texto digitado encontra opção nenhuma no dropdown.
       if (parametros.valorLocalizador) {
+        const botaoListarTodos = document.getElementById("selLocalizadorPrincipal-listAll");
+        if (botaoListarTodos) {
+          botaoListarTodos.click();
+          await aguardar(300);
+        }
         await selecionarTagify("Localizador", parametros.valorLocalizador, parametros.valorLocalizador);
       }
 
@@ -1604,6 +1612,17 @@ function listarLocalizadoresNoFiltroRelatorioGeralNaPagina() {
           opcoes: [],
           erro: 'Campo "Localizador" não encontrado nesta página (selecione um Órgão/Juízo primeiro).',
         };
+      }
+
+      // O Tagify comeca vazio - nenhuma sugestao carregada, nem mesmo
+      // digitando um texto de busca - ate' que o botao "Listar todos"
+      // (id="selLocalizadorPrincipal-listAll", companion do <select
+      // id="selLocalizadorPrincipal"> por baixo do Tagify) seja clicado.
+      // Sem esse clique o dropdown fica sempre vazio.
+      const botaoListarTodos = document.getElementById("selLocalizadorPrincipal-listAll");
+      if (botaoListarTodos) {
+        botaoListarTodos.click();
+        await aguardar(300);
       }
 
       inputSpan.focus();
@@ -1683,6 +1702,163 @@ async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJui
     return result || { opcoes: [], erro: "Sem resultado ao ler as opções do campo Localizador." };
   } catch (e) {
     return { opcoes: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
+}
+
+// Le' todas as opcoes de um grupo especifico do filtro "Situação"
+// (#selStatusProcesso, value no formato "status;codigo;grupo" - o mesmo
+// grupo usado por "selecionarGrupoSituacao") e roda, para CADA uma delas,
+// uma consulta separada (so' troca a Situação e clica Consultar de novo -
+// nenhum campo Tagify envolvido, entao reaproveita a MESMA aba/pagina
+// para todas as consultas do grupo, sem o custo de abrir uma aba nova por
+// item, exatamente como um usuario faria manualmente trocando o filtro
+// varias vezes seguidas na mesma tela). Usado para detalhar o total de
+// suspensos/sobrestados por situação especifica (quantos estao em
+// "SUSPENSAO", quantos em "SOBRESTADO CONVENIO", etc.) em vez de so' um
+// numero agregado do grupo inteiro. Autocontida, executada via
+// chrome.scripting.executeScript. Nunca lanca excecao: cada item devolve
+// seu proprio "erro" se algo falhar, sem interromper os demais.
+function consultarTodasSituacoesGrupoNaPagina(grupo) {
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function extrairContagem(texto) {
+    const m = (texto || "").match(/\((\d+)\)/);
+    return m ? Number(m[1]) : null;
+  }
+
+  function selecionarSituacaoEspecifica(valorOpcaoSituacao) {
+    const select = document.getElementById("selStatusProcesso");
+    let encontrou = false;
+    for (const opcao of select.options) {
+      const selecionada = opcao.value === valorOpcaoSituacao;
+      opcao.selected = selecionada;
+      if (selecionada) encontrou = true;
+    }
+    if (encontrou) select.dispatchEvent(new Event("change", { bubbles: true }));
+    return encontrou;
+  }
+
+  async function clicarConsultarELer() {
+    const botaoConsultar = document.querySelector('button.btnConsultar[form="frmProcessoLista"]');
+    if (!botaoConsultar) throw new Error('Botão "Consultar" não encontrado nesta página.');
+
+    const badgeAntes = document.getElementById("tblProcessoLista_info-badge");
+    const textoAntes = badgeAntes ? badgeAntes.textContent : null;
+
+    botaoConsultar.click();
+
+    for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+      await aguardar(250);
+      const badge = document.getElementById("tblProcessoLista_info-badge");
+      const textoAtual = badge ? badge.textContent : null;
+      const elementoProcessando = document.getElementById("tblProcessoLista_processing");
+      const estaProcessando =
+        elementoProcessando && getComputedStyle(elementoProcessando).display !== "none";
+
+      if (badge && !estaProcessando && textoAtual !== textoAntes) {
+        return extrairContagem(textoAtual);
+      }
+      if (badge && !estaProcessando && tentativa > 8) {
+        return extrairContagem(textoAtual);
+      }
+    }
+    throw new Error("Tempo esgotado esperando o resultado da consulta.");
+  }
+
+  return (async () => {
+    const select = document.getElementById("selStatusProcesso");
+    if (!select) {
+      return { itens: [], erro: 'Campo "Situação" (#selStatusProcesso) não encontrado nesta página.' };
+    }
+
+    const sufixo = `;${grupo}`;
+    const opcoesGrupo = Array.from(select.options)
+      .filter((opcao) => (opcao.value || "").endsWith(sufixo))
+      .map((opcao) => ({ valor: opcao.value, texto: (opcao.textContent || "").replace(/\s+/g, " ").trim() }));
+
+    if (opcoesGrupo.length === 0) {
+      return { itens: [], erro: `Nenhuma opção de situação do grupo "${grupo}" encontrada na lista.` };
+    }
+
+    const itens = [];
+    for (const opcao of opcoesGrupo) {
+      try {
+        const encontrou = selecionarSituacaoEspecifica(opcao.valor);
+        if (!encontrou) {
+          itens.push({ valor: opcao.valor, texto: opcao.texto, contagem: null, erro: "Opção não encontrada." });
+          continue;
+        }
+        await aguardar(150);
+        const contagem = await clicarConsultarELer();
+        itens.push({ valor: opcao.valor, texto: opcao.texto, contagem, erro: null });
+      } catch (e) {
+        itens.push({
+          valor: opcao.valor,
+          texto: opcao.texto,
+          contagem: null,
+          erro: e && e.message ? e.message : String(e),
+        });
+      }
+    }
+
+    return { itens, erro: null };
+  })();
+}
+
+// Abre uma aba oculta, navega ate' o Relatório Geral, seleciona a unidade
+// pedida e roda "consultarTodasSituacoesGrupoNaPagina" para detalhar, uma
+// por uma, todas as situações especificas de um grupo (ex.: cada
+// variante de suspensão/sobrestamento dentro do grupo "S").
+async function abrirAbaEConsultarSituacoesGrupo(urlBase, valorOrgaoJuizo, grupo) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioGeralNaPagina,
+    });
+
+    if (!linkEncontrado) {
+      return {
+        itens: [],
+        erro:
+          'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+      args: [valorOrgaoJuizo],
+    });
+
+    if (!resultadoSelecao || !resultadoSelecao.ok) {
+      return { itens: [], erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo." };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: consultarTodasSituacoesGrupoNaPagina,
+      args: [grupo],
+    });
+
+    return result || { itens: [], erro: "Sem resultado ao consultar as situações do grupo." };
+  } catch (e) {
+    return { itens: [], erro: e && e.message ? e.message : String(e) };
   } finally {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
@@ -2637,6 +2813,17 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
     suspensos.mais90Dias = r.contagem;
     if (r.erro) suspensos.erros.push(`+${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${r.erro}`);
   }
+  notificar("Consultando suspensos/sobrestados: detalhamento por situação específica...");
+  {
+    const { itens, erro } = await abrirAbaEConsultarSituacoesGrupo(abaAtual.url, valorUnidade, "S");
+    // So' entram na capa as situações com pelo menos 1 processo - listar
+    // as dezenas de variantes zeradas so' faria o relatório mais dificil
+    // de ler, sem nenhuma informação a mais.
+    suspensos.detalhamento = itens
+      .filter((item) => (item.contagem || 0) > 0)
+      .sort((a, b) => (b.contagem || 0) - (a.contagem || 0));
+    if (erro) suspensos.erros.push(`Detalhamento por situação: ${erro}`);
+  }
 
   // Acervo antigo em tramitação: grupo "M" (MOVIMENTO) + limite superior
   // na data de autuação (autuados ha' mais de N anos e ainda tramitando).
@@ -2707,6 +2894,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
           rotulo: `Suspensos há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`,
           valor: suspensos.mais90Dias == null ? "?" : suspensos.mais90Dias,
         },
+        ...(suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem })),
       ],
     },
     {

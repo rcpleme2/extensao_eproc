@@ -429,10 +429,15 @@ extração (mesmo processo usado nas Remessas em Aberto).
      urgentes (calculado como Total − Urgentes, sem precisar de uma
      consulta a mais) e Aguardando há mais de 90 dias.
    - Processos sem movimentação há mais de 30, 90 e 120 dias.
-   - **Suspensos/sobrestados**: total e há mais de 90 dias — seleciona de
-     uma vez todas as ~40 opções do grupo SUSPENSÃO do filtro "Situação"
-     (os values de `#selStatusProcesso` seguem o formato
-     `status;codigo;grupo`; o grupo é o sufixo `;S`).
+   - **Suspensos/sobrestados**: total e há mais de 90 dias (grupo inteiro
+     do filtro "Situação" — os values de `#selStatusProcesso` seguem o
+     formato `status;codigo;grupo`; o grupo SUSPENSÃO é o sufixo `;S`) e,
+     abaixo desses dois números, um **detalhamento por situação
+     específica**: cada uma das ~40 opções do grupo é consultada
+     individualmente, mas só entram no relatório as que têm pelo menos 1
+     processo (ex.: "SUSPENSAO: 12", "SOBRESTADO CONVÊNIO: 3") — as
+     dezenas de variantes zeradas ficam de fora, para não poluir o
+     relatório.
    - **Acervo antigo em tramitação**: processos do grupo MOVIMENTO
      autuados há mais de 2 e 5 anos, preenchendo o limite superior da
      data de autuação (`#txtDataAutuacaoFim`).
@@ -463,13 +468,18 @@ extração (mesmo processo usado nas Remessas em Aberto).
    Órgão" (diferente do resto do painel) — o Relatório Geral tem seu
    próprio campo **"Localizador"** (um widget Tagify, igual ao de
    "Informação complementar"), que só lista os localizadores da unidade
-   depois que um Órgão/Juízo é selecionado no filtro da tela. A extensão
-   lê essa lista de sugestões e, um de cada vez, seleciona cada
-   localizador no campo e roda a consulta, anotando o total de processos
-   do resultado — uma aba nova por localizador, seguindo o mesmo padrão
-   de estabilidade já usado para o campo Tagify de "Informação
-   complementar" (reaproveitar a mesma aba para duas interações seguidas
-   com esse tipo de campo se mostrou instável nos testes anteriores).
+   depois que um Órgão/Juízo é selecionado no filtro da tela. Esse campo
+   começa sem nenhuma sugestão carregada — nem digitando um texto de
+   busca — até que o botão **"Listar todos"** (companion do `<select
+   id="selLocalizadorPrincipal">` por baixo do Tagify) seja clicado; a
+   extensão clica nele automaticamente antes de ler ou selecionar
+   qualquer opção do campo. A extensão lê essa lista de sugestões e, um
+   de cada vez, seleciona cada localizador no campo e roda a consulta,
+   anotando o total de processos do resultado — uma aba nova por
+   localizador, seguindo o mesmo padrão de estabilidade já usado para o
+   campo Tagify de "Informação complementar" (reaproveitar a mesma aba
+   para duas interações seguidas com esse tipo de campo se mostrou
+   instável nos testes anteriores).
 
    As Remessas em Aberto vêm de uma tela separada, acessada pelo menu
    lateral **Relatórios → Relatório de remessas em aberto**
