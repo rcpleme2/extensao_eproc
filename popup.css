@@ -298,6 +298,12 @@ button {
   cursor: pointer;
 }
 
+.legenda-opcoes {
+  font-size: var(--fonte-pequena);
+  color: var(--cor-texto-suave);
+  margin-bottom: 2px;
+}
+
 .opcao input {
   accent-color: var(--cor-primaria);
 }

@@ -2778,13 +2778,36 @@ async function consultarLocalizadoresUnidadeViaRelatorioGeral(urlBase, valorOrga
 // mesmas funcoes do relatorio rapido do painel), consulta o total de
 // processos de cada Localizador dessa unidade (via campo "Localizador"
 // do proprio Relatório Geral) e gera tudo num unico PDF.
-async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nomeDescritivoUnidade, aoProgredir) {
+// Um item por checkbox do painel ("Personalizar relatório") - todos
+// habilitados por padrao (compatibilidade com quem chamava a funcao sem
+// passar "opcoes" nenhuma). Desmarcar um item pula tanto a(s) consulta(s)
+// dele quanto o trecho correspondente no PDF, ao inves de so' esconder a
+// secao depois de consultar tudo mesmo assim - o ganho e' pular as
+// consultas lentas dos itens que o usuario nao quer, nao so' o espaço no
+// PDF.
+const OPCOES_RELATORIO_UNIDADE_PADRAO = {
+  conclusosDecisao: true,
+  conclusosSentenca: true,
+  semMovimentacao: true,
+  suspensos: true,
+  acervoAntigo: true,
+  localizadores: true,
+  remessas: true,
+};
+
+async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nomeDescritivoUnidade, opcoes, aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
   };
 
+  const opcoesFinais = { ...OPCOES_RELATORIO_UNIDADE_PADRAO, ...(opcoes || {}) };
+
   if (!valorUnidade) {
     throw new Error("Selecione uma unidade antes de exportar o relatório.");
+  }
+
+  if (!Object.values(opcoesFinais).some(Boolean)) {
+    throw new Error("Selecione ao menos um item do relatório antes de exportar.");
   }
 
   const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -2792,70 +2815,68 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
 
-  const despacho = await consultarBlocoUnidade(
-    abaAtual.url,
-    valorUnidade,
-    "conclusos para decisão",
-    VALOR_SITUACAO_AGUARDA_DESPACHO,
-    notificar
-  );
-  const sentenca = await consultarBlocoUnidade(
-    abaAtual.url,
-    valorUnidade,
-    "conclusos para sentença",
-    VALOR_SITUACAO_AGUARDA_SENTENCA,
-    notificar
-  );
+  const blocoVazio = () => ({ total: null, urgentes: null, naoUrgentes: null, mais90Dias: null, erros: [] });
+
+  const despacho = opcoesFinais.conclusosDecisao
+    ? await consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para decisão", VALOR_SITUACAO_AGUARDA_DESPACHO, notificar)
+    : blocoVazio();
+  const sentenca = opcoesFinais.conclusosSentenca
+    ? await consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para sentença", VALOR_SITUACAO_AGUARDA_SENTENCA, notificar)
+    : blocoVazio();
 
   const semMovimentacao = { erros: [] };
-  for (const dias of FAIXAS_DIAS_SEM_MOVIMENTACAO) {
-    notificar(`Consultando processos sem movimentação há mais de ${dias} dias...`);
-    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      valorSituacao: null,
-      urgente: false,
-      diasSituacao: null,
-      diasSemMovimentacao: dias,
-      valorOrgaoJuizo: valorUnidade,
-    });
-    semMovimentacao[`dias${dias}`] = r.contagem;
-    if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
+  if (opcoesFinais.semMovimentacao) {
+    for (const dias of FAIXAS_DIAS_SEM_MOVIMENTACAO) {
+      notificar(`Consultando processos sem movimentação há mais de ${dias} dias...`);
+      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+        valorSituacao: null,
+        urgente: false,
+        diasSituacao: null,
+        diasSemMovimentacao: dias,
+        valorOrgaoJuizo: valorUnidade,
+      });
+      semMovimentacao[`dias${dias}`] = r.contagem;
+      if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
+    }
   }
 
   // Suspensos/sobrestados: grupo "S" inteiro do filtro Situação (todas
   // as ~40 variantes de suspensão/sobrestamento de uma vez).
-  const suspensos = { total: null, mais90Dias: null, erros: [] };
-  notificar("Consultando suspensos/sobrestados: total...");
-  {
-    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      grupoSituacao: "S",
-      urgente: false,
-      diasSituacao: null,
-      valorOrgaoJuizo: valorUnidade,
-    });
-    suspensos.total = r.contagem;
-    if (r.erro) suspensos.erros.push(`total: ${r.erro}`);
-  }
-  notificar(`Consultando suspensos/sobrestados: há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias...`);
-  {
-    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      grupoSituacao: "S",
-      urgente: false,
-      diasSituacao: DIAS_LIMITE_ATRASO_UNIDADE,
-      valorOrgaoJuizo: valorUnidade,
-    });
-    suspensos.mais90Dias = r.contagem;
-    if (r.erro) suspensos.erros.push(`+${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${r.erro}`);
-  }
-  notificar("Consultando suspensos/sobrestados: detalhamento por situação específica...");
-  {
-    const { itens, erro } = await abrirAbaEConsultarSituacoesGrupo(abaAtual.url, valorUnidade, "S");
-    // So' entram na capa as situações com pelo menos 1 processo - listar
-    // as dezenas de variantes zeradas so' faria o relatório mais dificil
-    // de ler, sem nenhuma informação a mais.
-    suspensos.detalhamento = itens
-      .filter((item) => (item.contagem || 0) > 0)
-      .sort((a, b) => (b.contagem || 0) - (a.contagem || 0));
-    if (erro) suspensos.erros.push(`Detalhamento por situação: ${erro}`);
+  const suspensos = { total: null, mais90Dias: null, detalhamento: [], erros: [] };
+  if (opcoesFinais.suspensos) {
+    notificar("Consultando suspensos/sobrestados: total...");
+    {
+      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+        grupoSituacao: "S",
+        urgente: false,
+        diasSituacao: null,
+        valorOrgaoJuizo: valorUnidade,
+      });
+      suspensos.total = r.contagem;
+      if (r.erro) suspensos.erros.push(`total: ${r.erro}`);
+    }
+    notificar(`Consultando suspensos/sobrestados: há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias...`);
+    {
+      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+        grupoSituacao: "S",
+        urgente: false,
+        diasSituacao: DIAS_LIMITE_ATRASO_UNIDADE,
+        valorOrgaoJuizo: valorUnidade,
+      });
+      suspensos.mais90Dias = r.contagem;
+      if (r.erro) suspensos.erros.push(`+${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${r.erro}`);
+    }
+    notificar("Consultando suspensos/sobrestados: detalhamento por situação específica...");
+    {
+      const { itens, erro } = await abrirAbaEConsultarSituacoesGrupo(abaAtual.url, valorUnidade, "S");
+      // So' entram na capa as situações com pelo menos 1 processo - listar
+      // as dezenas de variantes zeradas so' faria o relatório mais dificil
+      // de ler, sem nenhuma informação a mais.
+      suspensos.detalhamento = itens
+        .filter((item) => (item.contagem || 0) > 0)
+        .sort((a, b) => (b.contagem || 0) - (a.contagem || 0));
+      if (erro) suspensos.erros.push(`Detalhamento por situação: ${erro}`);
+    }
   }
 
   // Acervo antigo em tramitação: grupo "M" (MOVIMENTO) + limite superior
@@ -2869,31 +2890,37 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
   }
 
   const acervoAntigo = { erros: [] };
-  for (const anos of ANOS_ACERVO_ANTIGO) {
-    notificar(`Consultando processos em tramitação autuados há mais de ${anos} ano(s)...`);
-    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      grupoSituacao: "M",
-      urgente: false,
-      diasSituacao: null,
-      dataAutuacaoFim: dataAnosAtras(anos),
-      valorOrgaoJuizo: valorUnidade,
-    });
-    acervoAntigo[`anos${anos}`] = r.contagem;
-    if (r.erro) acervoAntigo.erros.push(`${anos} ano(s): ${r.erro}`);
+  if (opcoesFinais.acervoAntigo) {
+    for (const anos of ANOS_ACERVO_ANTIGO) {
+      notificar(`Consultando processos em tramitação autuados há mais de ${anos} ano(s)...`);
+      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+        grupoSituacao: "M",
+        urgente: false,
+        diasSituacao: null,
+        dataAutuacaoFim: dataAnosAtras(anos),
+        valorOrgaoJuizo: valorUnidade,
+      });
+      acervoAntigo[`anos${anos}`] = r.contagem;
+      if (r.erro) acervoAntigo.erros.push(`${anos} ano(s): ${r.erro}`);
+    }
   }
 
-  const { localizadores, erro: erroLocalizadores } = await consultarLocalizadoresUnidadeViaRelatorioGeral(
-    abaAtual.url,
-    valorUnidade,
-    notificar
-  );
-  const localizadoresOrdenados = [...localizadores].sort((a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0));
+  let localizadoresOrdenados = [];
+  let erroLocalizadores = null;
+  if (opcoesFinais.localizadores) {
+    const resultado = await consultarLocalizadoresUnidadeViaRelatorioGeral(abaAtual.url, valorUnidade, notificar);
+    localizadoresOrdenados = [...resultado.localizadores].sort((a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0));
+    erroLocalizadores = resultado.erro;
+  }
 
-  notificar("Abrindo o Relatório de Remessas em Aberto...");
-  const { itens: remessas, erro: erroRemessas } = await abrirAbaEExtrairRemessasEmAberto(
-    abaAtual.url,
-    nomeDescritivoUnidade || nomeUnidade
-  );
+  let remessas = [];
+  let erroRemessas = null;
+  if (opcoesFinais.remessas) {
+    notificar("Abrindo o Relatório de Remessas em Aberto...");
+    const resultado = await abrirAbaEExtrairRemessasEmAberto(abaAtual.url, nomeDescritivoUnidade || nomeUnidade);
+    remessas = resultado.itens;
+    erroRemessas = resultado.erro;
+  }
 
   notificar("Gerando PDF...");
 
@@ -2908,18 +2935,28 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
     },
   ];
 
-  const secoesResumo = [
-    { titulo: "CONCLUSOS PARA DECISÃO", linhas: linhasBloco(despacho) },
-    { titulo: "CONCLUSOS PARA SENTENÇA", linhas: linhasBloco(sentenca) },
-    {
+  // So' entram no PDF as seções que o usuario marcou - nao so' esconder o
+  // resultado de uma consulta que rodou mesmo assim (essa ja' nem rodou,
+  // ver os "if (opcoesFinais.xxx)" acima).
+  const secoesResumo = [];
+  if (opcoesFinais.conclusosDecisao) {
+    secoesResumo.push({ titulo: "CONCLUSOS PARA DECISÃO", linhas: linhasBloco(despacho) });
+  }
+  if (opcoesFinais.conclusosSentenca) {
+    secoesResumo.push({ titulo: "CONCLUSOS PARA SENTENÇA", linhas: linhasBloco(sentenca) });
+  }
+  if (opcoesFinais.semMovimentacao) {
+    secoesResumo.push({
       titulo: "PROCESSOS SEM MOVIMENTAÇÃO",
       linhas: [
         { rotulo: "Há mais de 30 dias", valor: semMovimentacao.dias30 == null ? "?" : semMovimentacao.dias30 },
         { rotulo: "Há mais de 90 dias", valor: semMovimentacao.dias90 == null ? "?" : semMovimentacao.dias90 },
         { rotulo: "Há mais de 120 dias", valor: semMovimentacao.dias120 == null ? "?" : semMovimentacao.dias120 },
       ],
-    },
-    {
+    });
+  }
+  if (opcoesFinais.suspensos) {
+    secoesResumo.push({
       titulo: "SUSPENSOS / SOBRESTADOS",
       linhas: [
         { rotulo: "Total", valor: suspensos.total == null ? "?" : suspensos.total },
@@ -2929,28 +2966,42 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
         },
         ...(suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem })),
       ],
-    },
-    {
+    });
+  }
+  if (opcoesFinais.acervoAntigo) {
+    secoesResumo.push({
       titulo: "ACERVO ANTIGO EM TRAMITAÇÃO",
       linhas: ANOS_ACERVO_ANTIGO.map((anos) => ({
         rotulo: `Autuados há mais de ${anos} ano(s)`,
         valor: acervoAntigo[`anos${anos}`] == null ? "?" : acervoAntigo[`anos${anos}`],
       })),
-    },
-    {
+    });
+  }
+  if (opcoesFinais.remessas) {
+    secoesResumo.push({
       titulo: "REMESSAS EM ABERTO",
       linhas: [{ rotulo: "Total de processos", valor: remessas.length }],
-    },
-  ];
+    });
+  }
 
   const avisos = [];
-  if (despacho.erros.length > 0) avisos.push(`Conclusos para decisão: ${despacho.erros.join(" | ")}`);
-  if (sentenca.erros.length > 0) avisos.push(`Conclusos para sentença: ${sentenca.erros.join(" | ")}`);
-  if (semMovimentacao.erros.length > 0) avisos.push(`Processos sem movimentação: ${semMovimentacao.erros.join(" | ")}`);
-  if (suspensos.erros.length > 0) avisos.push(`Suspensos/sobrestados: ${suspensos.erros.join(" | ")}`);
-  if (acervoAntigo.erros.length > 0) avisos.push(`Acervo antigo: ${acervoAntigo.erros.join(" | ")}`);
-  if (erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
-  if (erroRemessas) avisos.push(`Remessas em Aberto: ${erroRemessas}`);
+  if (opcoesFinais.conclusosDecisao && despacho.erros.length > 0) {
+    avisos.push(`Conclusos para decisão: ${despacho.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.conclusosSentenca && sentenca.erros.length > 0) {
+    avisos.push(`Conclusos para sentença: ${sentenca.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.semMovimentacao && semMovimentacao.erros.length > 0) {
+    avisos.push(`Processos sem movimentação: ${semMovimentacao.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.suspensos && suspensos.erros.length > 0) {
+    avisos.push(`Suspensos/sobrestados: ${suspensos.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.acervoAntigo && acervoAntigo.erros.length > 0) {
+    avisos.push(`Acervo antigo: ${acervoAntigo.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
+  if (opcoesFinais.remessas && erroRemessas) avisos.push(`Remessas em Aberto: ${erroRemessas}`);
 
   const bytesCapa = await construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoesResumo, avisos);
   const pdfCapa = await PDFDocument.load(bytesCapa);
@@ -2958,7 +3009,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
   const paginasCapa = await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices());
   paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
 
-  if (localizadoresOrdenados.length > 0) {
+  if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
     const bytesLocalizadores = await construirPdfLocalizadores(
       localizadoresOrdenados,
       `Localizadores da unidade "${nomeUnidade}" — ${localizadoresOrdenados.length} registro(s)`
@@ -2968,7 +3019,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
     paginasCopiadas.forEach((pagina) => pdfFinal.addPage(pagina));
   }
 
-  if (remessas.length > 0) {
+  if (opcoesFinais.remessas && remessas.length > 0) {
     const bytesRemessas = await construirPdfRemessasEmAberto(
       remessas,
       `Remessas em Aberto da unidade "${nomeUnidade}" — ${remessas.length} processo(s)`
@@ -4652,6 +4703,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
       mensagem.valorUnidade,
       mensagem.nomeUnidade,
       mensagem.nomeDescritivoUnidade,
+      mensagem.opcoes,
       (texto) => {
         chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_GERENCIAL", texto }).catch(() => {});
       }

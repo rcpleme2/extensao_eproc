@@ -379,6 +379,14 @@ const textoProgressoUnidades = document.getElementById("texto-progresso-unidades
 const areaSelectUnidade = document.getElementById("area-select-unidade");
 const selectUnidadeRelatorio = document.getElementById("select-unidade-relatorio");
 const areaUnidadeSelecionada = document.getElementById("area-unidade-selecionada");
+const areaPersonalizarRelatorio = document.getElementById("area-personalizar-relatorio");
+const chkRelConclusosDecisao = document.getElementById("chk-rel-conclusos-decisao");
+const chkRelConclusosSentenca = document.getElementById("chk-rel-conclusos-sentenca");
+const chkRelSemMovimentacao = document.getElementById("chk-rel-sem-movimentacao");
+const chkRelSuspensos = document.getElementById("chk-rel-suspensos");
+const chkRelAcervoAntigo = document.getElementById("chk-rel-acervo-antigo");
+const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
+const chkRelRemessas = document.getElementById("chk-rel-remessas");
 const areaBtnExportarGerencial = document.getElementById("area-btn-exportar-gerencial");
 const btnExportarRelatorioGerencial = document.getElementById("btn-exportar-relatorio-gerencial");
 const areaProgressoRelatorioGerencial = document.getElementById("area-progresso-relatorio-gerencial");
@@ -434,6 +442,7 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
   areaErrosCorregedoria.hidden = true;
   areaSelectUnidade.hidden = true;
   areaUnidadeSelecionada.hidden = true;
+  areaPersonalizarRelatorio.hidden = true;
   areaBtnExportarGerencial.hidden = true;
   unidadeSelecionadaCorregedoria = null;
   areaProgressoUnidades.hidden = false;
@@ -467,6 +476,7 @@ selectUnidadeRelatorio.addEventListener("change", () => {
   if (!valor || !opcaoSelecionada) {
     unidadeSelecionadaCorregedoria = null;
     areaUnidadeSelecionada.hidden = true;
+    areaPersonalizarRelatorio.hidden = true;
     areaBtnExportarGerencial.hidden = true;
     return;
   }
@@ -477,8 +487,25 @@ selectUnidadeRelatorio.addEventListener("change", () => {
   };
   areaUnidadeSelecionada.hidden = false;
   areaUnidadeSelecionada.textContent = `Informações serão extraídas de: ${unidadeSelecionadaCorregedoria.nome}`;
+  areaPersonalizarRelatorio.hidden = false;
   areaBtnExportarGerencial.hidden = false;
 });
+
+// Le' o estado atual dos 7 checkboxes de "Itens a incluir no PDF" - as
+// chaves batem exatamente com as de "OPCOES_RELATORIO_UNIDADE_PADRAO" no
+// background.js, entao a mensagem so' precisa repassar esse objeto sem
+// nenhuma traducao a mais.
+function lerOpcoesRelatorioUnidade() {
+  return {
+    conclusosDecisao: chkRelConclusosDecisao.checked,
+    conclusosSentenca: chkRelConclusosSentenca.checked,
+    semMovimentacao: chkRelSemMovimentacao.checked,
+    suspensos: chkRelSuspensos.checked,
+    acervoAntigo: chkRelAcervoAntigo.checked,
+    localizadores: chkRelLocalizadores.checked,
+    remessas: chkRelRemessas.checked,
+  };
+}
 
 btnExportarRelatorioGerencial.addEventListener("click", async () => {
   areaErrosCorregedoria.hidden = true;
@@ -489,6 +516,13 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
   } catch (e) {
     areaErrosCorregedoria.hidden = false;
     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+    return;
+  }
+
+  const opcoes = lerOpcoesRelatorioUnidade();
+  if (!Object.values(opcoes).some(Boolean)) {
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = "Marque ao menos um item do relatório antes de exportar.";
     return;
   }
 
@@ -508,6 +542,7 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
       valorUnidade: unidade.valor,
       nomeUnidade: unidade.nome,
       nomeDescritivoUnidade: unidade.nomeDescritivo,
+      opcoes,
     });
     if (!resposta || !resposta.ok) {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");

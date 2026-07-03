@@ -417,13 +417,17 @@ extração (mesmo processo usado nas Remessas em Aberto).
    `<select id="selIdOrgaoJuizo">` nativo por trás dele — preenchendo um
    menu suspenso no painel.
 2. Ao **escolher uma unidade** no menu, o painel mostra "Informações
-   serão extraídas de: `<nome da unidade>`" e libera o botão
-   **"Exportar Relatório da Unidade (PDF)"**. Esse relatório sempre
-   confere se uma unidade foi escolhida antes de rodar — sem isso,
-   mostra o erro "Selecione uma unidade na lista antes de gerar este
-   relatório." em vez de seguir sem saber de onde extrair os dados.
+   serão extraídas de: `<nome da unidade>`" e libera a lista **"Itens a
+   incluir no PDF"** (7 checkboxes, um por seção do relatório — todos
+   marcados por padrão) e o botão **"Exportar Relatório da Unidade
+   (PDF)"**. Esse relatório sempre confere se uma unidade foi escolhida
+   antes de rodar — sem isso, mostra o erro "Selecione uma unidade na
+   lista antes de gerar este relatório." em vez de seguir sem saber de
+   onde extrair os dados; e confere se pelo menos 1 item está marcado —
+   sem isso, mostra "Marque ao menos um item do relatório antes de
+   exportar.".
 3. **"Exportar Relatório da Unidade (PDF)"** gera, filtrado pela unidade
-   escolhida, um único PDF com:
+   escolhida e pelos itens marcados, um único PDF com:
    - Nome da unidade e data/hora da extração.
    - Conclusos para decisão e para sentença: Total, Urgentes, Não
      urgentes (calculado como Total − Urgentes, sem precisar de uma
@@ -445,6 +449,14 @@ extração (mesmo processo usado nas Remessas em Aberto).
      maior para o menor total.
    - As Remessas em Aberto da unidade: Juiz Leigo, Processo, Classe
      Judicial, Data Remessa e Dias da Remessa.
+
+   Desmarcar um item pula tanto a(s) consulta(s) dele quanto o trecho
+   correspondente no PDF — não é só uma questão de esconder o resultado,
+   a consulta daquele item nem chega a rodar. Como cada seção equivale a
+   uma ou mais consultas no Relatório Geral (cada uma com sua própria aba
+   oculta), desmarcar itens que a unidade não precisa (ex.: uma vara sem
+   Remessas em Aberto, ou que não quer o detalhamento de suspensos)
+   também deixa a exportação mais rápida.
 
    Tudo isso reaproveita as funções já existentes no painel: as mesmas
    consultas do Relatório Geral (agora com um filtro extra de

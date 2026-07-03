@@ -177,6 +177,38 @@
 
       <div id="area-unidade-selecionada" class="status" hidden></div>
 
+      <div class="opcoes" id="area-personalizar-relatorio" hidden>
+        <span class="legenda-opcoes">Itens a incluir no PDF:</span>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-conclusos-decisao" checked />
+          Conclusos para decisão
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-conclusos-sentenca" checked />
+          Conclusos para sentença
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-sem-movimentacao" checked />
+          Processos sem movimentação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-suspensos" checked />
+          Suspensos/sobrestados
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-acervo-antigo" checked />
+          Acervo antigo em tramitação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-localizadores" checked />
+          Localizadores
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-remessas" checked />
+          Remessas em aberto
+        </label>
+      </div>
+
       <div class="botoes" id="area-btn-exportar-gerencial" hidden>
         <button id="btn-exportar-relatorio-gerencial" class="btn">Exportar Relatório da Unidade (PDF)</button>
       </div>
