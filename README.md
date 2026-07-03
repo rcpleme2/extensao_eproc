@@ -464,22 +464,35 @@ extração.
    o Relatório Geral (mesmo mecanismo do botão "↗" do cartão Relatórios)
    e lê todas as opções do filtro "Órgão/Juízo" dessa tela — visualmente
    um dropdown do bootstrap-select, mas a leitura é feita direto no
-   `<select id="selIdOrgaoJuizo">` nativo por trás dele — preenchendo um
-   menu suspenso no painel, sempre em **ordem alfabética**. O botão
-   **some assim que clicado** — ele só serve para um carregamento
-   inicial, e só volta a aparecer se o carregamento falhar (para tentar
-   de novo).
-2. Ao **escolher uma unidade** no menu, o painel mostra "Informações
-   serão extraídas de: `<nome da unidade>`" e libera a lista **"Itens a
-   incluir no PDF"** (checkboxes, um por seção do relatório — todos
-   marcados por padrão) e o botão **"Exportar Relatório da Unidade
-   (PDF)"**. Esse relatório sempre confere se uma unidade foi escolhida
-   antes de rodar — sem isso, mostra o erro "Selecione uma unidade na
-   lista antes de gerar este relatório." em vez de seguir sem saber de
-   onde extrair os dados; e confere se pelo menos 1 item está marcado —
-   sem isso, mostra "Marque ao menos um item do relatório antes de
-   exportar.".
-3. **"Exportar Relatório da Unidade (PDF)"** gera, filtrado pela unidade
+   `<select id="selIdOrgaoJuizo">` nativo por trás dele. O botão **some
+   assim que clicado** — ele só serve para um carregamento inicial, e só
+   volta a aparecer se o carregamento falhar (para tentar de novo).
+2. Como os nomes de unidade do eproc seguem o padrão "`<Juízo/Vara> de
+   <Comarca>`" (ex.: "Juizado Especial Cível, Criminal e da Fazenda
+   Pública de Piraquara"), o painel separa a **Comarca** (tudo depois do
+   último " de " do nome) do restante e oferece a escolha em **duas
+   etapas**, em vez de uma lista única com centenas de unidades:
+   - Primeiro, um menu **"Selecione uma comarca..."** (em ordem
+     alfabética), preenchido assim que a lista termina de carregar.
+   - Ao escolher uma comarca, um segundo menu **"Selecione um
+     juízo/vara..."** aparece, já filtrado só com as unidades daquela
+     comarca (também em ordem alfabética) — o nome mostrado nesse menu
+     **não repete** o sufixo "de `<Comarca>`" (já está implícito na
+     comarca escolhida acima), mas o **nome completo original** é o que
+     aparece na confirmação abaixo e é usado de fato no relatório/PDF.
+     Nomes sem nenhum " de " (ex.: siglas curtas) caem numa comarca
+     "(Outras)".
+3. Ao **escolher um juízo/vara** no segundo menu, o painel mostra
+   "Informações serão extraídas de: `<nome completo da unidade>`" e
+   libera a lista **"Itens a incluir no PDF"** (checkboxes, um por seção
+   do relatório — todos marcados por padrão) e o botão **"Exportar
+   Relatório da Unidade (PDF)"**. Esse relatório sempre confere se uma
+   unidade foi escolhida antes de rodar — sem isso, mostra o erro
+   "Selecione uma unidade na lista antes de gerar este relatório." em vez
+   de seguir sem saber de onde extrair os dados; e confere se pelo menos
+   1 item está marcado — sem isso, mostra "Marque ao menos um item do
+   relatório antes de exportar.".
+4. **"Exportar Relatório da Unidade (PDF)"** gera, filtrado pela unidade
    escolhida e pelos itens marcados, um único PDF com as seções abaixo
    **nesta ordem** (mesma ordem dos checkboxes "Itens a incluir no PDF"):
    - Nome da unidade e data/hora da extração.
@@ -505,8 +518,10 @@ extração.
      bloco é consultado numa **aba oculta própria, simultaneamente** às
      demais (em vez de uma única aba consultando as ~40 situações uma de
      cada vez) — na prática, ~5x mais rápido que o modelo sequencial
-     anterior. Cada bloco tem seu próprio limite de tempo (25s); se
-     algum não terminar a tempo (ou falhar por qualquer motivo), o
+     anterior. Cada bloco tem um orçamento interno de 20s (verificado
+     ENTRE uma situação e outra, preservando o que já foi apurado até
+     ali) e um timeout externo de 28s como rede de segurança; se algum
+     bloco não terminar a tempo (ou falhar por qualquer motivo), o
      relatório sai com o que os demais blocos conseguiram apurar e um
      aviso discreto do tipo "Consulta em paralelo (5 bloco(s)
      simultâneos) não concluiu a tempo - N de 40 situação(ões) não
@@ -544,9 +559,15 @@ extração.
    desta extensão) — mostra tudo de uma vez (sem paginação) antes de ler,
    colunas limitadas às 8 primeiras para caber na página. A relação de
    remessas aos juízes leigos usa a mesma técnica, direto na tabela
-   `#tbl_remessas_em_aberto` dessa tela. Se a extração falhar por
-   qualquer motivo, um aviso aparece na capa e a seção simplesmente não
-   entra no PDF, sem interromper o resto do relatório.
+   `#tbl_remessas_em_aberto` dessa tela. Essas leituras rodam no **MAIN
+   world** da página (`chrome.scripting.executeScript` com
+   `world: "MAIN"`) — o `jQuery`/`DataTable` da própria página só existe
+   nesse contexto; injetar no mundo isolado padrão (usado nas demais
+   funções, que só mexem no DOM) faria a extensão nunca enxergar esse
+   `jQuery`, mesmo com a tabela funcionando normalmente na tela. Se a
+   extração falhar por qualquer motivo, um aviso aparece na capa e a
+   seção simplesmente não entra no PDF, sem interromper o resto do
+   relatório.
 
    Desmarcar um item pula tanto a(s) consulta(s) dele quanto o trecho
    correspondente no PDF — não é só uma questão de esconder o resultado,
@@ -565,9 +586,11 @@ extração.
    O PDF segue uma identidade visual sóbria e institucional, com o
    cabeçalho **"TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ · Sistema eProc"**
    repetido no topo de cada página, capa com os números organizados em
-   seções coloridas (rótulo/valor, uma por bloco, na ordem acima), rodapé
-   com numeração de página e aviso de que o documento foi gerado pela
-   extensão. A lista de Localizadores **não** vira uma tabela em página
+   seções coloridas (rótulo/valor, uma por bloco, na ordem acima) e rodapé
+   só com a **paginação** ("Página X de Y", centralizada) — sem nenhum
+   outro texto. Títulos longos (ex.: nome de unidade extenso) quebram em
+   mais de uma linha em vez de ultrapassar a margem da página. A lista de
+   Localizadores **não** vira uma tabela em página
    virada (paisagem) — os nomes entram **um por linha** (com um marcador
    "-" e recuo pendurado para nomes longos que precisem quebrar em mais
    de uma linha) em página(s) retrato próprias, no final do PDF — bem

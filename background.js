@@ -2089,8 +2089,23 @@ function consultarSituacoesEspecificasNaPagina(opcoesDoBloco) {
       return { itens: [], erro: 'Campo "Situação" (#selStatusProcesso) não encontrado nesta página.' };
     }
 
+    // Orcamento de tempo INTERNO a este bloco (verificado ENTRE um item e
+    // outro): garante que, mesmo se a consulta estiver lenta, o que ja' foi
+    // apurado ate' aqui e' devolvido em vez de perdido por completo. Sem
+    // isso, um timeout externo (ver "abrirAbaEConsultarSituacoesEspecificas")
+    // teria que abandonar esta chamada inteira e descartar TODO o progresso
+    // do bloco - mesmo os itens que ja' tinham sido consultados com sucesso
+    // antes do estouro.
+    const ORCAMENTO_BLOCO_MS = 20000;
+    const inicioBloco = Date.now();
+
     const itens = [];
+    let parcial = false;
     for (const opcao of opcoesDoBloco) {
+      if (Date.now() - inicioBloco > ORCAMENTO_BLOCO_MS) {
+        parcial = true;
+        break;
+      }
       try {
         const encontrou = selecionarSituacaoEspecifica(opcao.valor);
         if (!encontrou) {
@@ -2110,7 +2125,16 @@ function consultarSituacoesEspecificasNaPagina(opcoesDoBloco) {
       }
     }
 
-    return { itens, erro: null };
+    return {
+      itens,
+      erro: null,
+      parcial,
+      motivoParcial: parcial
+        ? `Tempo limite (${ORCAMENTO_BLOCO_MS / 1000}s) atingido dentro do bloco - ${
+            opcoesDoBloco.length - itens.length
+          } de ${opcoesDoBloco.length} situação(ões) deste bloco não consultada(s).`
+        : null,
+    };
   })();
 }
 
@@ -2121,7 +2145,14 @@ function consultarSituacoesEspecificasNaPagina(opcoesDoBloco) {
 // especifica travar, so' o bloco dela fica incompleto, sem afetar os
 // demais blocos que estao rodando ao mesmo tempo em outras abas.
 async function abrirAbaEConsultarSituacoesEspecificas(urlBase, valorOrgaoJuizo, opcoesDoBloco) {
-  const TIMEOUT_BLOCO_MS = 25000;
+  // So' uma rede de seguranca para casos realmente travados (pagina que
+  // nunca recarrega, clique que nunca dispara nada): o orcamento de 20s
+  // DENTRO de "consultarSituacoesEspecificasNaPagina" e' quem normalmente
+  // decide quando parar, devolvendo o progresso parcial ja' apurado. Esse
+  // timeout aqui fica um pouco acima dele de proposito (raramente deve
+  // disparar) - se disparar mesmo assim, e' so' esse bloco especifico que
+  // sai vazio, sem afetar os demais blocos rodando em paralelo.
+  const TIMEOUT_BLOCO_MS = 28000;
   let aba;
   try {
     aba = await chrome.tabs.create({ url: urlBase, active: false });
@@ -2192,11 +2223,13 @@ const NUM_BLOCOS_PARALELOS_SITUACOES = 5;
 // lista as opcoes do grupo (uma aba rapida, so' leitura), depois divide
 // em ate' 5 blocos e consulta cada bloco numa aba PROPRIA, todas ao mesmo
 // tempo (Promise.all) - em vez de uma unica aba consultando as ~40
-// opcoes uma de cada vez. Cada bloco tem seu proprio timeout (25s); se
-// algum nao terminar a tempo, o resultado sai "parcial" (com o que os
-// demais blocos conseguiram apurar), mas nunca trava a exportação -
-// o TOTAL de suspensos (consultado à parte, fora desta função) nunca é
-// afetado por esse limite.
+// opcoes uma de cada vez. Cada bloco tem um orcamento interno de 20s
+// (verificado ENTRE um item e outro, preservando o que ja' foi apurado) e
+// um timeout externo de 28s como rede de seguranca; se algum bloco nao
+// terminar a tempo, o resultado sai "parcial" (com o que os demais blocos
+// conseguiram apurar), mas nunca trava a exportação - o TOTAL de
+// suspensos (consultado à parte, fora desta função) nunca é afetado por
+// esse limite.
 async function abrirAbaEConsultarSituacoesGrupo(urlBase, valorOrgaoJuizo, grupo) {
   const { opcoes, erro: erroListagem } = await abrirAbaEListarSituacoesDoGrupo(urlBase, valorOrgaoJuizo, grupo);
   if (opcoes.length === 0) {
@@ -2418,6 +2451,7 @@ async function abrirAbaEExtrairTabelaRelatorio(urlBase, funcClicarLink, nomeRela
     try {
       const [{ result } = {}] = await chrome.scripting.executeScript({
         target: { tabId: aba.id },
+        world: "MAIN",
         func: extrairTabelaGenericaNaPagina,
         args: [diasPreencher != null ? diasPreencher : null],
       });
@@ -2433,6 +2467,7 @@ async function abrirAbaEExtrairTabelaRelatorio(urlBase, funcClicarLink, nomeRela
       await new Promise((resolve) => setTimeout(resolve, 1500));
       const [{ result } = {}] = await chrome.scripting.executeScript({
         target: { tabId: aba.id },
+        world: "MAIN",
         func: extrairTabelaGenericaNaPagina,
         args: [null],
       });
@@ -2649,6 +2684,7 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
 
     const [{ result } = {}] = await chrome.scripting.executeScript({
       target: { tabId: aba.id },
+      world: "MAIN",
       func: consultarUmaVezNaPagina,
       args: [parametros],
     });
@@ -3085,6 +3121,7 @@ async function consultarRemessasJuizesLeigosUmaVez(urlBase, valorUnidade) {
 
     const [{ result } = {}] = await chrome.scripting.executeScript({
       target: { tabId: aba.id },
+      world: "MAIN",
       func: extrairLinhasRemessasJuizesLeigosNaPagina,
     });
     return result || { linhas: [], erro: "Sem resultado ao ler a tabela de remessas aos juízes leigos." };
@@ -3164,14 +3201,23 @@ async function construirPdfRemessasJuizesLeigos(linhas, nomeUnidade) {
 
   novaPagina();
 
-  pagina.drawText(`Remessas aos juízes leigos da unidade "${sanitizarTextoPdf(nomeUnidade)}"`, {
-    x: margem,
-    y,
-    size: 13,
-    font: fonteNegrito,
-    color: COR_PRIMARIA_ESCURA,
-  });
-  y -= 20;
+  const tituloRemessas = quebrarLinhas(
+    `Remessas aos juízes leigos da unidade "${sanitizarTextoPdf(nomeUnidade)}"`,
+    fonteNegrito,
+    13,
+    larguraUtil
+  );
+  for (const linhaTitulo of tituloRemessas) {
+    pagina.drawText(linhaTitulo, {
+      x: margem,
+      y,
+      size: 13,
+      font: fonteNegrito,
+      color: COR_PRIMARIA_ESCURA,
+    });
+    y -= 17;
+  }
+  y -= 3;
   pagina.drawText(`Total geral: ${linhas.length} processo(s)`, {
     x: margem,
     y,
@@ -3738,6 +3784,7 @@ async function abrirRelatorioPreenchido(categoria, situacao, filtro, exportarExc
 
   const [{ result } = {}] = await chrome.scripting.executeScript({
     target: { tabId: aba.id },
+    world: "MAIN",
     func: consultarUmaVezNaPagina,
     args: [parametros],
   });
@@ -4220,17 +4267,13 @@ function desenharRodapePaginas(pdf, fonteNormal, largura, margem) {
       thickness: 0.5,
       color: COR_CINZA_BORDA,
     });
-    pagina.drawText("eProc/TJPR - documento gerado pela Extensão Auxiliar eProc", {
-      x: margem,
-      y,
-      size: 7,
-      font: fonteNormal,
-      color: COR_CINZA_TEXTO,
-    });
+    // So' a paginacao no rodape (sem texto de identificacao da extensao) -
+    // centralizada, ja' que nao ha' mais nenhum outro texto disputando a
+    // faixa com ela.
     const textoPagina = `Página ${indice + 1} de ${paginas.length}`;
     const larguraTexto = fonteNormal.widthOfTextAtSize(textoPagina, 7);
     pagina.drawText(textoPagina, {
-      x: largura - margem - larguraTexto,
+      x: (largura - larguraTexto) / 2,
       y,
       size: 7,
       font: fonteNormal,
@@ -4290,14 +4333,18 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
     desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, larguraPagina, margem);
     y = PDF_LOCALIZADORES_ALTURA_PAGINA - PDF_ALTURA_CABECALHO_INSTITUCIONAL - PDF_LOCALIZADORES_MARGEM;
     if (comTitulo) {
-      pagina.drawText(sanitizarTextoPdf(tituloDocumento), {
-        x: margem,
-        y,
-        size: 13,
-        font: fonteNegrito,
-        color: COR_PRIMARIA_ESCURA,
-      });
-      y -= PDF_LOCALIZADORES_ALTURA_LINHA * 2.2;
+      const linhasTitulo = quebrarLinhas(sanitizarTextoPdf(tituloDocumento), fonteNegrito, 13, larguraPagina - margem * 2);
+      for (const linhaTitulo of linhasTitulo) {
+        pagina.drawText(linhaTitulo, {
+          x: margem,
+          y,
+          size: 13,
+          font: fonteNegrito,
+          color: COR_PRIMARIA_ESCURA,
+        });
+        y -= 17;
+      }
+      y -= PDF_LOCALIZADORES_ALTURA_LINHA * 2.2 - 17;
     }
     desenharCabecalhoColunas();
   }
@@ -4466,14 +4513,17 @@ async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, seco
     color: COR_PRIMARIA_ESCURA,
   });
   y -= 24;
-  pagina.drawText(`Unidade: ${sanitizarTextoPdf(nomeUnidade)}`, {
-    x: margem,
-    y,
-    size: 11,
-    font: fonteNegrito,
-    color: COR_CINZA_TEXTO,
-  });
-  y -= 15;
+  const linhasUnidade = quebrarLinhas(`Unidade: ${sanitizarTextoPdf(nomeUnidade)}`, fonteNegrito, 11, larguraUtil);
+  for (const linhaUnidade of linhasUnidade) {
+    pagina.drawText(linhaUnidade, {
+      x: margem,
+      y,
+      size: 11,
+      font: fonteNegrito,
+      color: COR_CINZA_TEXTO,
+    });
+    y -= 15;
+  }
   pagina.drawText(`Data da informação: ${dataInformacao}`, {
     x: margem,
     y,
@@ -4534,14 +4584,22 @@ async function construirPaginaListaLocalizadores(nomeUnidade, localizadores) {
 
   let { pagina, y } = novaPagina();
 
-  pagina.drawText(`Localizadores da unidade "${sanitizarTextoPdf(nomeUnidade)}" (${localizadores.length})`, {
-    x: margem,
-    y,
-    size: 12,
-    font: fonteNegrito,
-    color: COR_PRIMARIA_ESCURA,
-  });
-  y -= 20;
+  const tituloLocalizadores = `Localizadores da unidade "${sanitizarTextoPdf(nomeUnidade)}" (${localizadores.length})`;
+  const linhasTitulo = quebrarLinhas(tituloLocalizadores, fonteNegrito, 12, larguraUtil);
+  for (const linhaTitulo of linhasTitulo) {
+    if (y - 16 < PDF_ALTURA_RODAPE + margem) {
+      ({ pagina, y } = novaPagina());
+    }
+    pagina.drawText(linhaTitulo, {
+      x: margem,
+      y,
+      size: 12,
+      font: fonteNegrito,
+      color: COR_PRIMARIA_ESCURA,
+    });
+    y -= 16;
+  }
+  y -= 4;
 
   const alturaLinha = 12;
   // Um localizador por linha, com um marcador "-" e recuo pendurado

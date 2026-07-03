@@ -419,6 +419,8 @@ const areaCorregedoriaInfo = document.getElementById("area-corregedoria-info");
 const btnRelatorioGerencialUnidade = document.getElementById("btn-relatorio-gerencial-unidade");
 const areaProgressoUnidades = document.getElementById("area-progresso-unidades");
 const textoProgressoUnidades = document.getElementById("texto-progresso-unidades");
+const areaSelectComarca = document.getElementById("area-select-comarca");
+const selectComarcaRelatorio = document.getElementById("select-comarca-relatorio");
 const areaSelectUnidade = document.getElementById("area-select-unidade");
 const selectUnidadeRelatorio = document.getElementById("select-unidade-relatorio");
 const areaUnidadeSelecionada = document.getElementById("area-unidade-selecionada");
@@ -444,6 +446,33 @@ const areaErrosCorregedoria = document.getElementById("area-erros-corregedoria")
 // da Corregedoria precisa conferir antes de rodar (ver
 // "exigirUnidadeSelecionada" abaixo).
 let unidadeSelecionadaCorregedoria = null;
+
+// Nomes de unidade do eproc seguem o padrão "<Juízo/Vara> de <Comarca>"
+// (ex.: "Juizado Especial Cível, Criminal e da Fazenda Pública de
+// Piraquara") - separa a Comarca (tudo depois do ÚLTIMO " de ") do nome
+// do Juízo/Vara propriamente dito, para o painel poder oferecer uma
+// escolha em duas etapas (Comarca primeiro, Juízo depois) em vez de uma
+// lista única com centenas de unidades. Se o padrão não for encontrado
+// (nome sem " de " nenhum), a unidade cai numa comarca "(Outras)" e o
+// nome completo é mantido como está.
+function separarComarcaDoJuizo(nomeCompleto) {
+  const texto = (nomeCompleto || "").trim();
+  const marcador = " de ";
+  const indice = texto.lastIndexOf(marcador);
+  if (indice === -1) {
+    return { comarca: "(Outras)", juizo: texto };
+  }
+  return {
+    comarca: texto.slice(indice + marcador.length).trim() || "(Outras)",
+    juizo: texto.slice(0, indice).trim() || texto,
+  };
+}
+
+// Lista bruta (valor + nome completo) recebida de UNIDADES_RELATORIO_FINALIZADO,
+// já com comarca/juízo separados - guardada para filtrar o select de
+// Juízo quando uma Comarca é escolhida, sem precisar pedir a lista de
+// novo ao eproc a cada troca.
+let unidadesRelatorioCorregedoria = [];
 
 function setStatusCorregedoria(texto, tipo) {
   aplicarStatus(areaCorregedoriaInfo, texto, tipo);
@@ -488,6 +517,7 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
   // aparecer se der erro, para o usuario poder tentar de novo.
   btnRelatorioGerencialUnidade.hidden = true;
   areaErrosCorregedoria.hidden = true;
+  areaSelectComarca.hidden = true;
   areaSelectUnidade.hidden = true;
   areaUnidadeSelecionada.hidden = true;
   areaPersonalizarRelatorio.hidden = true;
@@ -514,6 +544,36 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
   }
 });
 
+// Ao escolher uma Comarca, preenche o select de Juízo/Vara so' com as
+// unidades daquela comarca (mostrando o nome SEM o sufixo "de <Comarca>",
+// ja' que a comarca escolhida acima deixa isso implicito e repetir so'
+// deixaria a lista mais poluida).
+selectComarcaRelatorio.addEventListener("change", () => {
+  const comarca = selectComarcaRelatorio.value;
+  unidadeSelecionadaCorregedoria = null;
+  areaUnidadeSelecionada.hidden = true;
+  areaPersonalizarRelatorio.hidden = true;
+  areaBtnExportarGerencial.hidden = true;
+
+  selectUnidadeRelatorio.innerHTML = '<option value="" selected disabled>Selecione um juízo/vara...</option>';
+  if (!comarca) {
+    areaSelectUnidade.hidden = true;
+    return;
+  }
+
+  const unidadesDaComarca = unidadesRelatorioCorregedoria
+    .filter((u) => u.comarca === comarca)
+    .sort((a, b) => a.juizo.localeCompare(b.juizo, "pt-BR"));
+  for (const unidade of unidadesDaComarca) {
+    const opcao = document.createElement("option");
+    opcao.value = unidade.valor;
+    opcao.textContent = unidade.juizo;
+    opcao.dataset.nomeCompleto = unidade.texto;
+    selectUnidadeRelatorio.appendChild(opcao);
+  }
+  areaSelectUnidade.hidden = false;
+});
+
 // Ao escolher uma unidade no dropdown, preenche o campo indicando de
 // onde a informação será extraída (e' esse campo que
 // "exigirUnidadeSelecionada" confere antes de qualquer relatório deste
@@ -530,7 +590,10 @@ selectUnidadeRelatorio.addEventListener("change", () => {
   }
   unidadeSelecionadaCorregedoria = {
     valor,
-    nome: opcaoSelecionada.textContent,
+    // O nome completo original (com "de <Comarca>") e' o que identifica a
+    // unidade sem ambiguidade nos relatórios/PDFs - o texto exibido no
+    // dropdown, so' o Juízo/Vara, e' so' pra' facilitar a escolha visual.
+    nome: opcaoSelecionada.dataset.nomeCompleto || opcaoSelecionada.textContent,
   };
   areaUnidadeSelecionada.hidden = false;
   areaUnidadeSelecionada.textContent = `Informações serão extraídas de: ${unidadeSelecionadaCorregedoria.nome}`;
@@ -744,24 +807,33 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
     if (mensagem.ok) {
       const unidades = (mensagem.resultado && mensagem.resultado.unidades) || [];
-      const unidadesExibidas = [...unidades].sort((a, b) => a.texto.localeCompare(b.texto, "pt-BR"));
+      unidadesRelatorioCorregedoria = unidades.map((u) => ({
+        ...u,
+        ...separarComarcaDoJuizo(u.texto),
+      }));
 
-      selectUnidadeRelatorio.innerHTML = '<option value="" selected disabled>Selecione uma unidade...</option>';
-      for (const unidade of unidadesExibidas) {
+      const comarcas = [...new Set(unidadesRelatorioCorregedoria.map((u) => u.comarca))].sort((a, b) =>
+        a.localeCompare(b, "pt-BR")
+      );
+
+      selectComarcaRelatorio.innerHTML = '<option value="" selected disabled>Selecione uma comarca...</option>';
+      for (const comarca of comarcas) {
         const opcao = document.createElement("option");
-        opcao.value = unidade.valor;
-        opcao.textContent = unidade.texto;
-        selectUnidadeRelatorio.appendChild(opcao);
+        opcao.value = comarca;
+        opcao.textContent = comarca;
+        selectComarcaRelatorio.appendChild(opcao);
       }
-      areaSelectUnidade.hidden = unidadesExibidas.length === 0;
+      selectUnidadeRelatorio.innerHTML = '<option value="" selected disabled>Selecione um juízo/vara...</option>';
+      areaSelectUnidade.hidden = true;
+      areaSelectComarca.hidden = comarcas.length === 0;
       // Sem nenhuma unidade encontrada nao ha' nada mais a fazer com a
       // lista carregada - reaparece o botao para o usuario poder tentar
       // de novo (ex.: depois de navegar para uma pagina com o menu
       // lateral disponivel).
-      if (unidadesExibidas.length === 0) btnRelatorioGerencialUnidade.hidden = false;
+      if (comarcas.length === 0) btnRelatorioGerencialUnidade.hidden = false;
       setStatusCorregedoria(
-        unidadesExibidas.length > 0
-          ? `${unidadesExibidas.length} unidade(s) encontrada(s) no Relatório Geral - selecione uma.`
+        comarcas.length > 0
+          ? `${unidadesRelatorioCorregedoria.length} unidade(s) em ${comarcas.length} comarca(s) - selecione uma comarca.`
           : "Nenhuma unidade encontrada no filtro Órgão/Juízo."
       );
     } else {
