@@ -1546,12 +1546,10 @@ function consultarUmaVezNaPagina(parametros) {
   }
 
   // Le' a "relação de processos" (linhas da tabela de resultado, nao so'
-  // o total) direto da API do DataTables que alimenta "#tblProcessoLista"
-  // - mesma tecnica ja' usada para outras tabelas desta extensao (mais
-  // confiavel que raspar o DOM renderizado, e da' pra "mostrar tudo" sem
-  // precisar navegar entre paginas). Usado pelo Relatório da Unidade para
-  // trazer a lista de processos ativos/suspensos, alem do total. Nunca
-  // lanca excecao: sempre resolve com { cabecalhos, linhas, erro }.
+  // o total) da tabela de resultado "#tblProcessoLista" - usada pelo
+  // Relatório da Unidade para trazer a lista de processos ativos/
+  // suspensos, alem do total. Nunca lanca excecao: sempre resolve com
+  // { cabecalhos, linhas, erro }.
   async function extrairLinhasTblProcessoLista() {
     const LIMITE_COLUNAS = 8;
     const LIMITE_LINHAS = 500;
@@ -1577,23 +1575,28 @@ function consultarUmaVezNaPagina(parametros) {
       dt.page.len(-1).draw(false);
       await promessaMostrarTudo;
 
-      const cabecalhos = Array.from(document.querySelectorAll("#tblProcessoLista thead th"))
+      const tabelaDom = document.getElementById("tblProcessoLista");
+      const cabecalhos = Array.from(tabelaDom.querySelectorAll("thead th"))
         .map((th) => (th.textContent || "").replace(/\s+/g, " ").trim())
         .slice(0, LIMITE_COLUNAS);
 
-      const div = document.createElement("div");
-      const linhas = dt
-        .rows({ search: "applied" })
-        .data()
-        .toArray()
-        .slice(0, LIMITE_LINHAS)
-        .map((linha) => {
-          const valores = Array.isArray(linha) ? linha : Object.values(linha);
-          return valores.slice(0, LIMITE_COLUNAS).map((v) => {
-            div.innerHTML = v == null ? "" : String(v);
-            return (div.textContent || "").replace(/\s+/g, " ").trim();
-          });
-        });
+      // Le' direto das celulas <td> ja' RENDERIZADAS (na mesma ordem
+      // visual dos cabecalhos), em vez de "dt.rows().data()": essa API
+      // devolve o objeto de dados BRUTO de cada linha, cujas chaves nem
+      // sempre seguem a mesma ordem das colunas visiveis na tela -
+      // "Object.values()" sobre esse objeto produzia colunas
+      // desalinhadas com o cabecalho (ex.: "Situação" saindo vazia e o
+      // conteudo de "Sigilo" aparecendo embaixo de "Último Evento").
+      // Ler o texto que a propria tabela renderizou evita esse problema
+      // por completo.
+      const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
+        (tr) => tr.querySelectorAll("td").length > 0
+      );
+      const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) =>
+        Array.from(tr.querySelectorAll("td"))
+          .slice(0, LIMITE_COLUNAS)
+          .map((td) => (td.textContent || "").replace(/\s+/g, " ").trim())
+      );
 
       return { cabecalhos, linhas, erro: null };
     } catch (e) {
@@ -3319,6 +3322,169 @@ async function construirPdfRemessasJuizesLeigos(linhas, nomeUnidade) {
   return pdf.save();
 }
 
+// Acha o indice de uma coluna pelo texto do cabecalho (regex, case
+// insensitive) - devolve -1 se nao encontrar, para o chamador decidir o
+// que fazer (campo vazio) em vez de estourar.
+function indiceColunaPorCabecalho(cabecalhos, regex) {
+  return cabecalhos.findIndex((h) => regex.test(h));
+}
+
+// Converte um texto de data (dd/mm/aaaa, com ou sem hora) num numero
+// ordenavel (timestamp) - usado para classificar processos do mais
+// antigo para o mais novo pela Data de Autuação. Texto sem uma data
+// reconhecivel vira 0 (fica no inicio da ordenacao, mas nunca quebra).
+function paraDataOrdenavel(texto) {
+  const m = (texto || "").match(/(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/);
+  if (!m) return 0;
+  const [, dia, mes, ano, hora = "00", minuto = "00", segundo = "00"] = m;
+  const data = new Date(`${ano}-${mes}-${dia}T${hora}:${minuto}:${segundo}`);
+  const tempo = data.getTime();
+  return Number.isNaN(tempo) ? 0 : tempo;
+}
+
+// Monta o PDF (A4 RETRATO) da relação de processos ativos: so' os 5
+// campos pedidos (Nº do Processo, Data da Autuação, Situação, Classe e
+// Último Evento - o "#tblProcessoLista" real traz mais colunas, como
+// Sigilo e Localizador, que ficam de fora aqui), ordenados pela Data de
+// Autuação do mais antigo para o mais novo. Casa cada campo pelo texto
+// do cabecalho (nao pela posicao), para nao depender da ordem exata das
+// colunas na tela.
+async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
+  const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
+  const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxClasse = indiceColunaPorCabecalho(tabela.cabecalhos, /classe/i);
+  const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
+
+  const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
+  const itens = tabela.linhas
+    .map((linha) => {
+      const autuacao = valorDe(linha, idxAutuacao);
+      return {
+        processo: valorDe(linha, idxProcesso),
+        autuacao,
+        situacao: valorDe(linha, idxSituacao),
+        classe: valorDe(linha, idxClasse),
+        ultimoEvento: valorDe(linha, idxEvento),
+        autuacaoOrdenavel: paraDataOrdenavel(autuacao),
+      };
+    })
+    .sort((a, b) => a.autuacaoOrdenavel - b.autuacaoOrdenavel);
+
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+  const TAMANHO_FONTE = 8.5;
+  const ALTURA_LINHA = TAMANHO_FONTE * 1.35;
+
+  const colunas = [
+    { titulo: "Nº do Processo", largura: larguraUtil * 0.23, campo: "processo" },
+    { titulo: "Data da Autuação", largura: larguraUtil * 0.15, campo: "autuacao" },
+    { titulo: "Situação", largura: larguraUtil * 0.22, campo: "situacao" },
+    { titulo: "Classe", largura: larguraUtil * 0.2, campo: "classe" },
+    { titulo: "Último Evento", largura: larguraUtil * 0.2, campo: "ultimoEvento" },
+  ];
+
+  let pagina = null;
+  let y = 0;
+  let indiceLinhaZebra = 0;
+
+  function novaPagina() {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+  }
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina();
+    }
+  }
+
+  function desenharCabecalhoColunas() {
+    const alturaFaixa = ALTURA_LINHA * 1.7;
+    garantirEspaco(alturaFaixa + ALTURA_LINHA * 2);
+    pagina.drawRectangle({ x: margem, y: y - alturaFaixa, width: larguraUtil, height: alturaFaixa, color: COR_PRIMARIA_ESCURA });
+    let x = margem + 4;
+    for (const coluna of colunas) {
+      pagina.drawText(sanitizarTextoPdf(coluna.titulo), {
+        x,
+        y: y - alturaFaixa + alturaFaixa * 0.32,
+        size: TAMANHO_FONTE,
+        font: fonteNegrito,
+        color: COR_BRANCO,
+      });
+      x += coluna.largura;
+    }
+    y -= alturaFaixa + 10;
+    indiceLinhaZebra = 0;
+  }
+
+  novaPagina();
+
+  const tituloAtivos = quebrarLinhas(
+    `Processos ativos da unidade "${sanitizarTextoPdf(nomeUnidade)}" — ${itens.length} processo(s), do mais antigo ao mais novo`,
+    fonteNegrito,
+    13,
+    larguraUtil
+  );
+  for (const linhaTitulo of tituloAtivos) {
+    pagina.drawText(linhaTitulo, { x: margem, y, size: 13, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+    y -= 17;
+  }
+  y -= 8;
+
+  desenharCabecalhoColunas();
+
+  for (const item of itens) {
+    const linhasPorColuna = colunas.map((coluna) =>
+      quebrarLinhas(sanitizarTextoPdf(String(item[coluna.campo] ?? "")), fonteNormal, TAMANHO_FONTE, coluna.largura - 4)
+    );
+    const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
+    const alturaLinha = maxLinhas * ALTURA_LINHA + ALTURA_LINHA * 0.4;
+
+    if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
+      novaPagina();
+      desenharCabecalhoColunas();
+    }
+
+    if (indiceLinhaZebra % 2 === 1) {
+      pagina.drawRectangle({
+        x: margem,
+        y: y - alturaLinha + ALTURA_LINHA * 0.3,
+        width: larguraUtil,
+        height: alturaLinha,
+        color: COR_CINZA_CLARO,
+      });
+    }
+    indiceLinhaZebra += 1;
+
+    let x = margem + 4;
+    for (let i = 0; i < colunas.length; i += 1) {
+      let yColuna = y;
+      for (const linhaTexto of linhasPorColuna[i]) {
+        try {
+          pagina.drawText(linhaTexto, { x, y: yColuna, size: TAMANHO_FONTE, font: fonteNormal, color: COR_CINZA_TEXTO });
+        } catch (e) {
+          // Ignora linha que a fonte padrao nao consiga desenhar.
+        }
+        yColuna -= ALTURA_LINHA;
+      }
+      x += colunas[i].largura;
+    }
+    y -= alturaLinha;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+
+  return pdf.save();
+}
+
 // Le' os nomes dos Localizadores de uma unidade - DIFERENTE do resto do
 // painel (que usa a tela "Localizadores do Órgão"): aqui a extracao e'
 // feita direto no Relatório Geral, ja' que e' onde o campo "Localizador"
@@ -3626,11 +3792,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   // de fora, sem quebrar o resto do relatório). Mesma ordem das seções
   // acima: ativos, suspensos e, por fim, remessas aos juízes leigos.
   if (opcoesFinais.processosAtivos && processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
-    const bytesTabela = await construirPdfTabelaDinamica(
-      processosAtivos.tabela.cabecalhos,
-      processosAtivos.tabela.linhas,
-      `Processos ativos da unidade "${nomeUnidade}" — ${processosAtivos.tabela.linhas.length} processo(s)`
-    );
+    const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade);
     const pdfTabela = await PDFDocument.load(bytesTabela);
     const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));

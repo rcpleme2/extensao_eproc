@@ -498,9 +498,13 @@ extração.
    - Nome da unidade e data/hora da extração.
    - **Relação de processos ativos**: o próprio Relatório Geral filtrado
      só pela unidade, sem nenhum outro campo preenchido (Situação, dias,
-     etc.) — equivalente a rodar a consulta "com os campos em branco",
-     trazendo todos os processos ativos daquela unidade numa tabela em
-     página à parte.
+     etc.) — equivalente a rodar a consulta "com os campos em branco". Sai
+     em **página retrato** própria, com só os campos **Nº do Processo,
+     Data da Autuação, Situação, Classe e Último Evento** (a tabela real
+     do eproc traz mais colunas, como Sigilo e Localizador, que ficam de
+     fora aqui) — casados pelo texto do cabeçalho, não pela posição, para
+     não depender da ordem exata das colunas na tela. Ordenada pela **Data
+     de Autuação, do processo mais antigo para o mais novo**.
    - **Suspensos/sobrestados**: há mais de 90 dias (grupo inteiro do
      filtro "Situação" — os values de `#selStatusProcesso` seguem o
      formato `status;codigo;grupo`; o grupo SUSPENSÃO é o sufixo `;S`) e
@@ -553,18 +557,24 @@ extração.
      (**sem** o total de processos — ver aviso abaixo), em páginas
      próprias no **final do PDF**, depois de todas as demais seções.
 
-   As "relações de processos" (ativos e suspensos) são lidas direto da
-   API do DataTables que alimenta a tabela de resultado do Relatório
-   Geral (`#tblProcessoLista`, mesma técnica já usada em outras tabelas
-   desta extensão) — mostra tudo de uma vez (sem paginação) antes de ler,
-   colunas limitadas às 8 primeiras para caber na página. A relação de
-   remessas aos juízes leigos usa a mesma técnica, direto na tabela
-   `#tbl_remessas_em_aberto` dessa tela. Essas leituras rodam no **MAIN
-   world** da página (`chrome.scripting.executeScript` com
-   `world: "MAIN"`) — o `jQuery`/`DataTable` da própria página só existe
-   nesse contexto; injetar no mundo isolado padrão (usado nas demais
-   funções, que só mexem no DOM) faria a extensão nunca enxergar esse
-   `jQuery`, mesmo com a tabela funcionando normalmente na tela. Se a
+   As "relações de processos" (ativos e suspensos) usam a API do
+   DataTables só para **mostrar tudo de uma vez** (sem paginação) na
+   tabela de resultado do Relatório Geral (`#tblProcessoLista`) antes de
+   ler; a leitura em si é feita direto nas células `<td>` já renderizadas
+   (na mesma ordem visual dos cabeçalhos), colunas limitadas às 8
+   primeiras. A relação de remessas aos juízes leigos usa a mesma técnica,
+   direto na tabela `#tbl_remessas_em_aberto` dessa tela. Ler da API
+   `rows().data()` (usada em versões anteriores) devolvia o objeto de
+   dados BRUTO de cada linha, cujas chaves nem sempre seguem a mesma
+   ordem das colunas visíveis — causava desalinhamento entre cabeçalho e
+   valor (ex.: coluna "Situação" saindo vazia com o conteúdo de outra
+   coluna aparecendo no lugar errado); ler as células já renderizadas
+   evita esse problema por completo. Essas leituras (e o "mostrar tudo")
+   rodam no **MAIN world** da página (`chrome.scripting.executeScript`
+   com `world: "MAIN"`) — o `jQuery`/`DataTable` da própria página só
+   existe nesse contexto; injetar no mundo isolado padrão (usado nas
+   demais funções, que só mexem no DOM) faria a extensão nunca enxergar
+   esse `jQuery`, mesmo com a tabela funcionando normalmente na tela. Se a
    extração falhar por qualquer motivo, um aviso aparece na capa e a
    seção simplesmente não entra no PDF, sem interromper o resto do
    relatório.
@@ -595,10 +605,11 @@ extração.
    "-" e recuo pendurado para nomes longos que precisem quebrar em mais
    de uma linha) em página(s) retrato próprias, no final do PDF — bem
    mais fácil de escanear visualmente do que um parágrafo corrido com
-   todos os nomes separados por vírgula. As relações de processos
-   ativos/suspensos usam página virada (paisagem), uma tabela por seção,
-   com colunas dinâmicas de acordo com o que a própria tela do eproc
-   mostrar. Já a relação de remessas aos juízes leigos usa página
+   todos os nomes separados por vírgula. A relação de **processos ativos**
+   usa página **retrato**, com as 5 colunas curadas descritas acima. A
+   relação de **suspensos/sobrestados** usa página virada (paisagem), com
+   colunas dinâmicas de acordo com o que a própria tela do eproc mostrar
+   (até 8 colunas). Já a relação de remessas aos juízes leigos usa página
    **retrato**, agrupada por juiz leigo (ver acima), com destaque em
    vermelho para prioridades legais. Título, cabeçalho e zebrado seguem a
    mesma identidade visual em todas as tabelas. Essa mesma identidade
