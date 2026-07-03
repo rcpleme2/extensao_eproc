@@ -4003,7 +4003,16 @@ async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, seco
   // couber mais antes do rodape) - diferente do laco de avisos acima, que
   // so' confere a altura estimada UMA vez no inicio.
   if (localizadores && localizadores.length > 0) {
-    const alturaLinha = 11;
+    const alturaLinha = 12;
+    // Um localizador por linha, com um marcador "-" e recuo pendurado
+    // (linhas de continuacao de um nome muito longo alinham embaixo do
+    // TEXTO, nao do marcador) - lista comprida em texto corrido virava
+    // um paragrafo unico dificil de escanear; um nome por linha e' bem
+    // mais facil de ler, mesmo custando mais altura de pagina.
+    const marcador = "-  ";
+    const larguraMarcador = fonteNormal.widthOfTextAtSize(marcador, 8.5);
+    const larguraTextoLocalizador = larguraUtil - larguraMarcador;
+
     if (y - (14 + alturaLinha) < PDF_ALTURA_RODAPE + margem) {
       ({ pagina, y } = novaPagina());
     }
@@ -4016,18 +4025,24 @@ async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, seco
     });
     y -= 14;
 
-    const linhasLocalizadores = quebrarLinhas(
-      sanitizarTextoPdf(localizadores.join(", ")),
-      fonteNormal,
-      8.5,
-      larguraUtil
-    );
-    for (const linha of linhasLocalizadores) {
-      if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
-        ({ pagina, y } = novaPagina());
-      }
-      pagina.drawText(linha, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
-      y -= alturaLinha;
+    for (const nome of localizadores) {
+      const linhasNome = quebrarLinhas(sanitizarTextoPdf(nome), fonteNormal, 8.5, larguraTextoLocalizador);
+      linhasNome.forEach((linhaTexto, indice) => {
+        if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
+          ({ pagina, y } = novaPagina());
+        }
+        if (indice === 0) {
+          pagina.drawText("-", { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+        }
+        pagina.drawText(linhaTexto, {
+          x: margem + larguraMarcador,
+          y,
+          size: 8.5,
+          font: fonteNormal,
+          color: COR_CINZA_TEXTO,
+        });
+        y -= alturaLinha;
+      });
     }
   }
 
@@ -4164,8 +4179,10 @@ async function exportarLocalizadores(formatos, aoProgredir) {
 // Reaproveita a mesma coleta multi-pagina de "Localizadores do Órgão"
 // (abrirAbaEColetarLocalizadores) para alimentar o dropdown de navegacao
 // rapida do painel: so' os localizadores com pelo menos 1 processo
-// atribuido (os outros nao tem link nenhum para navegar), ordenados por
-// nome para facilitar achar um especifico na lista.
+// atribuido (os outros nao tem link nenhum para navegar). Devolve na
+// ORDEM ORIGINAL da coleta (nao ordena por nome aqui) - quem decide se
+// ordena ou nao antes de exibir no dropdown e' o popup.js, respeitando a
+// configuracao "ordenarListas" (engrenagem do painel).
 async function listarLocalizadoresComProcessos(aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
@@ -4183,9 +4200,7 @@ async function listarLocalizadoresComProcessos(aoProgredir) {
     throw new Error(erro || "Nenhum localizador encontrado.");
   }
 
-  const comProcessos = itens
-    .filter((item) => item.totalProcessos > 0 && item.urlProcessos)
-    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  const comProcessos = itens.filter((item) => item.totalProcessos > 0 && item.urlProcessos);
 
   notificar("Finalizando...");
   return { localizadores: comProcessos, erroColeta: erro };

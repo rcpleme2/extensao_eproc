@@ -410,11 +410,37 @@ function adicionarBotaoAbrirPainel() {
   logo.insertAdjacentElement("afterend", botao);
 }
 
-substituirSiglaPorNomeUsuario();
+// Configuracao do painel (engrenagem): liga/desliga a substituicao da
+// sigla pelo nome+cargo. Default "true" preserva o comportamento de
+// antes dessa opcao existir. Le' uma vez no carregamento da pagina e
+// tambem escuta mudancas (chrome.storage.onChanged) para reagir na hora
+// se o usuario alternar a opcao com esta mesma aba do eproc ja' aberta,
+// sem precisar recarregar a pagina.
+let configSubstituirSiglaAtivo = true;
+
+function aplicarSubstituicaoSiglaSeAtivo() {
+  if (configSubstituirSiglaAtivo) substituirSiglaPorNomeUsuario();
+}
+
+chrome.storage.local.get({ substituirSigla: true }, (itens) => {
+  configSubstituirSiglaAtivo = itens.substituirSigla;
+  aplicarSubstituicaoSiglaSeAtivo();
+});
+
+chrome.storage.onChanged.addListener((mudancas, area) => {
+  if (area === "local" && mudancas.substituirSigla) {
+    configSubstituirSiglaAtivo = mudancas.substituirSigla.newValue;
+    aplicarSubstituicaoSiglaSeAtivo();
+    // Desligar agora nao desfaz o que ja foi trocado nesta pagina (exigiria
+    // guardar o texto original de cada label) - so' passa a nao trocar mais
+    // nada dai pra frente, ate' a proxima navegacao/recarregamento.
+  }
+});
+
 adicionarBotaoAbrirPainel();
 
 const observadorEventos = new MutationObserver(() => {
-  substituirSiglaPorNomeUsuario();
+  aplicarSubstituicaoSiglaSeAtivo();
   adicionarBotaoAbrirPainel();
 });
 observadorEventos.observe(document.body, { childList: true, subtree: true });

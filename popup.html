@@ -7,8 +7,17 @@
 </head>
 <body>
   <header class="cabecalho-app">
-    <h1>Extensão Auxiliar eProc</h1>
-    <span class="cabecalho-sub">TJPR · Sistema eProc</span>
+    <div class="cabecalho-titulos">
+      <h1>Extensão Auxiliar eProc</h1>
+      <span class="cabecalho-sub">TJPR · Sistema eProc</span>
+    </div>
+    <button
+      id="btn-abrir-configuracoes"
+      class="btn-config"
+      type="button"
+      title="Configurações"
+      aria-label="Abrir configurações"
+    >⚙</button>
   </header>
 
   <details class="card" id="card-documentos" open>
@@ -335,6 +344,25 @@
         <button id="modal-btn-abrir" type="button" class="btn">Abrir relatório</button>
         <button id="modal-btn-excel" type="button" class="btn-secundario">Exportar planilha (Excel)</button>
         <button id="modal-btn-cancelar" type="button" class="btn-ghost">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-configuracoes" class="modal-overlay" hidden>
+    <div class="modal-caixa">
+      <p class="modal-texto">Configurações</p>
+      <div class="opcoes">
+        <label class="opcao">
+          <input type="checkbox" id="chk-config-substituir-sigla" />
+          Substituir a sigla do usuário pelo nome e cargo na movimentação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-config-ordenar-listas" />
+          Classificar em ordem alfabética as listas em dropdowns
+        </label>
+      </div>
+      <div class="modal-botoes">
+        <button id="modal-config-fechar" type="button" class="btn-secundario">Fechar</button>
       </div>
     </div>
   </div>

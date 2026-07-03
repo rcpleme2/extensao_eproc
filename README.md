@@ -84,6 +84,30 @@ próprio HTML da página (a informação já existe ali, usada hoje só para o
 tooltip que aparece ao passar o mouse). O tooltip com cargo e lotação
 continua funcionando normalmente.
 
+Esse comportamento pode ser desligado na engrenagem de **Configurações**
+do painel (ver seção própria abaixo) — desligar não desfaz o que já foi
+trocado numa página já aberta (passa a valer a partir da próxima
+navegação/recarregamento daquela página).
+
+## Configurações
+
+O ícone de engrenagem (⚙) discreto no canto superior direito do painel
+abre um pequeno modal com duas opções, salvas em `chrome.storage.local`
+(preferências deste navegador, não sincronizadas entre máquinas):
+
+- **"Substituir a sigla do usuário pelo nome e cargo na movimentação"**
+  (ligado por padrão): controla a troca descrita na seção "Nomes de
+  usuário na movimentação" acima.
+- **"Classificar em ordem alfabética as listas em dropdowns"** (ligado
+  por padrão): controla se os menus suspensos preenchidos pela extensão
+  (unidades do Relatório da Unidade, localizadores da "Busca específica
+  de localizadores") aparecem em ordem alfabética ou na ordem em que o
+  eproc os devolveu. Não afeta o conteúdo de nenhum PDF/planilha
+  exportado — só os dropdowns do próprio painel.
+
+Cada opção salva assim que marcada/desmarcada (sem precisar de um botão
+"Salvar" separado); o botão "Fechar" só esconde o modal.
+
 ## PDF único combinado
 
 Ao escolher o modo "PDF único combinado", a extensão monta um único arquivo
@@ -415,7 +439,11 @@ extração (mesmo processo usado nas Remessas em Aberto).
    e lê todas as opções do filtro "Órgão/Juízo" dessa tela — visualmente
    um dropdown do bootstrap-select, mas a leitura é feita direto no
    `<select id="selIdOrgaoJuizo">` nativo por trás dele — preenchendo um
-   menu suspenso no painel.
+   menu suspenso no painel, em **ordem alfabética** (respeita a
+   configuração "Classificar em ordem alfabética as listas em dropdowns"
+   — ver seção "Configurações" abaixo). O botão **some assim que
+   clicado** — ele só serve para um carregamento inicial, e só volta a
+   aparecer se o carregamento falhar (para tentar de novo).
 2. Ao **escolher uma unidade** no menu, o painel mostra "Informações
    serão extraídas de: `<nome da unidade>`" e libera a lista **"Itens a
    incluir no PDF"** (7 checkboxes, um por seção do relatório — todos
@@ -471,16 +499,18 @@ extração (mesmo processo usado nas Remessas em Aberto).
    movimentação, remessas), rodapé com numeração de página e aviso de
    que o documento foi gerado pela extensão. A lista de Localizadores
    **não** vira uma tabela em página virada (paisagem) à parte — os
-   nomes entram como texto corrido na mesma página retrato da capa, logo
-   abaixo do aviso sobre o total de processos, com quebra de linha
-   automática dentro da margem e continuando em novas páginas (sempre com
-   o mesmo cabeçalho/rodapé) só se a lista for grande demais para caber
-   no que sobrou da página. Já a tabela de Remessas em Aberto usa página
-   virada com a mesma paleta (cabeçalho de coluna com fundo escuro e
-   texto branco, linhas com listras zebradas) — essa identidade visual
-   também vale para os PDFs de Localizadores/Processos por Localizador
-   exportados fora do painel da Corregedoria, já que reaproveitam o mesmo
-   gerador de tabela.
+   nomes entram **um por linha** (com um marcador "-" e recuo pendurado
+   para nomes longos que precisem quebrar em mais de uma linha) na mesma
+   página retrato da capa, logo abaixo do aviso sobre o total de
+   processos — bem mais fácil de escanear visualmente do que um
+   parágrafo corrido com todos os nomes separados por vírgula. Continua
+   em novas páginas (sempre com o mesmo cabeçalho/rodapé) só se a lista
+   for grande demais para caber no que sobrou da página. Já a tabela de
+   Remessas em Aberto usa página virada com a mesma paleta (cabeçalho de
+   coluna com fundo escuro e texto branco, linhas com listras zebradas) —
+   essa identidade visual também vale para os PDFs de Localizadores/
+   Processos por Localizador exportados fora do painel da Corregedoria,
+   já que reaproveitam o mesmo gerador de tabela.
 
    A extração dos Localizadores **não** usa a tela "Localizadores do
    Órgão" (diferente do resto do painel) — o Relatório Geral tem seu
@@ -629,7 +659,9 @@ Ao clicar em **"Carregar localizadores"**:
    atribuído — os demais não têm para onde navegar, já que o número da
    coluna "Total de processos" só é um link quando maior que zero.
 3. Preenche um menu suspenso com esses localizadores (nome e total de
-   processos entre parênteses), ordenados alfabeticamente.
+   processos entre parênteses), em ordem alfabética por padrão (respeita
+   a configuração "Classificar em ordem alfabética as listas em
+   dropdowns" — ver seção "Configurações" abaixo).
 
 Ao **escolher um localizador** no menu, aparecem duas ações (a escolha
 no menu sozinha não navega nem exporta nada — é preciso clicar em um dos

@@ -21,6 +21,52 @@ const ROTULO_FASE = {
   "md-unico": "MD único",
 };
 
+// Configurações do painel (engrenagem no cabeçalho) - guardadas em
+// chrome.storage.local (não sync: são preferências locais deste
+// navegador, não precisam seguir o usuário entre máquinas). Os valores
+// padrão preservam o comportamento de antes dessas opções existirem
+// (substituir a sigla já era feito sempre; ordenar listas alfabeticamente
+// também já era o padrão nas listas que já existiam).
+const CONFIG_PADRAO = {
+  substituirSigla: true,
+  ordenarListas: true,
+};
+
+function obterConfiguracoes() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(CONFIG_PADRAO, (itens) => resolve(itens));
+  });
+}
+
+function salvarConfiguracao(chave, valor) {
+  chrome.storage.local.set({ [chave]: valor });
+}
+
+const btnAbrirConfiguracoes = document.getElementById("btn-abrir-configuracoes");
+const modalConfiguracoes = document.getElementById("modal-configuracoes");
+const chkConfigSubstituirSigla = document.getElementById("chk-config-substituir-sigla");
+const chkConfigOrdenarListas = document.getElementById("chk-config-ordenar-listas");
+const modalConfigFechar = document.getElementById("modal-config-fechar");
+
+btnAbrirConfiguracoes.addEventListener("click", async () => {
+  const config = await obterConfiguracoes();
+  chkConfigSubstituirSigla.checked = config.substituirSigla;
+  chkConfigOrdenarListas.checked = config.ordenarListas;
+  modalConfiguracoes.hidden = false;
+});
+
+chkConfigSubstituirSigla.addEventListener("change", () => {
+  salvarConfiguracao("substituirSigla", chkConfigSubstituirSigla.checked);
+});
+
+chkConfigOrdenarListas.addEventListener("change", () => {
+  salvarConfiguracao("ordenarListas", chkConfigOrdenarListas.checked);
+});
+
+modalConfigFechar.addEventListener("click", () => {
+  modalConfiguracoes.hidden = true;
+});
+
 let estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [] };
 
 // Os tres modos sao mutuamente exclusivos (radio buttons), entao sempre
@@ -438,7 +484,12 @@ async function atualizarCardCorregedoria() {
 }
 
 btnRelatorioGerencialUnidade.addEventListener("click", async () => {
-  btnRelatorioGerencialUnidade.disabled = true;
+  // Some assim que clicado - so' serve para um carregamento inicial (o
+  // dropdown de unidades que ele preenche continua ali depois); manter o
+  // botao visivel (so' desabilitado) enquanto ja' tem uma lista carregada
+  // parecia sugerir que clicar de novo faria algo diferente. So' volta a
+  // aparecer se der erro, para o usuario poder tentar de novo.
+  btnRelatorioGerencialUnidade.hidden = true;
   areaErrosCorregedoria.hidden = true;
   areaSelectUnidade.hidden = true;
   areaUnidadeSelecionada.hidden = true;
@@ -462,7 +513,7 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
     areaErrosCorregedoria.hidden = false;
     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
     areaProgressoUnidades.hidden = true;
-    btnRelatorioGerencialUnidade.disabled = false;
+    btnRelatorioGerencialUnidade.hidden = false;
   }
 });
 
@@ -589,7 +640,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 atualizarCardCorregedoria();
 
-chrome.runtime.onMessage.addListener((mensagem) => {
+chrome.runtime.onMessage.addListener(async (mensagem) => {
   if (!mensagem) return;
 
   if (mensagem.tipo === "PROGRESSO_DOWNLOAD") {
@@ -688,12 +739,16 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
   if (mensagem.tipo === "UNIDADES_RELATORIO_FINALIZADO") {
     areaProgressoUnidades.hidden = true;
-    btnRelatorioGerencialUnidade.disabled = false;
 
     if (mensagem.ok) {
       const unidades = (mensagem.resultado && mensagem.resultado.unidades) || [];
+      const config = await obterConfiguracoes();
+      const unidadesExibidas = config.ordenarListas
+        ? [...unidades].sort((a, b) => a.texto.localeCompare(b.texto, "pt-BR"))
+        : unidades;
+
       selectUnidadeRelatorio.innerHTML = '<option value="" selected disabled>Selecione uma unidade...</option>';
-      for (const unidade of unidades) {
+      for (const unidade of unidadesExibidas) {
         const opcao = document.createElement("option");
         opcao.value = unidade.valor;
         opcao.textContent = unidade.texto;
@@ -704,10 +759,15 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         if (unidade.nomeDescritivo) opcao.dataset.nomeDescritivo = unidade.nomeDescritivo;
         selectUnidadeRelatorio.appendChild(opcao);
       }
-      areaSelectUnidade.hidden = unidades.length === 0;
+      areaSelectUnidade.hidden = unidadesExibidas.length === 0;
+      // Sem nenhuma unidade encontrada nao ha' nada mais a fazer com a
+      // lista carregada - reaparece o botao para o usuario poder tentar
+      // de novo (ex.: depois de navegar para uma pagina com o menu
+      // lateral disponivel).
+      if (unidadesExibidas.length === 0) btnRelatorioGerencialUnidade.hidden = false;
       setStatusCorregedoria(
-        unidades.length > 0
-          ? `${unidades.length} unidade(s) encontrada(s) no Relatório Geral - selecione uma.`
+        unidadesExibidas.length > 0
+          ? `${unidadesExibidas.length} unidade(s) encontrada(s) no Relatório Geral - selecione uma.`
           : "Nenhuma unidade encontrada no filtro Órgão/Juízo."
       );
     } else {
@@ -715,6 +775,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosCorregedoria.hidden = false;
       areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao carregar as unidades.";
+      btnRelatorioGerencialUnidade.hidden = false;
     }
   }
 
@@ -844,7 +905,7 @@ btnExportarLocalizadores.addEventListener("click", async () => {
   }
 });
 
-chrome.runtime.onMessage.addListener((mensagem) => {
+chrome.runtime.onMessage.addListener(async (mensagem) => {
   if (!mensagem) return;
 
   if (mensagem.tipo === "PROGRESSO_LOCALIZADORES") {
@@ -899,7 +960,10 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
-      const localizadores = resultado.localizadores || [];
+      const config = await obterConfiguracoes();
+      const localizadores = config.ordenarListas
+        ? [...(resultado.localizadores || [])].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
+        : resultado.localizadores || [];
       localizadoresCarregados = localizadores;
       areaAcoesLocalizador.hidden = true;
 

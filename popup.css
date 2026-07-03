@@ -68,6 +68,13 @@ body {
   border-bottom: 2px solid var(--cor-primaria);
 }
 
+.cabecalho-titulos {
+  display: flex;
+  align-items: baseline;
+  gap: var(--espaco-1);
+  min-width: 0;
+}
+
 .cabecalho-app h1 {
   font-size: 15px;
   font-weight: 700;
@@ -79,6 +86,28 @@ body {
   font-size: var(--fonte-pequena);
   color: var(--cor-texto-suave);
   white-space: nowrap;
+}
+
+/* Engrenagem discreta: so' aparece com destaque (cor primaria) no hover/
+   foco, o resto do tempo fica quase imperceptivel, coerente com ser uma
+   opcao secundaria e nao uma acao do dia a dia. */
+.btn-config {
+  align-self: center;
+  flex: none;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: var(--raio);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--cor-texto-suave);
+}
+
+.btn-config:hover,
+.btn-config:focus-visible {
+  color: var(--cor-primaria);
+  background: var(--cor-borda-suave);
 }
 
 /* ---- Cartões colapsáveis ----

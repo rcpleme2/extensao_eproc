@@ -3,7 +3,7 @@
   "name": "Extensão Auxiliar eProc",
   "version": "2.0",
   "description": "Extensão para auxiliar no uso e extração de relatórios do eProc",
-  "permissions": ["downloads", "activeTab", "scripting", "tabs", "sidePanel"],
+  "permissions": ["downloads", "activeTab", "scripting", "tabs", "sidePanel", "storage"],
   "host_permissions": ["*://*/eproc/*"],
   "side_panel": {
     "default_path": "popup.html"
