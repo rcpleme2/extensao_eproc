@@ -244,6 +244,8 @@ const valorSentencaMais30DiasEl = document.getElementById("valor-sentenca-mais30
 const valorSemMov30El = document.getElementById("valor-sem-mov-30");
 const valorSemMov90El = document.getElementById("valor-sem-mov-90");
 const valorSemMov120El = document.getElementById("valor-sem-mov-120");
+const valorAtivosEl = document.getElementById("valor-ativos");
+const valorSuspensosGeralEl = document.getElementById("valor-suspensos-geral");
 const avisoUrgenciaEl = document.getElementById("aviso-urgencia");
 const areaProgressoRelatorio = document.getElementById("area-progresso-relatorio");
 const textoProgressoRelatorio = document.getElementById("texto-progresso-relatorio");
@@ -421,11 +423,12 @@ const areaSelectUnidade = document.getElementById("area-select-unidade");
 const selectUnidadeRelatorio = document.getElementById("select-unidade-relatorio");
 const areaUnidadeSelecionada = document.getElementById("area-unidade-selecionada");
 const areaPersonalizarRelatorio = document.getElementById("area-personalizar-relatorio");
+const chkRelProcessosAtivos = document.getElementById("chk-rel-processos-ativos");
+const chkRelSuspensos = document.getElementById("chk-rel-suspensos");
 const chkRelConclusosDecisao = document.getElementById("chk-rel-conclusos-decisao");
 const chkRelConclusosSentenca = document.getElementById("chk-rel-conclusos-sentenca");
 const chkRelSemMovimentacao = document.getElementById("chk-rel-sem-movimentacao");
-const chkRelSuspensos = document.getElementById("chk-rel-suspensos");
-const chkRelProcessosAtivos = document.getElementById("chk-rel-processos-ativos");
+const chkRelRemessasJuizesLeigos = document.getElementById("chk-rel-remessas-juizes-leigos");
 const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
 const areaBtnExportarGerencial = document.getElementById("area-btn-exportar-gerencial");
 const btnExportarRelatorioGerencial = document.getElementById("btn-exportar-relatorio-gerencial");
@@ -541,11 +544,12 @@ selectUnidadeRelatorio.addEventListener("change", () => {
 // nenhuma traducao a mais.
 function lerOpcoesRelatorioUnidade() {
   return {
+    processosAtivos: chkRelProcessosAtivos.checked,
+    suspensos: chkRelSuspensos.checked,
     conclusosDecisao: chkRelConclusosDecisao.checked,
     conclusosSentenca: chkRelConclusosSentenca.checked,
     semMovimentacao: chkRelSemMovimentacao.checked,
-    suspensos: chkRelSuspensos.checked,
-    processosAtivos: chkRelProcessosAtivos.checked,
+    remessasJuizesLeigos: chkRelRemessasJuizesLeigos.checked,
     localizadores: chkRelLocalizadores.checked,
   };
 }
@@ -685,6 +689,11 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       valorSemMov90El.textContent = formatarContagem(semMovimentacao.dias90);
       valorSemMov120El.textContent = formatarContagem(semMovimentacao.dias120);
 
+      const processosAtivos = resultado.processosAtivos || {};
+      const suspensos = resultado.suspensos || {};
+      valorAtivosEl.textContent = formatarContagem(processosAtivos.total);
+      valorSuspensosGeralEl.textContent = formatarContagem(suspensos.total);
+
       areaRelatorio.hidden = false;
       definirBotoesValorHabilitados(true);
 
@@ -692,6 +701,8 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         ...(despacho.erros || []),
         ...(sentenca.erros || []),
         ...(semMovimentacao.erros || []),
+        ...(processosAtivos.erros || []),
+        ...(suspensos.erros || []),
       ];
       if (avisos.length > 0) {
         avisoUrgenciaEl.hidden = false;

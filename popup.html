@@ -113,6 +113,14 @@
       <div class="opcoes" id="area-personalizar-relatorio" hidden>
         <span class="legenda-opcoes">Itens a incluir no PDF:</span>
         <label class="opcao">
+          <input type="checkbox" id="chk-rel-processos-ativos" checked />
+          Relação de processos ativos
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-suspensos" checked />
+          Suspensos/sobrestados
+        </label>
+        <label class="opcao">
           <input type="checkbox" id="chk-rel-conclusos-decisao" checked />
           Conclusos para decisão
         </label>
@@ -125,12 +133,8 @@
           Processos sem movimentação
         </label>
         <label class="opcao">
-          <input type="checkbox" id="chk-rel-suspensos" checked />
-          Suspensos/sobrestados
-        </label>
-        <label class="opcao">
-          <input type="checkbox" id="chk-rel-processos-ativos" checked />
-          Relação de processos ativos
+          <input type="checkbox" id="chk-rel-remessas-juizes-leigos" checked />
+          Remessas aos juízes leigos
         </label>
         <label class="opcao">
           <input type="checkbox" id="chk-rel-localizadores" checked />
@@ -223,6 +227,23 @@
                 <td><button type="button" class="valor-link" id="valor-sem-mov-30" data-tipo="semMovimentacao" data-filtro="30" disabled></button></td>
                 <td><button type="button" class="valor-link" id="valor-sem-mov-90" data-tipo="semMovimentacao" data-filtro="90" disabled></button></td>
                 <td><button type="button" class="valor-link" id="valor-sem-mov-120" data-tipo="semMovimentacao" data-filtro="120" disabled></button></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <table class="tabela-relatorio tabela-relatorio-ativos-suspensos">
+            <thead>
+              <tr>
+                <th scope="col">Processos</th>
+                <th scope="col">Ativos</th>
+                <th scope="col">Suspensos/sobrestados</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Total</th>
+                <td id="valor-ativos"></td>
+                <td id="valor-suspensos-geral"></td>
               </tr>
             </tbody>
           </table>

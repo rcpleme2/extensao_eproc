@@ -62,6 +62,32 @@ function montarNomeArquivo(pastaBase, doc, sequencial) {
 
 const REGEX_IFRAME_CONTEUDO = /id=["']conteudoIframe["'][^>]*\ssrc=["']([^"']+)["']/i;
 
+// Nenhuma requisicao de rede desta extensao pode travar a exportacao para
+// sempre: se o eproc nao responder em 10s (proxy lento, sessao expirada
+// sem redirecionar, etc.), a requisicao especifica e' abortada, o item
+// (documento/consulta) e' pulado e o motivo entra nos avisos/erros do
+// resultado final, sem impedir os proximos itens de serem processados.
+const TIMEOUT_REQUISICAO_MS = 10000;
+
+// Envolve "fetch" com um AbortController que cancela a requisicao (nao so'
+// desiste de esperar - cancela de fato a conexao) apos "ms" milissegundos,
+// convertendo o timeout num erro tratavel normalmente pelo chamador (em
+// vez de a requisicao ficar pendurada indefinidamente).
+async function fetchComTimeout(url, opcoes, ms = TIMEOUT_REQUISICAO_MS) {
+  const controller = new AbortController();
+  const idTimeout = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...opcoes, signal: controller.signal });
+  } catch (e) {
+    if (e && e.name === "AbortError") {
+      throw new Error(`Tempo esgotado (${Math.round(ms / 1000)}s) aguardando resposta de "${url}".`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(idTimeout);
+  }
+}
+
 // A URL do link do documento (acao=acessar_documento) retorna uma pagina
 // "casca" em HTML com um <iframe id="conteudoIframe"> cujo src e' quem
 // efetivamente serve o arquivo (acao=acessar_documento_implementacao).
@@ -69,7 +95,7 @@ const REGEX_IFRAME_CONTEUDO = /id=["']conteudoIframe["'][^>]*\ssrc=["']([^"']+)[
 async function resolverUrlReal(url) {
   let resposta;
   try {
-    resposta = await fetch(url, { credentials: "same-origin" });
+    resposta = await fetchComTimeout(url, { credentials: "same-origin" });
   } catch (e) {
     return url;
   }
@@ -313,7 +339,7 @@ async function abrirAbaEExtrairHtmlDivDochtml(url) {
 // vez de devolver bytes binarios como se fossem texto.
 async function tentarFallbackFetchHtml(url) {
   try {
-    const resposta = await fetch(url, { credentials: "same-origin" });
+    const resposta = await fetchComTimeout(url, { credentials: "same-origin" });
     if (!resposta.ok) {
       return { html: null, erro: `Falha ao baixar via fetch (HTTP ${resposta.status}).` };
     }
@@ -370,10 +396,23 @@ async function obterConteudoHtmlReal(url, nomeDocumento) {
 // Converte o HTML do documento para texto simples, preservando quebras de
 // linha aproximadas (troca tags de bloco/<br> por "\n" antes de remover as
 // demais tags), para uso nas paginas de texto corrido do PDF unico.
+//
+// Documentos "html" do eproc (certidoes, mandados, atos ordinatorios) quase
+// sempre trazem um <style> de formatacao para impressao embutido no proprio
+// "#divdochtml", e ocasionalmente um <script>. Remover so' as TAGS (como a
+// versao anterior fazia) apaga "<style>" e "</style>", mas deixa o CONTEUDO
+// delas (regras CSS, codigo JS) solto no meio do texto como se fosse parte
+// do documento - e' isso que aparecia como "elementos do html" no resultado
+// final. Por isso essas duas tags precisam ser removidas por INTEIRO (tag +
+// conteudo) antes de qualquer outra substituicao.
 function converterHtmlParaTextoSimples(html) {
   return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<(br|BR)\s*\/?>/g, "\n")
     .replace(/<\/(p|P|div|DIV|li|LI|tr|TR|h[1-6]|H[1-6])>/g, "\n")
+    .replace(/<\/(td|TD|th|TH)>/g, "\t")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/g, "&")
@@ -381,6 +420,7 @@ function converterHtmlParaTextoSimples(html) {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -533,7 +573,7 @@ async function converterImagemParaPng(bytesOriginais, mimetypeOriginal) {
 
 async function adicionarDocumentoAoPdf(pdfFinal, fonteTexto, doc, urlReal) {
   if (doc.mimetype === "pdf") {
-    const resposta = await fetch(urlReal, { credentials: "same-origin" });
+    const resposta = await fetchComTimeout(urlReal, { credentials: "same-origin" });
     const bytes = await resposta.arrayBuffer();
     const pdfOrigem = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const paginasCopiadas = await pdfFinal.copyPages(pdfOrigem, pdfOrigem.getPageIndices());
@@ -542,7 +582,7 @@ async function adicionarDocumentoAoPdf(pdfFinal, fonteTexto, doc, urlReal) {
   }
 
   if (MIMETYPES_IMAGEM.has(doc.mimetype)) {
-    const resposta = await fetch(urlReal, { credentials: "same-origin" });
+    const resposta = await fetchComTimeout(urlReal, { credentials: "same-origin" });
     const bufferOriginal = await resposta.arrayBuffer();
     const { bytes, largura, altura } = await converterImagemParaPng(
       new Uint8Array(bufferOriginal),
@@ -734,7 +774,19 @@ function prepararAmbientePdfNaPagina() {
 
   window.__eprocExtrairTextoPdf = async function (parametros) {
     try {
-      const resposta = await fetch(parametros.url, { credentials: "same-origin" });
+      const controladorAbort = new AbortController();
+      const idTimeoutAbort = setTimeout(() => controladorAbort.abort(), 10000);
+      let resposta;
+      try {
+        resposta = await fetch(parametros.url, { credentials: "same-origin", signal: controladorAbort.signal });
+      } catch (e) {
+        if (e && e.name === "AbortError") {
+          throw new Error("Tempo esgotado (10s) baixando o documento.");
+        }
+        throw e;
+      } finally {
+        clearTimeout(idTimeoutAbort);
+      }
       if (!resposta.ok) {
         throw new Error(`Falha ao baixar o documento (HTTP ${resposta.status}).`);
       }
@@ -1783,7 +1835,19 @@ function buscarLocalizadoresViaFetchNaPagina() {
       }
 
       const urlAbsoluta = new URL(url, window.location.href).toString();
-      const resposta = await fetch(urlAbsoluta, { credentials: "same-origin" });
+      const controladorAbort = new AbortController();
+      const idTimeoutAbort = setTimeout(() => controladorAbort.abort(), 10000);
+      let resposta;
+      try {
+        resposta = await fetch(urlAbsoluta, { credentials: "same-origin", signal: controladorAbort.signal });
+      } catch (e) {
+        if (e && e.name === "AbortError") {
+          return { opcoes: [], erro: "Tempo esgotado (10s) buscando localizadores nesta página." };
+        }
+        throw e;
+      } finally {
+        clearTimeout(idTimeoutAbort);
+      }
       if (!resposta.ok) {
         return { opcoes: [], erro: `Falha ao buscar localizadores (HTTP ${resposta.status}).` };
       }
@@ -2531,8 +2595,36 @@ async function gerarRelatorioGeral(aoProgredir) {
     if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
   }
 
+  // Relação de processos ativos e suspensos/sobrestados - so' o total
+  // (sem "relação de processos"), na unidade atual (sem filtro de
+  // Órgão/Juízo: esse relatório roda sempre na unidade ja' habilitada no
+  // perfil logado).
+  const processosAtivos = { total: null, erros: [] };
+  notificar("Consultando a relação de processos ativos...");
+  {
+    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      valorSituacao: null,
+      urgente: false,
+      diasSituacao: null,
+    });
+    processosAtivos.total = r.contagem;
+    if (r.erro) processosAtivos.erros.push(r.erro);
+  }
+
+  const suspensos = { total: null, erros: [] };
+  notificar("Consultando suspensos/sobrestados...");
+  {
+    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      grupoSituacao: "S",
+      urgente: false,
+      diasSituacao: null,
+    });
+    suspensos.total = r.contagem;
+    if (r.erro) suspensos.erros.push(r.erro);
+  }
+
   notificar("Finalizando...");
-  return { despacho, sentenca, semMovimentacao };
+  return { despacho, sentenca, semMovimentacao, processosAtivos, suspensos };
 }
 
 // Atalho: navega a aba ATUAL (visivel) direto para a tela do Relatório
@@ -2683,6 +2775,223 @@ async function consultarBlocoUnidade(urlBase, valorOrgaoJuizo, nomeSituacao, val
 }
 
 
+// ---- Remessas aos juízes leigos (tela "Relatório de remessas em aberto") ----
+
+// Link de menu confirmado no HTML real da tela (menu lateral > Relatórios
+// > "Relatório de remessas em aberto"). Autocontida, executada via
+// chrome.scripting.executeScript.
+function clicarLinkRemessasJuizesLeigosNaPagina() {
+  const link = document.querySelector('a[href*="acao=relatorio_remessas_em_aberto/listar"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Seleciona o órgão julgador no filtro "Órgão Julgador" (#IdOrgaoSecretaria)
+// dessa tela - um <select> simples por baixo do bootstrap-select, mesmo
+// mecanismo ja' usado em "selecionarOrgaoJuizoRelatorioGeralNaPagina".
+function selecionarOrgaoRemessasJuizesLeigosNaPagina(valorOrgao) {
+  const select = document.getElementById("IdOrgaoSecretaria");
+  if (!select) {
+    return { ok: false, erro: 'Campo "Órgão Julgador" (#IdOrgaoSecretaria) não encontrado nesta página.' };
+  }
+
+  let encontrouOpcao = false;
+  for (const opcao of select.options) {
+    const selecionada = opcao.value === valorOrgao;
+    opcao.selected = selecionada;
+    if (selecionada) encontrouOpcao = true;
+  }
+  if (!encontrouOpcao) {
+    return { ok: false, erro: `Órgão "${valorOrgao}" não encontrado no filtro Órgão Julgador.` };
+  }
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return { ok: true, erro: null };
+}
+
+// Clica no botão "Consultar" do formulário de filtro (form="frmFiltroRemessasEmAberto").
+function clicarConsultarRemessasJuizesLeigosNaPagina() {
+  const botao =
+    document.querySelector('button[onclick*="submeterFrmFiltroRemessasEmAberto"]') ||
+    Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]')).find((el) =>
+      /consultar/i.test(el.textContent || el.value || "")
+    );
+  if (!botao) return false;
+  botao.click();
+  return true;
+}
+
+// Le' a tabela "#tbl_remessas_em_aberto" (DataTables), so' com as 4
+// colunas pedidas (Nome do Juiz Leigo, Número do Processo, Data Remessa,
+// Dias da Remessa - "Classe Judicial" fica de fora), casando pelo texto do
+// cabecalho para nao depender da ordem exata das colunas. Le' direto do
+// DOM ja' renderizado (apos "page.len(-1).draw(false)" mostrar todas as
+// linhas), em vez da API "rows().data()" - essa devolveria o objeto bruto
+// da linha (com campos como "LinkProcesso"/"DadoCompValor" que nao
+// interessam aqui), enquanto o DOM ja' traz exatamente o texto formatado
+// que aparece na tela (ex.: "5 Dia(s)"). Best-effort, nunca lanca excecao.
+async function extrairLinhasRemessasJuizesLeigosNaPagina() {
+  const LIMITE_LINHAS = 1000;
+
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  function textoLimpo(el) {
+    return (el && el.textContent ? el.textContent : "").replace(/\s+/g, " ").trim();
+  }
+
+  try {
+    if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
+      return { linhas: [], erro: "jQuery DataTables não disponível nesta página." };
+    }
+    const tabelaEl = jQuery("#tbl_remessas_em_aberto");
+    if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tbl_remessas_em_aberto")) {
+      return { linhas: [], erro: 'Tabela "#tbl_remessas_em_aberto" não encontrada ou ainda não inicializada.' };
+    }
+
+    const dt = tabelaEl.DataTable();
+    const aguardarRedesenho = () =>
+      Promise.race([
+        new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true))),
+        aguardar(8000).then(() => false),
+      ]);
+    const promessaMostrarTudo = aguardarRedesenho();
+    dt.page.len(-1).draw(false);
+    await promessaMostrarTudo;
+
+    const tabelaDom = document.getElementById("tbl_remessas_em_aberto");
+    const cabecalhos = Array.from(tabelaDom.querySelectorAll("thead th")).map(textoLimpo);
+    const idxJuiz = cabecalhos.findIndex((h) => /juiz/i.test(h));
+    const idxProcesso = cabecalhos.findIndex((h) => /processo/i.test(h));
+    const idxData = cabecalhos.findIndex((h) => /data remessa/i.test(h));
+    const idxDias = cabecalhos.findIndex((h) => /dias/i.test(h));
+
+    const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
+      (tr) => tr.querySelectorAll("td").length > 0
+    );
+
+    const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) => {
+      const celulas = Array.from(tr.querySelectorAll("td"));
+      const valor = (idx) => (idx >= 0 && celulas[idx] ? textoLimpo(celulas[idx]) : "");
+      const diasTexto = valor(idxDias);
+      const diasNumero = parseInt((diasTexto.match(/\d+/) || [])[0], 10);
+      return {
+        juiz: valor(idxJuiz),
+        processo: valor(idxProcesso),
+        dataRemessa: valor(idxData),
+        diasRemessa: diasTexto,
+        diasRemessaNumero: Number.isNaN(diasNumero) ? 0 : diasNumero,
+      };
+    });
+
+    return { linhas, erro: null };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Orquestra a consulta de remessas aos juízes leigos de uma unidade: abre
+// uma aba oculta, clica no link de menu, seleciona o órgão julgador,
+// consulta e extrai a tabela de resultado - mesmo padrao de aba
+// oculta/timeout ja' usado nas demais consultas do relatório gerencial.
+// Nunca lanca excecao: sempre resolve com { linhas, erro }.
+async function consultarRemessasJuizesLeigosUmaVez(urlBase, valorUnidade) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRemessasJuizesLeigosNaPagina,
+    });
+    if (!linkEncontrado) {
+      return {
+        linhas: [],
+        erro: 'Link "Relatório de remessas em aberto" não encontrado no menu lateral desta página.',
+      };
+    }
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const [{ result: selecaoOrgao } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: selecionarOrgaoRemessasJuizesLeigosNaPagina,
+      args: [valorUnidade],
+    });
+    if (!selecaoOrgao || !selecaoOrgao.ok) {
+      return { linhas: [], erro: (selecaoOrgao && selecaoOrgao.erro) || 'Falha ao selecionar o "Órgão Julgador".' };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarConsultarRemessasJuizesLeigosNaPagina,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: extrairLinhasRemessasJuizesLeigosNaPagina,
+    });
+    return result || { linhas: [], erro: "Sem resultado ao ler a tabela de remessas aos juízes leigos." };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
+}
+
+// Monta as páginas de PDF (A4 paisagem, reaproveitando "construirPdfTabela")
+// do relatório de remessas aos juízes leigos: primeiro uma tabela-resumo
+// com o total por juiz leigo (do maior para o menor), depois a tabela
+// discriminada com todos os processos, ordenada do mais antigo ao mais
+// novo (maior quantidade de dias em remessa primeiro).
+async function construirPdfRemessasJuizesLeigos(linhas, nomeUnidade) {
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+
+  const porJuiz = new Map();
+  for (const linha of linhas) {
+    const chave = linha.juiz || "(sem nome)";
+    porJuiz.set(chave, (porJuiz.get(chave) || 0) + 1);
+  }
+  const totalPorJuiz = Array.from(porJuiz.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([juiz, total]) => ({ juiz, total }));
+
+  const bytesTotalPorJuiz = await construirPdfTabela(
+    totalPorJuiz,
+    [
+      { titulo: "Juiz Leigo", largura: larguraUtil * 0.7, campo: "juiz" },
+      { titulo: "Total de processos", largura: larguraUtil * 0.3, campo: "total" },
+    ],
+    `Remessas aos juízes leigos da unidade "${nomeUnidade}" — total por juiz leigo`
+  );
+
+  const linhasOrdenadas = [...linhas].sort((a, b) => (b.diasRemessaNumero || 0) - (a.diasRemessaNumero || 0));
+  const bytesDiscriminado = await construirPdfTabela(
+    linhasOrdenadas,
+    [
+      { titulo: "Juiz Leigo", largura: larguraUtil * 0.3, campo: "juiz" },
+      { titulo: "Número do Processo", largura: larguraUtil * 0.3, campo: "processo" },
+      { titulo: "Data Remessa", largura: larguraUtil * 0.2, campo: "dataRemessa" },
+      { titulo: "Dias da Remessa", largura: larguraUtil * 0.2, campo: "diasRemessa" },
+    ],
+    `Remessas aos juízes leigos da unidade "${nomeUnidade}" — ${linhasOrdenadas.length} processo(s), do mais antigo ao mais novo`
+  );
+
+  const pdfFinal = await PDFDocument.create();
+  const pdfTotalPorJuiz = await PDFDocument.load(bytesTotalPorJuiz);
+  (await pdfFinal.copyPages(pdfTotalPorJuiz, pdfTotalPorJuiz.getPageIndices())).forEach((p) => pdfFinal.addPage(p));
+  const pdfDiscriminado = await PDFDocument.load(bytesDiscriminado);
+  (await pdfFinal.copyPages(pdfDiscriminado, pdfDiscriminado.getPageIndices())).forEach((p) => pdfFinal.addPage(p));
+
+  return pdfFinal.save();
+}
+
 // Le' os nomes dos Localizadores de uma unidade - DIFERENTE do resto do
 // painel (que usa a tela "Localizadores do Órgão"): aqui a extracao e'
 // feita direto no Relatório Geral, ja' que e' onde o campo "Localizador"
@@ -2729,11 +3038,12 @@ async function consultarLocalizadoresUnidadeViaRelatorioGeral(urlBase, valorOrga
 // consultas lentas dos itens que o usuario nao quer, nao so' o espaço no
 // PDF.
 const OPCOES_RELATORIO_UNIDADE_PADRAO = {
+  processosAtivos: true,
+  suspensos: true,
   conclusosDecisao: true,
   conclusosSentenca: true,
   semMovimentacao: true,
-  suspensos: true,
-  processosAtivos: true,
+  remessasJuizesLeigos: true,
   localizadores: true,
 };
 
@@ -2759,28 +3069,10 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
 
   const blocoVazio = () => ({ total: null, urgentes: null, naoUrgentes: null, mais90Dias: null, erros: [] });
 
-  const despacho = opcoesFinais.conclusosDecisao
-    ? await consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para decisão", VALOR_SITUACAO_AGUARDA_DESPACHO, notificar)
-    : blocoVazio();
-  const sentenca = opcoesFinais.conclusosSentenca
-    ? await consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para sentença", VALOR_SITUACAO_AGUARDA_SENTENCA, notificar)
-    : blocoVazio();
-
-  const semMovimentacao = { erros: [] };
-  if (opcoesFinais.semMovimentacao) {
-    for (const dias of FAIXAS_DIAS_SEM_MOVIMENTACAO) {
-      notificar(`Consultando processos sem movimentação há mais de ${dias} dias...`);
-      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-        valorSituacao: null,
-        urgente: false,
-        diasSituacao: null,
-        diasSemMovimentacao: dias,
-        valorOrgaoJuizo: valorUnidade,
-      });
-      semMovimentacao[`dias${dias}`] = r.contagem;
-      if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
-    }
-  }
+  // A ordem das consultas abaixo segue a ordem em que as seções aparecem
+  // no relatório final (e nos checkboxes do painel): processos ativos,
+  // suspensos/sobrestados, conclusos (decisão/sentença), sem
+  // movimentação, remessas aos juízes leigos e, por último, localizadores.
 
   // Relação de processos ativos: o proprio Relatório Geral, filtrado so'
   // pela unidade, sem nenhum outro campo preenchido (Situação, dias,
@@ -2845,6 +3137,40 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     }
   }
 
+  const despacho = opcoesFinais.conclusosDecisao
+    ? await consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para decisão", VALOR_SITUACAO_AGUARDA_DESPACHO, notificar)
+    : blocoVazio();
+  const sentenca = opcoesFinais.conclusosSentenca
+    ? await consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para sentença", VALOR_SITUACAO_AGUARDA_SENTENCA, notificar)
+    : blocoVazio();
+
+  const semMovimentacao = { erros: [] };
+  if (opcoesFinais.semMovimentacao) {
+    for (const dias of FAIXAS_DIAS_SEM_MOVIMENTACAO) {
+      notificar(`Consultando processos sem movimentação há mais de ${dias} dias...`);
+      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+        valorSituacao: null,
+        urgente: false,
+        diasSituacao: null,
+        diasSemMovimentacao: dias,
+        valorOrgaoJuizo: valorUnidade,
+      });
+      semMovimentacao[`dias${dias}`] = r.contagem;
+      if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
+    }
+  }
+
+  // Remessas aos juízes leigos: tela própria (menu "Relatórios" >
+  // "Relatório de remessas em aberto"), filtrada pelo mesmo órgão
+  // julgador da unidade escolhida.
+  const remessasJuizesLeigos = { linhas: [], erros: [] };
+  if (opcoesFinais.remessasJuizesLeigos) {
+    notificar("Consultando remessas aos juízes leigos...");
+    const r = await consultarRemessasJuizesLeigosUmaVez(abaAtual.url, valorUnidade);
+    remessasJuizesLeigos.linhas = r.linhas || [];
+    if (r.erro) remessasJuizesLeigos.erros.push(r.erro);
+  }
+
   let localizadoresOrdenados = [];
   let erroLocalizadores = null;
   if (opcoesFinais.localizadores) {
@@ -2871,8 +3197,31 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
 
   // So' entram no PDF as seções que o usuario marcou - nao so' esconder o
   // resultado de uma consulta que rodou mesmo assim (essa ja' nem rodou,
-  // ver os "if (opcoesFinais.xxx)" acima).
+  // ver os "if (opcoesFinais.xxx)" acima). Ordem: processos ativos,
+  // suspensos, conclusos (decisão/sentença), sem movimentação e remessas
+  // aos juízes leigos - a mesma ordem dos checkboxes no painel.
+  // Localizadores fica de fora daqui: sua lista de nomes é desenhada em
+  // páginas próprias, no final do PDF (ver "construirPaginaListaLocalizadores").
   const secoesResumo = [];
+  if (opcoesFinais.processosAtivos) {
+    secoesResumo.push({
+      titulo: "PROCESSOS ATIVOS",
+      linhas: [{ rotulo: "Total", valor: processosAtivos.total == null ? "?" : processosAtivos.total }],
+    });
+  }
+  if (opcoesFinais.suspensos) {
+    secoesResumo.push({
+      titulo: "SUSPENSOS / SOBRESTADOS",
+      linhas: [
+        {
+          rotulo: `Suspensos há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`,
+          valor: suspensos.mais90Dias == null ? "?" : suspensos.mais90Dias,
+        },
+        ...(suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem })),
+        { rotulo: "Total", valor: suspensos.total == null ? "?" : suspensos.total },
+      ],
+    });
+  }
   if (opcoesFinais.conclusosDecisao) {
     secoesResumo.push({ titulo: "CONCLUSOS PARA DECISÃO", linhas: linhasBloco(despacho) });
   }
@@ -2889,27 +3238,20 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
       ],
     });
   }
-  if (opcoesFinais.suspensos) {
+  if (opcoesFinais.remessasJuizesLeigos) {
     secoesResumo.push({
-      titulo: "SUSPENSOS / SOBRESTADOS",
-      linhas: [
-        {
-          rotulo: `Suspensos há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`,
-          valor: suspensos.mais90Dias == null ? "?" : suspensos.mais90Dias,
-        },
-        ...(suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem })),
-        { rotulo: "Total", valor: suspensos.total == null ? "?" : suspensos.total },
-      ],
-    });
-  }
-  if (opcoesFinais.processosAtivos) {
-    secoesResumo.push({
-      titulo: "PROCESSOS ATIVOS",
-      linhas: [{ rotulo: "Total", valor: processosAtivos.total == null ? "?" : processosAtivos.total }],
+      titulo: "REMESSAS AOS JUÍZES LEIGOS",
+      linhas: [{ rotulo: "Total de processos em remessa", valor: remessasJuizesLeigos.linhas.length }],
     });
   }
 
   const avisos = [];
+  if (opcoesFinais.processosAtivos && processosAtivos.erros.length > 0) {
+    avisos.push(`Processos ativos: ${processosAtivos.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.suspensos && suspensos.erros.length > 0) {
+    avisos.push(`Suspensos/sobrestados: ${suspensos.erros.join(" | ")}`);
+  }
   if (opcoesFinais.conclusosDecisao && despacho.erros.length > 0) {
     avisos.push(`Conclusos para decisão: ${despacho.erros.join(" | ")}`);
   }
@@ -2919,11 +3261,8 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   if (opcoesFinais.semMovimentacao && semMovimentacao.erros.length > 0) {
     avisos.push(`Processos sem movimentação: ${semMovimentacao.erros.join(" | ")}`);
   }
-  if (opcoesFinais.suspensos && suspensos.erros.length > 0) {
-    avisos.push(`Suspensos/sobrestados: ${suspensos.erros.join(" | ")}`);
-  }
-  if (opcoesFinais.processosAtivos && processosAtivos.erros.length > 0) {
-    avisos.push(`Processos ativos: ${processosAtivos.erros.join(" | ")}`);
+  if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.erros.length > 0) {
+    avisos.push(`Remessas aos juízes leigos: ${remessasJuizesLeigos.erros.join(" | ")}`);
   }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
   if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
@@ -2934,14 +3273,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     );
   }
 
-  const nomesLocalizadores = opcoesFinais.localizadores ? localizadoresOrdenados.map((l) => l.nome) : [];
-  const bytesCapa = await construirCapaRelatorioGerencial(
-    nomeUnidade,
-    dataInformacao,
-    secoesResumo,
-    avisos,
-    nomesLocalizadores
-  );
+  const bytesCapa = await construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoesResumo, avisos);
   const pdfCapa = await PDFDocument.load(bytesCapa);
   const pdfFinal = await PDFDocument.create();
   const paginasCapa = await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices());
@@ -2952,7 +3284,8 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   // tabela por secao, so' quando a extracao encontrou alguma linha
   // (best-effort: ver "extrairLinhasTblProcessoLista"; se falhar, o
   // aviso correspondente ja' foi acrescentado acima e a secao so' fica
-  // de fora, sem quebrar o resto do relatório).
+  // de fora, sem quebrar o resto do relatório). Mesma ordem das seções
+  // acima: ativos, suspensos e, por fim, remessas aos juízes leigos.
   if (opcoesFinais.processosAtivos && processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
     const bytesTabela = await construirPdfTabelaDinamica(
       processosAtivos.tabela.cabecalhos,
@@ -2971,6 +3304,26 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     );
     const pdfTabela = await PDFDocument.load(bytesTabela);
     const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0) {
+    const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
+    const pdfRemessas = await PDFDocument.load(bytesRemessas);
+    const paginas = await pdfFinal.copyPages(pdfRemessas, pdfRemessas.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  // Localizadores: so' a lista de nomes (sem total de processos - ver
+  // aviso acima), em páginas próprias no final do PDF, depois de todas as
+  // demais seções (inclusive as tabelas de remessas aos juízes leigos).
+  if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
+    const bytesLocalizadores = await construirPaginaListaLocalizadores(
+      nomeUnidade,
+      localizadoresOrdenados.map((l) => l.nome)
+    );
+    const pdfLocalizadores = await PDFDocument.load(bytesLocalizadores);
+    const paginas = await pdfFinal.copyPages(pdfLocalizadores, pdfLocalizadores.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
   }
 
@@ -3794,7 +4147,7 @@ function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, lar
 // parte (bytes), depois copiado para dentro do PDF final junto com as
 // tabelas de Localizadores/Remessas - mesmo padrao ja' usado para
 // combinar os PDFs de cada secao num unico arquivo.
-async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoes, avisos, localizadores) {
+async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoes, avisos) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
   const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -3860,56 +4213,71 @@ async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, seco
     }
   }
 
-  // Lista de nomes dos Localizadores - texto corrido (nao tabela em
-  // pagina virada), continuando na MESMA pagina do aviso acima que avisa
-  // sobre a ausencia do total de processos. Pode ter dezenas de nomes,
-  // entao "quebrarLinhas" cuida de nao estourar a largura da pagina e o
-  // laco abaixo cuida de nao estourar a altura (cria uma pagina nova, com
-  // o mesmo cabecalho institucional, sempre que a proxima linha nao
-  // couber mais antes do rodape) - diferente do laco de avisos acima, que
-  // so' confere a altura estimada UMA vez no inicio.
-  if (localizadores && localizadores.length > 0) {
-    const alturaLinha = 12;
-    // Um localizador por linha, com um marcador "-" e recuo pendurado
-    // (linhas de continuacao de um nome muito longo alinham embaixo do
-    // TEXTO, nao do marcador) - lista comprida em texto corrido virava
-    // um paragrafo unico dificil de escanear; um nome por linha e' bem
-    // mais facil de ler, mesmo custando mais altura de pagina.
-    const marcador = "-  ";
-    const larguraMarcador = fonteNormal.widthOfTextAtSize(marcador, 8.5);
-    const larguraTextoLocalizador = larguraUtil - larguraMarcador;
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
 
-    if (y - (14 + alturaLinha) < PDF_ALTURA_RODAPE + margem) {
-      ({ pagina, y } = novaPagina());
-    }
-    pagina.drawText(`Localizadores da unidade (${localizadores.length})`, {
-      x: margem,
-      y,
-      size: 10,
-      font: fonteNegrito,
-      color: COR_PRIMARIA_ESCURA,
-    });
-    y -= 14;
+  return pdf.save();
+}
 
-    for (const nome of localizadores) {
-      const linhasNome = quebrarLinhas(sanitizarTextoPdf(nome), fonteNormal, 8.5, larguraTextoLocalizador);
-      linhasNome.forEach((linhaTexto, indice) => {
-        if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
-          ({ pagina, y } = novaPagina());
-        }
-        if (indice === 0) {
-          pagina.drawText("-", { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
-        }
-        pagina.drawText(linhaTexto, {
-          x: margem + larguraMarcador,
-          y,
-          size: 8.5,
-          font: fonteNormal,
-          color: COR_CINZA_TEXTO,
-        });
-        y -= alturaLinha;
+// Paginas proprias (portrait) so' com a lista de nomes dos Localizadores -
+// extraida da capa (que hoje termina em "PROCESSOS SEM MOVIMENTAÇÃO"/
+// "REMESSAS AOS JUÍZES LEIGOS") para poder ficar sempre por ultimo no PDF,
+// depois de todas as demais seções e tabelas, conforme a ordem pedida para
+// o Relatório da Unidade. Mesmo layout "um nome por linha" de antes.
+async function construirPaginaListaLocalizadores(nomeUnidade, localizadores) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  function novaPagina() {
+    const pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    return { pagina, y: altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem };
+  }
+
+  let { pagina, y } = novaPagina();
+
+  pagina.drawText(`Localizadores da unidade "${sanitizarTextoPdf(nomeUnidade)}" (${localizadores.length})`, {
+    x: margem,
+    y,
+    size: 12,
+    font: fonteNegrito,
+    color: COR_PRIMARIA_ESCURA,
+  });
+  y -= 20;
+
+  const alturaLinha = 12;
+  // Um localizador por linha, com um marcador "-" e recuo pendurado
+  // (linhas de continuacao de um nome muito longo alinham embaixo do
+  // TEXTO, nao do marcador) - lista comprida em texto corrido virava
+  // um paragrafo unico dificil de escanear; um nome por linha e' bem
+  // mais facil de ler, mesmo custando mais altura de pagina.
+  const marcador = "-  ";
+  const larguraMarcador = fonteNormal.widthOfTextAtSize(marcador, 8.5);
+  const larguraTextoLocalizador = larguraUtil - larguraMarcador;
+
+  for (const nome of localizadores) {
+    const linhasNome = quebrarLinhas(sanitizarTextoPdf(nome), fonteNormal, 8.5, larguraTextoLocalizador);
+    linhasNome.forEach((linhaTexto, indice) => {
+      if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
+        ({ pagina, y } = novaPagina());
+      }
+      if (indice === 0) {
+        pagina.drawText("-", { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+      }
+      pagina.drawText(linhaTexto, {
+        x: margem + larguraMarcador,
+        y,
+        size: 8.5,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
       });
-    }
+      y -= alturaLinha;
+    });
   }
 
   desenharRodapePaginas(pdf, fonteNormal, largura, margem);

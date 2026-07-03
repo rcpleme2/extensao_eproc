@@ -88,20 +88,21 @@ body {
   white-space: nowrap;
 }
 
-/* Engrenagem discreta: so' aparece com destaque (cor primaria) no hover/
-   foco, o resto do tempo fica quase imperceptivel, coerente com ser uma
-   opcao secundaria e nao uma acao do dia a dia. */
+/* Engrenagem secundaria: visivel o suficiente para ser notada de cara
+   (fundo sutil + cor de texto normal, nao a mais apagada), mas ainda sem
+   competir com os botoes de acao - so' ganha destaque de verdade (cor
+   primaria) no hover/foco. */
 .btn-config {
   align-self: center;
   flex: none;
   border: none;
-  background: none;
+  background: var(--cor-borda-suave);
   cursor: pointer;
-  padding: 2px 5px;
+  padding: 3px 7px;
   border-radius: var(--raio);
-  font-size: 15px;
+  font-size: 17px;
   line-height: 1;
-  color: var(--cor-texto-suave);
+  color: var(--cor-texto);
 }
 
 .btn-config:hover,

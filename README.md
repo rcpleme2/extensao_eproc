@@ -106,8 +106,10 @@ navegação/recarregamento daquela página).
 
 ## Configurações
 
-O ícone de engrenagem (⚙) discreto no canto superior direito do painel
-abre um pequeno modal com uma opção, salva em `chrome.storage.local`
+O ícone de engrenagem (⚙) no canto superior direito do painel — com um
+fundo sutil para não passar despercebido, mas sem chamar mais atenção que
+os botões de ação — abre um pequeno modal com uma opção, salva em
+`chrome.storage.local`
 (preferência deste navegador, não sincronizada entre máquinas):
 
 - **"Substituir a sigla do usuário pelo nome e cargo na movimentação"**
@@ -263,7 +265,11 @@ completa") permite ajustar a detecção com precisão.
   antes de terminar), a extensão tenta como último recurso um download
   direto (`fetch` autenticado da mesma URL). Só quando isso também falha
   o documento entra no arquivo final com uma nota de erro. Veja a seção
-  de diagnóstico abaixo para os detalhes de cada tentativa.
+  de diagnóstico abaixo para os detalhes de cada tentativa. A conversão
+  para texto simples remove por inteiro (tag **e** conteúdo) qualquer
+  `<style>`/`<script>`/comentário embutido no HTML do documento (comum em
+  certidões/mandados, que trazem CSS de impressão junto) — sem isso, o
+  conteúdo dessas tags vazava como se fosse texto do próprio documento.
 
 ### Anonimização (melhor esforço)
 
@@ -332,10 +338,16 @@ exportação).
    falharem, um aviso `"tentando baixar bruto via fetch como último
    recurso"` indica que a extensão está tentando o fallback de download
    direto antes de desistir do documento.
-4. Nenhuma etapa demorada fica presa para sempre: download de documento
-   tem limite de 30s, e a extração de texto de cada PDF tem limite de
-   60s — ao estourar, vira um erro tratado normalmente (nos avisos do
-   arquivo final), em vez de travar a exportação inteira.
+4. Nenhuma requisição de rede fica presa para sempre: toda chamada
+   `fetch` feita pela extensão (resolver a URL real de um documento,
+   baixar o conteúdo de um PDF/imagem, buscar a lista de Localizadores)
+   usa um `AbortController` com limite de **10 segundos** — ao estourar,
+   a requisição específica é **abortada de fato** (não só "desistida"), o
+   item correspondente (documento, consulta) é pulado e o motivo
+   ("Tempo esgotado (10s) aguardando resposta de ...") entra nos
+   avisos/erros do resultado final, sem impedir os próximos itens de
+   serem processados. A extração de texto de cada PDF (que envolve várias
+   páginas, não só uma requisição) tem um limite maior, de 60s.
 
 ## Relatório Geral (conclusos para despacho/sentença)
 
@@ -468,12 +480,14 @@ extração.
    sem isso, mostra "Marque ao menos um item do relatório antes de
    exportar.".
 3. **"Exportar Relatório da Unidade (PDF)"** gera, filtrado pela unidade
-   escolhida e pelos itens marcados, um único PDF com:
+   escolhida e pelos itens marcados, um único PDF com as seções abaixo
+   **nesta ordem** (mesma ordem dos checkboxes "Itens a incluir no PDF"):
    - Nome da unidade e data/hora da extração.
-   - Conclusos para decisão e para sentença: Urgentes, Não urgentes
-     (calculado como Total − Urgentes, sem precisar de uma consulta a
-     mais), Aguardando há mais de 90 dias e, **por último, o Total**.
-   - Processos sem movimentação há mais de 30, 90 e 120 dias.
+   - **Relação de processos ativos**: o próprio Relatório Geral filtrado
+     só pela unidade, sem nenhum outro campo preenchido (Situação, dias,
+     etc.) — equivalente a rodar a consulta "com os campos em branco",
+     trazendo todos os processos ativos daquela unidade numa tabela em
+     página à parte.
    - **Suspensos/sobrestados**: há mais de 90 dias (grupo inteiro do
      filtro "Situação" — os values de `#selStatusProcesso` seguem o
      formato `status;codigo;grupo`; o grupo SUSPENSÃO é o sufixo `;S`) e
@@ -485,22 +499,34 @@ extração.
      depois de todos os processos individuais listados acima. Além do
      total, o relatório também traz a **relação de processos** (linhas
      reais do resultado, não só a contagem) numa tabela em página à
-     parte, logo depois da capa.
-   - **Relação de processos ativos**: o próprio Relatório Geral filtrado
-     só pela unidade, sem nenhum outro campo preenchido (Situação, dias,
-     etc.) — equivalente a rodar a consulta "com os campos em branco",
-     trazendo todos os processos ativos daquela unidade numa tabela em
-     página à parte.
+     parte.
+   - Conclusos para decisão e para sentença: Urgentes, Não urgentes
+     (calculado como Total − Urgentes, sem precisar de uma consulta a
+     mais), Aguardando há mais de 90 dias e, **por último, o Total**.
+   - Processos sem movimentação há mais de 30, 90 e 120 dias.
+   - **Remessas aos juízes leigos**: extraída da tela própria do menu
+     lateral "Relatórios → Relatório de remessas em aberto"
+     (`acao=relatorio_remessas_em_aberto/listar`), preenchendo o filtro
+     "Órgão Julgador" (`#IdOrgaoSecretaria`) com a mesma unidade
+     escolhida. Traz, em páginas à parte (paisagem): uma tabela-resumo
+     com o **total de processos por juiz leigo** (do maior para o menor)
+     e a **tabela discriminada** com Nome do Juiz Leigo, Número do
+     Processo, Data Remessa e Dias da Remessa de cada processo, ordenada
+     do **mais antigo para o mais novo** (maior quantidade de dias em
+     remessa primeiro).
    - O **nome de cada Localizador** da unidade, em ordem alfabética
-     (**sem** o total de processos — ver aviso abaixo).
+     (**sem** o total de processos — ver aviso abaixo), em páginas
+     próprias no **final do PDF**, depois de todas as demais seções.
 
-   As duas "relações de processos" (ativos e suspensos) são lidas direto
-   da API do DataTables que alimenta a tabela de resultado do Relatório
+   As "relações de processos" (ativos e suspensos) são lidas direto da
+   API do DataTables que alimenta a tabela de resultado do Relatório
    Geral (`#tblProcessoLista`, mesma técnica já usada em outras tabelas
    desta extensão) — mostra tudo de uma vez (sem paginação) antes de ler,
-   colunas limitadas às 8 primeiras para caber na página. Se a extração
-   falhar por qualquer motivo, um aviso aparece na capa e a seção
-   simplesmente não entra no PDF, sem interromper o resto do relatório.
+   colunas limitadas às 8 primeiras para caber na página. A relação de
+   remessas aos juízes leigos usa a mesma técnica, direto na tabela
+   `#tbl_remessas_em_aberto` dessa tela. Se a extração falhar por
+   qualquer motivo, um aviso aparece na capa e a seção simplesmente não
+   entra no PDF, sem interromper o resto do relatório.
 
    Desmarcar um item pula tanto a(s) consulta(s) dele quanto o trecho
    correspondente no PDF — não é só uma questão de esconder o resultado,
@@ -519,23 +545,21 @@ extração.
    O PDF segue uma identidade visual sóbria e institucional, com o
    cabeçalho **"TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ · Sistema eProc"**
    repetido no topo de cada página, capa com os números organizados em
-   seções coloridas (rótulo/valor, uma por bloco: decisão, sentença, sem
-   movimentação, suspensos), rodapé com numeração de página e aviso de
-   que o documento foi gerado pela extensão. A lista de Localizadores
-   **não** vira uma tabela em página virada (paisagem) à parte — os
-   nomes entram **um por linha** (com um marcador "-" e recuo pendurado
-   para nomes longos que precisem quebrar em mais de uma linha) na mesma
-   página retrato da capa, logo abaixo do aviso sobre o total de
-   processos — bem mais fácil de escanear visualmente do que um
-   parágrafo corrido com todos os nomes separados por vírgula. Continua
-   em novas páginas (sempre com o mesmo cabeçalho/rodapé) só se a lista
-   for grande demais para caber no que sobrou da página. Já as relações
-   de processos ativos/suspensos usam página virada (paisagem), uma
-   tabela por seção, com colunas dinâmicas de acordo com o que a própria
-   tela do eproc mostrar (título, cabeçalho e zebrado seguem a mesma
-   identidade visual). Essa mesma identidade visual também vale para os
-   PDFs de Localizadores/Processos por Localizador exportados fora do
-   painel da Corregedoria, já que reaproveitam o mesmo gerador de
+   seções coloridas (rótulo/valor, uma por bloco, na ordem acima), rodapé
+   com numeração de página e aviso de que o documento foi gerado pela
+   extensão. A lista de Localizadores **não** vira uma tabela em página
+   virada (paisagem) — os nomes entram **um por linha** (com um marcador
+   "-" e recuo pendurado para nomes longos que precisem quebrar em mais
+   de uma linha) em página(s) retrato próprias, no final do PDF — bem
+   mais fácil de escanear visualmente do que um parágrafo corrido com
+   todos os nomes separados por vírgula. Já as relações de processos
+   ativos/suspensos e a de remessas aos juízes leigos usam página virada
+   (paisagem), uma tabela por seção, com colunas dinâmicas de acordo com
+   o que a própria tela do eproc mostrar (título, cabeçalho e zebrado
+   seguem a mesma identidade visual). Essa mesma identidade visual também
+   vale para os PDFs de Localizadores/Processos por Localizador
+   exportados fora do painel da Corregedoria, já que reaproveitam o mesmo
+   gerador de
    tabela.
 
    A extração dos Localizadores **não** usa a tela "Localizadores do
