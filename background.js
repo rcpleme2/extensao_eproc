@@ -1950,20 +1950,91 @@ async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJui
   }
 }
 
-// Le' todas as opcoes de um grupo especifico do filtro "Situação"
-// (#selStatusProcesso, value no formato "status;codigo;grupo" - o mesmo
-// grupo usado por "selecionarGrupoSituacao") e roda, para CADA uma delas,
-// uma consulta separada (so' troca a Situação e clica Consultar de novo -
-// nenhum campo Tagify envolvido, entao reaproveita a MESMA aba/pagina
-// para todas as consultas do grupo, sem o custo de abrir uma aba nova por
-// item, exatamente como um usuario faria manualmente trocando o filtro
-// varias vezes seguidas na mesma tela). Usado para detalhar o total de
-// suspensos/sobrestados por situação especifica (quantos estao em
-// "SUSPENSAO", quantos em "SOBRESTADO CONVENIO", etc.) em vez de so' um
-// numero agregado do grupo inteiro. Autocontida, executada via
-// chrome.scripting.executeScript. Nunca lanca excecao: cada item devolve
-// seu proprio "erro" se algo falhar, sem interromper os demais.
-function consultarTodasSituacoesGrupoNaPagina(grupo) {
+// Le', SEM CONSULTAR nada, as opcoes de um grupo especifico do filtro
+// "Situação" (#selStatusProcesso, value no formato "status;codigo;grupo" -
+// o mesmo grupo usado por "selecionarGrupoSituacao"). Usada so' para
+// descobrir a lista antes de dividi-la em blocos e consultar em paralelo
+// (ver "abrirAbaEConsultarSituacoesGrupo"). Autocontida, executada via
+// chrome.scripting.executeScript.
+function listarSituacoesDoGrupoNaPagina(grupo) {
+  const select = document.getElementById("selStatusProcesso");
+  if (!select) {
+    return { opcoes: [], erro: 'Campo "Situação" (#selStatusProcesso) não encontrado nesta página.' };
+  }
+  const sufixo = `;${grupo}`;
+  const opcoes = Array.from(select.options)
+    .filter((opcao) => (opcao.value || "").endsWith(sufixo))
+    .map((opcao) => ({ valor: opcao.value, texto: (opcao.textContent || "").replace(/\s+/g, " ").trim() }));
+  if (opcoes.length === 0) {
+    return { opcoes: [], erro: `Nenhuma opção de situação do grupo "${grupo}" encontrada na lista.` };
+  }
+  return { opcoes, erro: null };
+}
+
+// Abre uma aba oculta, navega ate' o Relatório Geral, seleciona a unidade
+// pedida e le' (sem consultar) as opcoes do grupo indicado do filtro
+// "Situação".
+async function abrirAbaEListarSituacoesDoGrupo(urlBase, valorOrgaoJuizo, grupo) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioGeralNaPagina,
+    });
+    if (!linkEncontrado) {
+      return {
+        opcoes: [],
+        erro:
+          'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+      args: [valorOrgaoJuizo],
+    });
+    if (!resultadoSelecao || !resultadoSelecao.ok) {
+      return { opcoes: [], erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo." };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: listarSituacoesDoGrupoNaPagina,
+      args: [grupo],
+    });
+    return result || { opcoes: [], erro: "Sem resultado ao listar as situações do grupo." };
+  } catch (e) {
+    return { opcoes: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
+}
+
+// Roda, para CADA uma das opcoes recebidas (ja' definidas de fora - um
+// BLOCO de um grupo maior, nao o grupo inteiro), uma consulta separada
+// (so' troca a Situação e clica Consultar de novo - nenhum campo Tagify
+// envolvido, entao reaproveita a MESMA aba/pagina para todas as consultas
+// do bloco, sem o custo de abrir uma aba nova por item). Usada para
+// detalhar o total de suspensos/sobrestados por situação especifica
+// (quantos estao em "SUSPENSAO", quantos em "SOBRESTADO CONVENIO", etc.)
+// em vez de so' um numero agregado do grupo inteiro - varios blocos rodam
+// em ABAS SEPARADAS e em PARALELO (ver "abrirAbaEConsultarSituacoesGrupo"),
+// cada um cuidando so' da sua fatia da lista completa. Autocontida,
+// executada via chrome.scripting.executeScript. Nunca lanca excecao: cada
+// item devolve seu proprio "erro" se algo falhar, sem interromper os
+// demais itens do mesmo bloco.
+function consultarSituacoesEspecificasNaPagina(opcoesDoBloco) {
   function aguardar(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -2018,32 +2089,8 @@ function consultarTodasSituacoesGrupoNaPagina(grupo) {
       return { itens: [], erro: 'Campo "Situação" (#selStatusProcesso) não encontrado nesta página.' };
     }
 
-    const sufixo = `;${grupo}`;
-    const opcoesGrupo = Array.from(select.options)
-      .filter((opcao) => (opcao.value || "").endsWith(sufixo))
-      .map((opcao) => ({ valor: opcao.value, texto: (opcao.textContent || "").replace(/\s+/g, " ").trim() }));
-
-    if (opcoesGrupo.length === 0) {
-      return { itens: [], erro: `Nenhuma opção de situação do grupo "${grupo}" encontrada na lista.` };
-    }
-
-    // Cada uma das ~40 opcoes exige sua propria consulta sequencial (troca
-    // o filtro, clica Consultar, espera o resultado) - em unidades/eproc
-    // mais lentos isso pode somar minutos. Um orcamento de tempo TOTAL
-    // (nao por item) corta o laco assim que estourar, devolvendo o que ja'
-    // foi apurado ate' ali como resultado "parcial" em vez de travar a
-    // exportacao inteira so' para terminar de detalhar situacoes com
-    // poucos processos.
-    const ORCAMENTO_DETALHAMENTO_MS = 15000;
-    const inicioDetalhamento = Date.now();
-
     const itens = [];
-    let parcial = false;
-    for (const opcao of opcoesGrupo) {
-      if (Date.now() - inicioDetalhamento > ORCAMENTO_DETALHAMENTO_MS) {
-        parcial = true;
-        break;
-      }
+    for (const opcao of opcoesDoBloco) {
       try {
         const encontrou = selecionarSituacaoEspecifica(opcao.valor);
         if (!encontrou) {
@@ -2063,24 +2110,18 @@ function consultarTodasSituacoesGrupoNaPagina(grupo) {
       }
     }
 
-    return {
-      itens,
-      erro: null,
-      parcial,
-      motivoParcial: parcial
-        ? `Tempo limite (${ORCAMENTO_DETALHAMENTO_MS / 1000}s) atingido - ${
-            opcoesGrupo.length - itens.length
-          } de ${opcoesGrupo.length} situação(ões) não consultada(s).`
-        : null,
-    };
+    return { itens, erro: null };
   })();
 }
 
-// Abre uma aba oculta, navega ate' o Relatório Geral, seleciona a unidade
-// pedida e roda "consultarTodasSituacoesGrupoNaPagina" para detalhar, uma
-// por uma, todas as situações especificas de um grupo (ex.: cada
-// variante de suspensão/sobrestamento dentro do grupo "S").
-async function abrirAbaEConsultarSituacoesGrupo(urlBase, valorOrgaoJuizo, grupo) {
+// Abre uma aba oculta PROPRIA, navega ate' o Relatório Geral, seleciona a
+// unidade pedida e roda "consultarSituacoesEspecificasNaPagina" so' para o
+// bloco recebido - usada para poder chamar varias dessas em PARALELO
+// (Promise.all), uma aba por bloco. Tem seu proprio timeout: se essa aba
+// especifica travar, so' o bloco dela fica incompleto, sem afetar os
+// demais blocos que estao rodando ao mesmo tempo em outras abas.
+async function abrirAbaEConsultarSituacoesEspecificas(urlBase, valorOrgaoJuizo, opcoesDoBloco) {
+  const TIMEOUT_BLOCO_MS = 25000;
   let aba;
   try {
     aba = await chrome.tabs.create({ url: urlBase, active: false });
@@ -2091,7 +2132,6 @@ async function abrirAbaEConsultarSituacoesGrupo(urlBase, valorOrgaoJuizo, grupo)
       target: { tabId: aba.id },
       func: clicarLinkRelatorioGeralNaPagina,
     });
-
     if (!linkEncontrado) {
       return {
         itens: [],
@@ -2108,38 +2148,89 @@ async function abrirAbaEConsultarSituacoesGrupo(urlBase, valorOrgaoJuizo, grupo)
       func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
       args: [valorOrgaoJuizo],
     });
-
     if (!resultadoSelecao || !resultadoSelecao.ok) {
       return { itens: [], erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo." };
     }
-
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Camada extra de seguranca alem do orcamento interno de
-    // "consultarTodasSituacoesGrupoNaPagina" (que se auto-limita a 15s
-    // entre as consultas): se o proprio executeScript nunca retornar (aba
-    // travada, clique que nao dispara o resultado, etc.), esse timeout
-    // externo evita que o relatório gerencial fique preso indefinidamente
-    // nessa unica etapa - o total de suspensos (consultado à parte) segue
-    // disponível mesmo que o detalhamento por situação falhe por completo.
     const [{ result } = {}] = await comTimeout(
       chrome.scripting.executeScript({
         target: { tabId: aba.id },
-        func: consultarTodasSituacoesGrupoNaPagina,
-        args: [grupo],
+        func: consultarSituacoesEspecificasNaPagina,
+        args: [opcoesDoBloco],
       }),
-      30000,
-      `Tempo esgotado (30s) detalhando as situações do grupo "${grupo}".`
+      TIMEOUT_BLOCO_MS,
+      `Tempo esgotado (${TIMEOUT_BLOCO_MS / 1000}s) consultando um bloco de ${opcoesDoBloco.length} situação(ões).`
     );
 
-    return result || { itens: [], erro: "Sem resultado ao consultar as situações do grupo." };
+    return result || { itens: [], erro: "Sem resultado ao consultar o bloco de situações." };
   } catch (e) {
-    return { itens: [], erro: e && e.message ? e.message : String(e), parcial: true };
+    return { itens: [], erro: e && e.message ? e.message : String(e) };
   } finally {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
   }
+}
+
+// Divide uma lista em ate' "numBlocos" blocos (round-robin), descartando
+// blocos vazios - usado para repartir as ~40 opcoes de situação em (por
+// padrao) 5 fatias de ~8, uma por aba/consulta em paralelo.
+function dividirEmBlocos(lista, numBlocos) {
+  const total = Math.max(1, Math.min(numBlocos, lista.length));
+  const blocos = Array.from({ length: total }, () => []);
+  lista.forEach((item, indice) => {
+    blocos[indice % total].push(item);
+  });
+  return blocos.filter((bloco) => bloco.length > 0);
+}
+
+const NUM_BLOCOS_PARALELOS_SITUACOES = 5;
+
+// Detalha todas as situações especificas de um grupo (ex.: cada variante
+// de suspensão/sobrestamento dentro do grupo "S") em PARALELO: primeiro
+// lista as opcoes do grupo (uma aba rapida, so' leitura), depois divide
+// em ate' 5 blocos e consulta cada bloco numa aba PROPRIA, todas ao mesmo
+// tempo (Promise.all) - em vez de uma unica aba consultando as ~40
+// opcoes uma de cada vez. Cada bloco tem seu proprio timeout (25s); se
+// algum nao terminar a tempo, o resultado sai "parcial" (com o que os
+// demais blocos conseguiram apurar), mas nunca trava a exportação -
+// o TOTAL de suspensos (consultado à parte, fora desta função) nunca é
+// afetado por esse limite.
+async function abrirAbaEConsultarSituacoesGrupo(urlBase, valorOrgaoJuizo, grupo) {
+  const { opcoes, erro: erroListagem } = await abrirAbaEListarSituacoesDoGrupo(urlBase, valorOrgaoJuizo, grupo);
+  if (opcoes.length === 0) {
+    return { itens: [], erro: erroListagem || `Nenhuma opção de situação do grupo "${grupo}" encontrada.` };
+  }
+
+  const blocos = dividirEmBlocos(opcoes, NUM_BLOCOS_PARALELOS_SITUACOES);
+  const resultadosBlocos = await Promise.all(
+    blocos.map((bloco) => abrirAbaEConsultarSituacoesEspecificas(urlBase, valorOrgaoJuizo, bloco))
+  );
+
+  const itens = [];
+  const errosBlocos = [];
+  let itensEsperados = 0;
+  for (let i = 0; i < blocos.length; i += 1) {
+    itensEsperados += blocos[i].length;
+    const { itens: itensBloco, erro: erroBloco } = resultadosBlocos[i];
+    itens.push(...itensBloco);
+    if (erroBloco) errosBlocos.push(erroBloco);
+  }
+
+  const parcial = itens.length < itensEsperados || errosBlocos.length > 0;
+  return {
+    itens,
+    erro: null,
+    parcial,
+    motivoParcial: parcial
+      ? `Consulta em paralelo (${blocos.length} bloco(s) simultâneos) não concluiu a tempo - ${
+          itensEsperados - itens.length
+        } de ${itensEsperados} situação(ões) não consultada(s)${
+          errosBlocos.length > 0 ? ` (${errosBlocos.join(" | ")})` : ""
+        }.`
+      : null,
+  };
 }
 
 

@@ -499,16 +499,20 @@ extração.
      depois de todos os processos individuais listados acima. Além do
      total, o relatório também traz a **relação de processos** (linhas
      reais do resultado, não só a contagem) numa tabela em página à
-     parte. Como esse detalhamento faz uma consulta separada para CADA
-     uma das ~40 situações (uma de cada vez, na mesma aba), ele tem um
-     **orçamento de tempo total de 15s**: se estourar, a extensão para de
-     consultar novas situações e usa o que já tiver apurado até ali,
-     registrando um aviso discreto do tipo "Tempo limite (15s) atingido -
-     N de 40 situação(ões) não consultada(s)." — o **Total geral de
-     suspensos** (que vem de uma consulta separada, à parte) nunca é
-     afetado por esse limite, só o detalhamento fica incompleto. Há ainda
-     um limite externo de 30s (à prova de travamentos de página) que, se
-     estourar, também não impede o resto do relatório de ser gerado.
+     parte. Esse detalhamento é a parte mais demorada do relatório (uma
+     consulta por situação), então roda **em paralelo**: a lista de ~40
+     situações do grupo é dividida em **5 blocos** (de ~8 cada) e cada
+     bloco é consultado numa **aba oculta própria, simultaneamente** às
+     demais (em vez de uma única aba consultando as ~40 situações uma de
+     cada vez) — na prática, ~5x mais rápido que o modelo sequencial
+     anterior. Cada bloco tem seu próprio limite de tempo (25s); se
+     algum não terminar a tempo (ou falhar por qualquer motivo), o
+     relatório sai com o que os demais blocos conseguiram apurar e um
+     aviso discreto do tipo "Consulta em paralelo (5 bloco(s)
+     simultâneos) não concluiu a tempo - N de 40 situação(ões) não
+     consultada(s)." — o **Total geral de suspensos** (que vem de uma
+     consulta separada, à parte) nunca é afetado por esse limite, só o
+     detalhamento por situação específica fica incompleto.
    - Conclusos para decisão e para sentença: Urgentes, Não urgentes
      (calculado como Total − Urgentes, sem precisar de uma consulta a
      mais), Aguardando há mais de 90 dias e, **por último, o Total**.
