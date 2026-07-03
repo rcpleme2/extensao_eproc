@@ -1317,6 +1317,29 @@ function consultarUmaVezNaPagina(parametros) {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  // Seleciona TODAS as opcoes de um grupo de situacao de uma vez. Os
+  // values de "selStatusProcesso" seguem o formato "status;codigo;grupo"
+  // (ex.: "M;02;S") - o sufixo ";S" identifica o grupo SUSPENSÃO, ";M" o
+  // grupo MOVIMENTO, etc. Usado pelo Relatório da Unidade (Corregedoria)
+  // para contar suspensos/sobrestados (grupo S) e acervo em tramitacao
+  // (grupo M) sem precisar enumerar as ~40 opcoes uma a uma.
+  function selecionarGrupoSituacao(grupo) {
+    const select = document.getElementById("selStatusProcesso");
+    if (!select) throw new Error('Campo "Situação" não encontrado nesta página.');
+
+    const sufixo = `;${grupo}`;
+    let alguma = false;
+    for (const opcao of select.options) {
+      const selecionada = (opcao.value || "").endsWith(sufixo);
+      opcao.selected = selecionada;
+      if (selecionada) alguma = true;
+    }
+    if (!alguma) {
+      throw new Error(`Nenhuma opção de situação do grupo "${grupo}" encontrada na lista.`);
+    }
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   // Usado pelo Relatório Gerencial da Unidade (Corregedoria): filtra a
   // consulta por uma unidade especifica (Órgão/Juízo), em vez da unidade
   // padrao do perfil logado. Visualmente um dropdown do bootstrap-select,
@@ -1344,30 +1367,16 @@ function consultarUmaVezNaPagina(parametros) {
   // ...") para garantir que a mudanca seja percebida mesmo se algum
   // framework de formulario estiver "escutando" o proprio setter da
   // propriedade, alem de disparar os eventos nativos "input"/"change".
-  function definirDiasSituacao(dias) {
-    const input = document.getElementById("txtDiasSituacao");
+  // Generica: serve "Dias na situação" (#txtDiasSituacao), "Dias sem
+  // movimentação" (#txtDiasSemMovimentacao) e "Autuação fim"
+  // (#txtDataAutuacaoFim), entre outros campos de texto da tela.
+  function definirCampoTexto(idCampo, rotulo, valor) {
+    const input = document.getElementById(idCampo);
     if (!input) {
-      throw new Error('Campo "Dias na situação" (#txtDiasSituacao) não encontrado nesta página.');
+      throw new Error(`Campo "${rotulo}" (#${idCampo}) não encontrado nesta página.`);
     }
     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-    nativeSetter.call(input, String(dias));
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  // Mesma logica de "definirDiasSituacao", so' que para o campo "Dias sem
-  // movimentação" (#txtDiasSemMovimentacao), usado no demonstrativo de
-  // processos parados. Esse campo nao depende de nenhuma situacao
-  // selecionada no outro filtro.
-  function definirDiasSemMovimentacao(dias) {
-    const input = document.getElementById("txtDiasSemMovimentacao");
-    if (!input) {
-      throw new Error(
-        'Campo "Dias sem movimentação" (#txtDiasSemMovimentacao) não encontrado nesta página.'
-      );
-    }
-    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-    nativeSetter.call(input, String(dias));
+    nativeSetter.call(input, String(valor));
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }
@@ -1482,12 +1491,24 @@ function consultarUmaVezNaPagina(parametros) {
         selecionarSituacao(parametros.valorSituacao);
       }
 
+      // Grupo inteiro de situacoes (ex.: "S" = todos os SUSPENSÃO, "M" =
+      // todos os MOVIMENTO) - mutuamente exclusivo com "valorSituacao".
+      if (parametros.grupoSituacao) {
+        selecionarGrupoSituacao(parametros.grupoSituacao);
+      }
+
       if (parametros.diasSituacao != null) {
-        definirDiasSituacao(parametros.diasSituacao);
+        definirCampoTexto("txtDiasSituacao", "Dias na situação", parametros.diasSituacao);
       }
 
       if (parametros.diasSemMovimentacao != null) {
-        definirDiasSemMovimentacao(parametros.diasSemMovimentacao);
+        definirCampoTexto("txtDiasSemMovimentacao", "Dias sem movimentação", parametros.diasSemMovimentacao);
+      }
+
+      // Limite superior da data de autuação (formato dd/mm/aaaa) - usado
+      // para contar o acervo antigo ("autuados ha' mais de N anos").
+      if (parametros.dataAutuacaoFim) {
+        definirCampoTexto("txtDataAutuacaoFim", "Autuação (fim)", parametros.dataAutuacaoFim);
       }
 
       if (parametros.urgente) {
@@ -2091,6 +2112,14 @@ async function listarUnidadesRelatorioGeral(aoProgredir) {
 // aqui o pedido foi especificamente "aguardando há mais de 90 dias").
 const DIAS_LIMITE_ATRASO_UNIDADE = 90;
 
+// Faixas de idade (em anos desde a autuação) usadas na seção "Acervo
+// antigo em tramitação" do Relatório da Unidade.
+const ANOS_ACERVO_ANTIGO = [2, 5];
+
+// Dias sem movimentação usados no panorama de todas as varas (Relatório
+// Geral da Corregedoria).
+const DIAS_PANORAMA_SEM_MOVIMENTACAO = 90;
+
 // Consulta total/urgentes/+90 dias de uma situacao (despacho ou
 // sentenca) filtrada por uma unidade especifica - reaproveita
 // "abrirAbaEConsultarUmaVez"/"consultarUmaVezNaPagina" (mesmas funcoes
@@ -2227,6 +2256,56 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
     if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
   }
 
+  // Suspensos/sobrestados: grupo "S" inteiro do filtro Situação (todas
+  // as ~40 variantes de suspensão/sobrestamento de uma vez).
+  const suspensos = { total: null, mais90Dias: null, erros: [] };
+  notificar("Consultando suspensos/sobrestados: total...");
+  {
+    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      grupoSituacao: "S",
+      urgente: false,
+      diasSituacao: null,
+      valorOrgaoJuizo: valorUnidade,
+    });
+    suspensos.total = r.contagem;
+    if (r.erro) suspensos.erros.push(`total: ${r.erro}`);
+  }
+  notificar(`Consultando suspensos/sobrestados: há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias...`);
+  {
+    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      grupoSituacao: "S",
+      urgente: false,
+      diasSituacao: DIAS_LIMITE_ATRASO_UNIDADE,
+      valorOrgaoJuizo: valorUnidade,
+    });
+    suspensos.mais90Dias = r.contagem;
+    if (r.erro) suspensos.erros.push(`+${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${r.erro}`);
+  }
+
+  // Acervo antigo em tramitação: grupo "M" (MOVIMENTO) + limite superior
+  // na data de autuação (autuados ha' mais de N anos e ainda tramitando).
+  function dataAnosAtras(anos) {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - anos);
+    const dia = String(d.getDate()).padStart(2, "0");
+    const mes = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dia}/${mes}/${d.getFullYear()}`;
+  }
+
+  const acervoAntigo = { erros: [] };
+  for (const anos of ANOS_ACERVO_ANTIGO) {
+    notificar(`Consultando processos em tramitação autuados há mais de ${anos} ano(s)...`);
+    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      grupoSituacao: "M",
+      urgente: false,
+      diasSituacao: null,
+      dataAutuacaoFim: dataAnosAtras(anos),
+      valorOrgaoJuizo: valorUnidade,
+    });
+    acervoAntigo[`anos${anos}`] = r.contagem;
+    if (r.erro) acervoAntigo.erros.push(`${anos} ano(s): ${r.erro}`);
+  }
+
   const { localizadores, erro: erroLocalizadores } = await consultarLocalizadoresUnidadeViaRelatorioGeral(
     abaAtual.url,
     valorUnidade,
@@ -2265,6 +2344,23 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
       ],
     },
     {
+      titulo: "SUSPENSOS / SOBRESTADOS",
+      linhas: [
+        { rotulo: "Total", valor: suspensos.total == null ? "?" : suspensos.total },
+        {
+          rotulo: `Suspensos há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`,
+          valor: suspensos.mais90Dias == null ? "?" : suspensos.mais90Dias,
+        },
+      ],
+    },
+    {
+      titulo: "ACERVO ANTIGO EM TRAMITAÇÃO",
+      linhas: ANOS_ACERVO_ANTIGO.map((anos) => ({
+        rotulo: `Autuados há mais de ${anos} ano(s)`,
+        valor: acervoAntigo[`anos${anos}`] == null ? "?" : acervoAntigo[`anos${anos}`],
+      })),
+    },
+    {
       titulo: "REMESSAS EM ABERTO",
       linhas: [{ rotulo: "Total de processos", valor: remessas.length }],
     },
@@ -2274,6 +2370,8 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
   if (despacho.erros.length > 0) avisos.push(`Conclusos para decisão: ${despacho.erros.join(" | ")}`);
   if (sentenca.erros.length > 0) avisos.push(`Conclusos para sentença: ${sentenca.erros.join(" | ")}`);
   if (semMovimentacao.erros.length > 0) avisos.push(`Processos sem movimentação: ${semMovimentacao.erros.join(" | ")}`);
+  if (suspensos.erros.length > 0) avisos.push(`Suspensos/sobrestados: ${suspensos.erros.join(" | ")}`);
+  if (acervoAntigo.erros.length > 0) avisos.push(`Acervo antigo: ${acervoAntigo.erros.join(" | ")}`);
   if (erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
   if (erroRemessas) avisos.push(`Remessas em Aberto: ${erroRemessas}`);
 
