@@ -1669,12 +1669,94 @@ function listarLocalizadoresNoFiltroRelatorioGeralNaPagina() {
   })();
 }
 
+// Busca a lista completa de localizadores da unidade direto pelo mesmo
+// endpoint JSON que o proprio widget "Listar todos" chama por baixo dos
+// panos (confirmado inspecionando a aba de Rede do navegador:
+// "acao=relatorio_geral/listar_localizador_orgao&acao_origem=
+// relatorio_geral_listar&hash=..."), em vez de clicar no botao e ler o
+// dropdown do Tagify depois - um unico fetch, sem esperar nenhuma
+// animacao/render de dropdown. O "hash" e' um token por pagina/sessao;
+// primeiro tenta achar a URL exata desse endpoint (com o hash certo) em
+// algum <script> da propria pagina (e' de la' que o Tagify pega essa URL
+// para montar sua propria chamada), e so' cai para reaproveitar o hash
+// da URL da pagina atual se essa busca no HTML nao encontrar nada.
+//
+// Importante: esse endpoint devolve so' os NOMES dos localizadores
+// (IdLocalizadorOrgao/SigLocalizador/DesLocalizador) - nao inclui o total
+// de processos de cada um. Por isso "contagem" aqui sempre vem null; o
+// total continua vindo de uma consulta por localizador (ver
+// "consultarLocalizadoresUnidadeViaRelatorioGeral"), ja' que esse numero
+// depende da combinacao de filtros da consulta, nao e' um dado fixo do
+// localizador em si.
+function buscarLocalizadoresViaFetchNaPagina() {
+  return (async () => {
+    try {
+      // Normaliza as formas mais comuns de escapar essa URL dentro do
+      // HTML antes de procurar por ela: barra escapada de string JSON
+      // embutida num <script> ("\/"), unicode escape do "&" ("&")
+      // e entidade HTML do "&" ("&amp;") - sem isso, a URL exata que o
+      // Tagify usa (com o "hash" certo) pode nao bater com nenhuma das
+      // duas regras de busca abaixo, mesmo estando la' no HTML.
+      const htmlPagina = (document.documentElement ? document.documentElement.innerHTML : "")
+        .replace(/\\\//g, "/")
+        .replace(/\\u0026/gi, "&")
+        .replace(/&amp;/g, "&");
+
+      const matchUrl = htmlPagina.match(
+        /(controlador\.php\?acao=relatorio_geral(?:%2F|\/)listar_localizador_orgao[^"'\\]*)/i
+      );
+
+      let url;
+      if (matchUrl) {
+        url = matchUrl[1];
+      } else {
+        const matchHashPagina = window.location.href.match(/[?&]hash=([a-f0-9]+)/i);
+        if (!matchHashPagina) {
+          return {
+            opcoes: [],
+            erro: 'Não foi possível localizar a URL (nem o parâmetro "hash") do endpoint de localizadores nesta página.',
+          };
+        }
+        url = `controlador.php?acao=relatorio_geral/listar_localizador_orgao&acao_origem=relatorio_geral_listar&hash=${matchHashPagina[1]}`;
+      }
+
+      const urlAbsoluta = new URL(url, window.location.href).toString();
+      const resposta = await fetch(urlAbsoluta, { credentials: "same-origin" });
+      if (!resposta.ok) {
+        return { opcoes: [], erro: `Falha ao buscar localizadores (HTTP ${resposta.status}).` };
+      }
+
+      const dados = await resposta.json();
+      if (!Array.isArray(dados)) {
+        return { opcoes: [], erro: "Resposta inesperada ao buscar localizadores (não é uma lista)." };
+      }
+
+      const opcoes = dados.map((item) => {
+        const nome = item.DesLocalizador || item.SigLocalizador || String(item.IdLocalizadorOrgao);
+        return {
+          valor: nome,
+          texto: nome,
+          nome,
+          idLocalizadorOrgao: item.IdLocalizadorOrgao,
+          contagem: null,
+        };
+      });
+
+      return { opcoes, erro: null };
+    } catch (e) {
+      return { opcoes: [], erro: e && e.message ? e.message : String(e) };
+    }
+  })();
+}
+
 // Abre uma aba oculta, navega ate' o Relatório Geral, seleciona a
 // unidade pedida e le' as opcoes disponiveis no campo "Localizador" -
 // usado pelo Relatório Gerencial da Unidade antes de consultar o total
 // de processos de cada um (uma consulta por localizador, cada uma na
 // sua propria aba - ver comentario sobre estabilidade do Tagify acima de
-// "gerarRelatorioGeral").
+// "gerarRelatorioGeral"). Tenta primeiro o fetch direto do endpoint JSON
+// (mais rapido e confiavel); so' cai para a simulacao antiga via Tagify
+// ("Listar todos" + ler o dropdown) se o fetch nao encontrar nada.
 async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJuizo) {
   let aba;
   try {
@@ -1712,12 +1794,26 @@ async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJui
     // lista de sugestoes apos a troca de unidade.
     await new Promise((resolve) => setTimeout(resolve, 800));
 
+    const [{ result: resultadoFetch } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: buscarLocalizadoresViaFetchNaPagina,
+    });
+
+    if (resultadoFetch && resultadoFetch.opcoes && resultadoFetch.opcoes.length > 0) {
+      return resultadoFetch;
+    }
+
     const [{ result } = {}] = await chrome.scripting.executeScript({
       target: { tabId: aba.id },
       func: listarLocalizadoresNoFiltroRelatorioGeralNaPagina,
     });
 
-    return result || { opcoes: [], erro: "Sem resultado ao ler as opções do campo Localizador." };
+    return (
+      result || {
+        opcoes: [],
+        erro: (resultadoFetch && resultadoFetch.erro) || "Sem resultado ao ler as opções do campo Localizador.",
+      }
+    );
   } catch (e) {
     return { opcoes: [], erro: e && e.message ? e.message : String(e) };
   } finally {

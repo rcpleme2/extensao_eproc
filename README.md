@@ -480,20 +480,21 @@ extração (mesmo processo usado nas Remessas em Aberto).
    Órgão" (diferente do resto do painel) — o Relatório Geral tem seu
    próprio campo **"Localizador"** (um widget Tagify, igual ao de
    "Informação complementar"), que só lista os localizadores da unidade
-   depois que um Órgão/Juízo é selecionado no filtro da tela. Esse campo
-   começa sem nenhuma sugestão carregada — nem digitando um texto de
-   busca — até que o botão **"Listar todos"** (companion do `<select
-   id="selLocalizadorPrincipal">` por baixo do Tagify) seja clicado; a
-   extensão clica nele automaticamente antes de ler ou selecionar
-   qualquer opção do campo. Cada item do dropdown já vem com o total de
-   processos junto do nome (ex.: "GABINETE (42)") — a extensão lê esse
-   número direto do texto do item, **sem precisar abrir uma aba nem
-   rodar consulta nenhuma** para a maioria dos localizadores. Só cai para
-   o modo antigo (abrir uma aba nova, selecionar aquele localizador
-   específico no campo e rodar a consulta, um de cada vez — mesmo padrão
-   de estabilidade já usado para o campo Tagify de "Informação
-   complementar") nos itens em que esse número não vier junto no texto
-   do dropdown, o que deixa a extração bem mais rápida no caso comum.
+   depois que um Órgão/Juízo é selecionado no filtro da tela.
+
+   Para obter a **lista de nomes**, a extensão busca direto o mesmo
+   endpoint JSON que o botão **"Listar todos"** chama por baixo dos panos
+   (`acao=relatorio_geral/listar_localizador_orgao`, achado inspecionando
+   a aba de Rede do navegador) — um único `fetch`, sem clicar em nada nem
+   esperar o dropdown do Tagify renderizar. Só cai para o modo antigo
+   (clicar em "Listar todos" e ler os itens do dropdown do Tagify) se
+   esse fetch não encontrar a URL do endpoint na página ou a chamada
+   falhar. Esse endpoint, porém, devolve **só os nomes** dos
+   localizadores — não tem o total de processos de cada um —, então o
+   **total de processos continua vindo de uma consulta por localizador**
+   (uma aba nova por localizador, uma de cada vez), já que esse número
+   depende da combinação de filtros da consulta, não é um dado fixo do
+   localizador em si.
 
    As Remessas em Aberto vêm de uma tela separada, acessada pelo menu
    lateral **Relatórios → Relatório de remessas em aberto**
