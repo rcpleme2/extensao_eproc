@@ -499,7 +499,16 @@ extração.
      depois de todos os processos individuais listados acima. Além do
      total, o relatório também traz a **relação de processos** (linhas
      reais do resultado, não só a contagem) numa tabela em página à
-     parte.
+     parte. Como esse detalhamento faz uma consulta separada para CADA
+     uma das ~40 situações (uma de cada vez, na mesma aba), ele tem um
+     **orçamento de tempo total de 15s**: se estourar, a extensão para de
+     consultar novas situações e usa o que já tiver apurado até ali,
+     registrando um aviso discreto do tipo "Tempo limite (15s) atingido -
+     N de 40 situação(ões) não consultada(s)." — o **Total geral de
+     suspensos** (que vem de uma consulta separada, à parte) nunca é
+     afetado por esse limite, só o detalhamento fica incompleto. Há ainda
+     um limite externo de 30s (à prova de travamentos de página) que, se
+     estourar, também não impede o resto do relatório de ser gerado.
    - Conclusos para decisão e para sentença: Urgentes, Não urgentes
      (calculado como Total − Urgentes, sem precisar de uma consulta a
      mais), Aguardando há mais de 90 dias e, **por último, o Total**.
@@ -508,12 +517,19 @@ extração.
      lateral "Relatórios → Relatório de remessas em aberto"
      (`acao=relatorio_remessas_em_aberto/listar`), preenchendo o filtro
      "Órgão Julgador" (`#IdOrgaoSecretaria`) com a mesma unidade
-     escolhida. Traz, em páginas à parte (paisagem): uma tabela-resumo
-     com o **total de processos por juiz leigo** (do maior para o menor)
-     e a **tabela discriminada** com Nome do Juiz Leigo, Número do
-     Processo, Data Remessa e Dias da Remessa de cada processo, ordenada
-     do **mais antigo para o mais novo** (maior quantidade de dias em
-     remessa primeiro).
+     escolhida. Sai em **página retrato** (diferente das demais tabelas
+     deste relatório, que usam página virada), com o **total geral** no
+     topo e, em seguida, um bloco por juiz leigo (subtítulo com nome e
+     total daquele juiz) seguido da tabela com Nome do Juiz Leigo, Número
+     do Processo, Classe Processual, Data Remessa e Dias da Remessa de
+     cada processo dele, ordenada do **mais antigo para o mais novo**
+     (maior quantidade de dias em remessa primeiro). Processos com
+     **prioridade legal** (idoso, doença grave etc. — identificados pelo
+     `<label>` extra que o eproc inclui na célula de Classe Processual
+     desses processos) aparecem com o **número do processo em vermelho**
+     e o motivo da prioridade **entre parênteses** logo depois (ex.:
+     "0000001-11.2024.8.16.0001 (Idoso)"), com uma legenda no topo da
+     página explicando a cor sempre que houver ao menos um caso.
    - O **nome de cada Localizador** da unidade, em ordem alfabética
      (**sem** o total de processos — ver aviso abaixo), em páginas
      próprias no **final do PDF**, depois de todas as demais seções.
@@ -552,14 +568,16 @@ extração.
    "-" e recuo pendurado para nomes longos que precisem quebrar em mais
    de uma linha) em página(s) retrato próprias, no final do PDF — bem
    mais fácil de escanear visualmente do que um parágrafo corrido com
-   todos os nomes separados por vírgula. Já as relações de processos
-   ativos/suspensos e a de remessas aos juízes leigos usam página virada
-   (paisagem), uma tabela por seção, com colunas dinâmicas de acordo com
-   o que a própria tela do eproc mostrar (título, cabeçalho e zebrado
-   seguem a mesma identidade visual). Essa mesma identidade visual também
-   vale para os PDFs de Localizadores/Processos por Localizador
-   exportados fora do painel da Corregedoria, já que reaproveitam o mesmo
-   gerador de
+   todos os nomes separados por vírgula. As relações de processos
+   ativos/suspensos usam página virada (paisagem), uma tabela por seção,
+   com colunas dinâmicas de acordo com o que a própria tela do eproc
+   mostrar. Já a relação de remessas aos juízes leigos usa página
+   **retrato**, agrupada por juiz leigo (ver acima), com destaque em
+   vermelho para prioridades legais. Título, cabeçalho e zebrado seguem a
+   mesma identidade visual em todas as tabelas. Essa mesma identidade
+   visual também vale para os PDFs de Localizadores/Processos por
+   Localizador exportados fora do painel da Corregedoria, já que
+   reaproveitam o mesmo gerador de
    tabela.
 
    A extração dos Localizadores **não** usa a tela "Localizadores do

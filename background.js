@@ -19,6 +19,7 @@ const COR_CINZA_TEXTO = rgb(0.35, 0.35, 0.35);
 const COR_CINZA_CLARO = rgb(0.95, 0.96, 0.97);
 const COR_CINZA_BORDA = rgb(0.82, 0.85, 0.87);
 const COR_BRANCO = rgb(1, 1, 1);
+const COR_ALERTA_VERMELHO = rgb(0.75, 0.1, 0.1);
 
 // Abre o painel lateral (side panel) ao clicar no icone da extensao, em
 // vez do popup efemero padrao, para que ele permaneca visivel enquanto o
@@ -2026,8 +2027,23 @@ function consultarTodasSituacoesGrupoNaPagina(grupo) {
       return { itens: [], erro: `Nenhuma opção de situação do grupo "${grupo}" encontrada na lista.` };
     }
 
+    // Cada uma das ~40 opcoes exige sua propria consulta sequencial (troca
+    // o filtro, clica Consultar, espera o resultado) - em unidades/eproc
+    // mais lentos isso pode somar minutos. Um orcamento de tempo TOTAL
+    // (nao por item) corta o laco assim que estourar, devolvendo o que ja'
+    // foi apurado ate' ali como resultado "parcial" em vez de travar a
+    // exportacao inteira so' para terminar de detalhar situacoes com
+    // poucos processos.
+    const ORCAMENTO_DETALHAMENTO_MS = 15000;
+    const inicioDetalhamento = Date.now();
+
     const itens = [];
+    let parcial = false;
     for (const opcao of opcoesGrupo) {
+      if (Date.now() - inicioDetalhamento > ORCAMENTO_DETALHAMENTO_MS) {
+        parcial = true;
+        break;
+      }
       try {
         const encontrou = selecionarSituacaoEspecifica(opcao.valor);
         if (!encontrou) {
@@ -2047,7 +2063,16 @@ function consultarTodasSituacoesGrupoNaPagina(grupo) {
       }
     }
 
-    return { itens, erro: null };
+    return {
+      itens,
+      erro: null,
+      parcial,
+      motivoParcial: parcial
+        ? `Tempo limite (${ORCAMENTO_DETALHAMENTO_MS / 1000}s) atingido - ${
+            opcoesGrupo.length - itens.length
+          } de ${opcoesGrupo.length} situação(ões) não consultada(s).`
+        : null,
+    };
   })();
 }
 
@@ -2090,15 +2115,26 @@ async function abrirAbaEConsultarSituacoesGrupo(urlBase, valorOrgaoJuizo, grupo)
 
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const [{ result } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: consultarTodasSituacoesGrupoNaPagina,
-      args: [grupo],
-    });
+    // Camada extra de seguranca alem do orcamento interno de
+    // "consultarTodasSituacoesGrupoNaPagina" (que se auto-limita a 15s
+    // entre as consultas): se o proprio executeScript nunca retornar (aba
+    // travada, clique que nao dispara o resultado, etc.), esse timeout
+    // externo evita que o relatório gerencial fique preso indefinidamente
+    // nessa unica etapa - o total de suspensos (consultado à parte) segue
+    // disponível mesmo que o detalhamento por situação falhe por completo.
+    const [{ result } = {}] = await comTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: consultarTodasSituacoesGrupoNaPagina,
+        args: [grupo],
+      }),
+      30000,
+      `Tempo esgotado (30s) detalhando as situações do grupo "${grupo}".`
+    );
 
     return result || { itens: [], erro: "Sem resultado ao consultar as situações do grupo." };
   } catch (e) {
-    return { itens: [], erro: e && e.message ? e.message : String(e) };
+    return { itens: [], erro: e && e.message ? e.message : String(e), parcial: true };
   } finally {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
@@ -2821,15 +2857,24 @@ function clicarConsultarRemessasJuizesLeigosNaPagina() {
   return true;
 }
 
-// Le' a tabela "#tbl_remessas_em_aberto" (DataTables), so' com as 4
-// colunas pedidas (Nome do Juiz Leigo, Número do Processo, Data Remessa,
-// Dias da Remessa - "Classe Judicial" fica de fora), casando pelo texto do
-// cabecalho para nao depender da ordem exata das colunas. Le' direto do
-// DOM ja' renderizado (apos "page.len(-1).draw(false)" mostrar todas as
-// linhas), em vez da API "rows().data()" - essa devolveria o objeto bruto
-// da linha (com campos como "LinkProcesso"/"DadoCompValor" que nao
-// interessam aqui), enquanto o DOM ja' traz exatamente o texto formatado
-// que aparece na tela (ex.: "5 Dia(s)"). Best-effort, nunca lanca excecao.
+// Le' a tabela "#tbl_remessas_em_aberto" (DataTables), com as colunas
+// pedidas (Nome do Juiz Leigo, Número do Processo, Classe Processual,
+// Data Remessa, Dias da Remessa), casando pelo texto do cabecalho para
+// nao depender da ordem exata das colunas. Le' direto do DOM ja'
+// renderizado (apos "page.len(-1).draw(false)" mostrar todas as linhas),
+// em vez da API "rows().data()" - essa devolveria o objeto bruto da linha
+// (com campos como "LinkProcesso" que nao interessam aqui), enquanto o
+// DOM ja' traz exatamente o texto formatado que aparece na tela (ex.: "5
+// Dia(s)"). Best-effort, nunca lanca excecao.
+//
+// Processos com prioridade legal (idoso, doente grave, etc.) aparecem na
+// celula de Classe Processual com um <label style="color:red;..."> extra
+// junto da classe (confirmado no HTML real da tela) - ex.:
+// "PROCEDIMENTO DO JUIZADO ESPECIAL CÍVEL<br><label ...>Idoso</label>".
+// O motivo (texto do <label>) e' extraido separadamente do texto da
+// classe (clonando a celula e removendo o <label> antes de ler o
+// textContent), para poder destacar o processo no PDF sem misturar o
+// motivo dentro do nome da classe.
 async function extrairLinhasRemessasJuizesLeigosNaPagina() {
   const LIMITE_LINHAS = 1000;
 
@@ -2863,6 +2908,7 @@ async function extrairLinhasRemessasJuizesLeigosNaPagina() {
     const cabecalhos = Array.from(tabelaDom.querySelectorAll("thead th")).map(textoLimpo);
     const idxJuiz = cabecalhos.findIndex((h) => /juiz/i.test(h));
     const idxProcesso = cabecalhos.findIndex((h) => /processo/i.test(h));
+    const idxClasse = cabecalhos.findIndex((h) => /classe/i.test(h));
     const idxData = cabecalhos.findIndex((h) => /data remessa/i.test(h));
     const idxDias = cabecalhos.findIndex((h) => /dias/i.test(h));
 
@@ -2875,9 +2921,24 @@ async function extrairLinhasRemessasJuizesLeigosNaPagina() {
       const valor = (idx) => (idx >= 0 && celulas[idx] ? textoLimpo(celulas[idx]) : "");
       const diasTexto = valor(idxDias);
       const diasNumero = parseInt((diasTexto.match(/\d+/) || [])[0], 10);
+
+      let classe = "";
+      let prioridade = null;
+      if (idxClasse >= 0 && celulas[idxClasse]) {
+        const celulaClasse = celulas[idxClasse].cloneNode(true);
+        const labelEl = celulaClasse.querySelector("label");
+        if (labelEl) {
+          prioridade = textoLimpo(labelEl) || null;
+          labelEl.remove();
+        }
+        classe = textoLimpo(celulaClasse);
+      }
+
       return {
         juiz: valor(idxJuiz),
         processo: valor(idxProcesso),
+        classe,
+        prioridade,
         dataRemessa: valor(idxData),
         diasRemessa: diasTexto,
         diasRemessaNumero: Number.isNaN(diasNumero) ? 0 : diasNumero,
@@ -2945,51 +3006,180 @@ async function consultarRemessasJuizesLeigosUmaVez(urlBase, valorUnidade) {
   }
 }
 
-// Monta as páginas de PDF (A4 paisagem, reaproveitando "construirPdfTabela")
-// do relatório de remessas aos juízes leigos: primeiro uma tabela-resumo
-// com o total por juiz leigo (do maior para o menor), depois a tabela
-// discriminada com todos os processos, ordenada do mais antigo ao mais
-// novo (maior quantidade de dias em remessa primeiro).
+const REMESSAS_TAMANHO_FONTE = 8.5;
+const REMESSAS_ALTURA_LINHA = REMESSAS_TAMANHO_FONTE * 1.35;
+
+// Monta o PDF (A4 RETRATO, diferente das demais tabelas desta extensao -
+// que usam pagina virada) do relatório de remessas aos juízes leigos:
+// total geral no topo, depois um bloco por juiz leigo (subtitulo com o
+// nome + total daquele juiz, seguido da tabela com todos os processos
+// dele, ordenados do mais antigo para o mais novo - maior quantidade de
+// dias em remessa primeiro). Processos com prioridade legal (campo
+// "prioridade" preenchido, vindo do <label> da celula de Classe
+// Processual) tem o numero do processo desenhado em vermelho, com o
+// motivo entre parenteses logo depois.
 async function construirPdfRemessasJuizesLeigos(linhas, nomeUnidade) {
-  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  const colunas = [
+    { titulo: "Juiz Leigo", largura: larguraUtil * 0.18, campo: "juiz" },
+    { titulo: "Número do Processo", largura: larguraUtil * 0.25, campo: "processo" },
+    { titulo: "Classe Processual", largura: larguraUtil * 0.25, campo: "classe" },
+    { titulo: "Data Remessa", largura: larguraUtil * 0.16, campo: "dataRemessa" },
+    { titulo: "Dias Remessa", largura: larguraUtil * 0.16, campo: "diasRemessa" },
+  ];
+
+  let pagina = null;
+  let y = 0;
+  let indiceLinhaZebra = 0;
+
+  function novaPagina() {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+  }
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina();
+    }
+  }
+
+  function desenharCabecalhoColunas() {
+    const alturaFaixa = REMESSAS_ALTURA_LINHA * 1.7;
+    garantirEspaco(alturaFaixa + REMESSAS_ALTURA_LINHA * 2);
+    pagina.drawRectangle({ x: margem, y: y - alturaFaixa, width: larguraUtil, height: alturaFaixa, color: COR_PRIMARIA_ESCURA });
+    let x = margem + 4;
+    for (const coluna of colunas) {
+      pagina.drawText(sanitizarTextoPdf(coluna.titulo), {
+        x,
+        y: y - alturaFaixa + alturaFaixa * 0.32,
+        size: REMESSAS_TAMANHO_FONTE,
+        font: fonteNegrito,
+        color: COR_BRANCO,
+      });
+      x += coluna.largura;
+    }
+    y -= alturaFaixa + 10;
+    indiceLinhaZebra = 0;
+  }
+
+  novaPagina();
+
+  pagina.drawText(`Remessas aos juízes leigos da unidade "${sanitizarTextoPdf(nomeUnidade)}"`, {
+    x: margem,
+    y,
+    size: 13,
+    font: fonteNegrito,
+    color: COR_PRIMARIA_ESCURA,
+  });
+  y -= 20;
+  pagina.drawText(`Total geral: ${linhas.length} processo(s)`, {
+    x: margem,
+    y,
+    size: 10,
+    font: fonteNegrito,
+    color: COR_CINZA_TEXTO,
+  });
+  y -= 16;
+  if (linhas.some((l) => l.prioridade)) {
+    pagina.drawText("Em vermelho: processos com prioridade legal (motivo entre parênteses).", {
+      x: margem,
+      y,
+      size: 8,
+      font: fonteNormal,
+      color: COR_ALERTA_VERMELHO,
+    });
+    y -= 14;
+  }
+  y -= 8;
 
   const porJuiz = new Map();
   for (const linha of linhas) {
     const chave = linha.juiz || "(sem nome)";
-    porJuiz.set(chave, (porJuiz.get(chave) || 0) + 1);
+    if (!porJuiz.has(chave)) porJuiz.set(chave, []);
+    porJuiz.get(chave).push(linha);
   }
-  const totalPorJuiz = Array.from(porJuiz.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([juiz, total]) => ({ juiz, total }));
+  const grupos = Array.from(porJuiz.entries())
+    .map(([juiz, itens]) => ({
+      juiz,
+      itens: [...itens].sort((a, b) => (b.diasRemessaNumero || 0) - (a.diasRemessaNumero || 0)),
+    }))
+    .sort((a, b) => b.itens.length - a.itens.length || a.juiz.localeCompare(b.juiz, "pt-BR"));
 
-  const bytesTotalPorJuiz = await construirPdfTabela(
-    totalPorJuiz,
-    [
-      { titulo: "Juiz Leigo", largura: larguraUtil * 0.7, campo: "juiz" },
-      { titulo: "Total de processos", largura: larguraUtil * 0.3, campo: "total" },
-    ],
-    `Remessas aos juízes leigos da unidade "${nomeUnidade}" — total por juiz leigo`
-  );
+  for (const grupo of grupos) {
+    garantirEspaco(120);
+    pagina.drawText(`${sanitizarTextoPdf(grupo.juiz)} — Total: ${grupo.itens.length} processo(s)`, {
+      x: margem,
+      y,
+      size: 10.5,
+      font: fonteNegrito,
+      color: COR_PRIMARIA,
+    });
+    y -= REMESSAS_ALTURA_LINHA * 1.8;
 
-  const linhasOrdenadas = [...linhas].sort((a, b) => (b.diasRemessaNumero || 0) - (a.diasRemessaNumero || 0));
-  const bytesDiscriminado = await construirPdfTabela(
-    linhasOrdenadas,
-    [
-      { titulo: "Juiz Leigo", largura: larguraUtil * 0.3, campo: "juiz" },
-      { titulo: "Número do Processo", largura: larguraUtil * 0.3, campo: "processo" },
-      { titulo: "Data Remessa", largura: larguraUtil * 0.2, campo: "dataRemessa" },
-      { titulo: "Dias da Remessa", largura: larguraUtil * 0.2, campo: "diasRemessa" },
-    ],
-    `Remessas aos juízes leigos da unidade "${nomeUnidade}" — ${linhasOrdenadas.length} processo(s), do mais antigo ao mais novo`
-  );
+    desenharCabecalhoColunas();
 
-  const pdfFinal = await PDFDocument.create();
-  const pdfTotalPorJuiz = await PDFDocument.load(bytesTotalPorJuiz);
-  (await pdfFinal.copyPages(pdfTotalPorJuiz, pdfTotalPorJuiz.getPageIndices())).forEach((p) => pdfFinal.addPage(p));
-  const pdfDiscriminado = await PDFDocument.load(bytesDiscriminado);
-  (await pdfFinal.copyPages(pdfDiscriminado, pdfDiscriminado.getPageIndices())).forEach((p) => pdfFinal.addPage(p));
+    for (const item of grupo.itens) {
+      const valoresLinha = {
+        juiz: item.juiz,
+        processo: item.prioridade ? `${item.processo} (${item.prioridade})` : item.processo,
+        classe: item.classe || "",
+        dataRemessa: item.dataRemessa,
+        diasRemessa: item.diasRemessa,
+      };
+      const linhasPorColuna = colunas.map((coluna) =>
+        quebrarLinhas(sanitizarTextoPdf(String(valoresLinha[coluna.campo] ?? "")), fonteNormal, REMESSAS_TAMANHO_FONTE, coluna.largura - 4)
+      );
+      const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
+      const alturaLinha = maxLinhas * REMESSAS_ALTURA_LINHA + REMESSAS_ALTURA_LINHA * 0.4;
 
-  return pdfFinal.save();
+      if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
+        novaPagina();
+        desenharCabecalhoColunas();
+      }
+
+      if (indiceLinhaZebra % 2 === 1) {
+        pagina.drawRectangle({
+          x: margem,
+          y: y - alturaLinha + REMESSAS_ALTURA_LINHA * 0.3,
+          width: larguraUtil,
+          height: alturaLinha,
+          color: COR_CINZA_CLARO,
+        });
+      }
+      indiceLinhaZebra += 1;
+
+      let x = margem + 4;
+      for (let i = 0; i < colunas.length; i += 1) {
+        const corColuna = colunas[i].campo === "processo" && item.prioridade ? COR_ALERTA_VERMELHO : COR_CINZA_TEXTO;
+        let yColuna = y;
+        for (const linhaTexto of linhasPorColuna[i]) {
+          try {
+            pagina.drawText(linhaTexto, { x, y: yColuna, size: REMESSAS_TAMANHO_FONTE, font: fonteNormal, color: corColuna });
+          } catch (e) {
+            // Ignora linha que a fonte padrao nao consiga desenhar.
+          }
+          yColuna -= REMESSAS_ALTURA_LINHA;
+        }
+        x += colunas[i].largura;
+      }
+      y -= alturaLinha;
+    }
+
+    y -= REMESSAS_ALTURA_LINHA * 0.8;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+
+  return pdf.save();
 }
 
 // Le' os nomes dos Localizadores de uma unidade - DIFERENTE do resto do
@@ -3097,7 +3287,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
 
   // Suspensos/sobrestados: grupo "S" inteiro do filtro Situação (todas
   // as ~40 variantes de suspensão/sobrestamento de uma vez).
-  const suspensos = { total: null, mais90Dias: null, detalhamento: [], tabela: null, erros: [] };
+  const suspensos = { total: null, mais90Dias: null, detalhamento: [], tabela: null, erros: [], avisoDetalhamentoParcial: null };
   if (opcoesFinais.suspensos) {
     notificar("Consultando suspensos/sobrestados: total e relação de processos...");
     {
@@ -3126,7 +3316,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     }
     notificar("Consultando suspensos/sobrestados: detalhamento por situação específica...");
     {
-      const { itens, erro } = await abrirAbaEConsultarSituacoesGrupo(abaAtual.url, valorUnidade, "S");
+      const { itens, erro, parcial, motivoParcial } = await abrirAbaEConsultarSituacoesGrupo(abaAtual.url, valorUnidade, "S");
       // So' entram na capa as situações com pelo menos 1 processo - listar
       // as dezenas de variantes zeradas so' faria o relatório mais dificil
       // de ler, sem nenhuma informação a mais.
@@ -3134,6 +3324,15 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
         .filter((item) => (item.contagem || 0) > 0)
         .sort((a, b) => (b.contagem || 0) - (a.contagem || 0));
       if (erro) suspensos.erros.push(`Detalhamento por situação: ${erro}`);
+      // Diferente dos "erros" (que aparecem destacados como falha), isso
+      // e' so' uma nota discreta: o TOTAL de suspensos continua correto
+      // (veio de uma consulta separada, à parte) - so' o detalhamento por
+      // situação especifica ficou incompleto por demorar demais.
+      if (parcial) {
+        suspensos.avisoDetalhamentoParcial =
+          motivoParcial ||
+          "O detalhamento por situação específica não foi concluído a tempo - apenas o total de suspensos foi informado.";
+      }
     }
   }
 
@@ -3251,6 +3450,9 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   }
   if (opcoesFinais.suspensos && suspensos.erros.length > 0) {
     avisos.push(`Suspensos/sobrestados: ${suspensos.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.suspensos && suspensos.avisoDetalhamentoParcial) {
+    avisos.push(`Suspensos/sobrestados: ${suspensos.avisoDetalhamentoParcial}`);
   }
   if (opcoesFinais.conclusosDecisao && despacho.erros.length > 0) {
     avisos.push(`Conclusos para decisão: ${despacho.erros.join(" | ")}`);
