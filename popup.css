@@ -185,6 +185,36 @@ body {
   padding: var(--espaco-2) 12px 12px;
 }
 
+/* Subseções dentro de um cartão que agrupa varias funcionalidades
+   relacionadas (ex.: "Gestão da Unidade" reúne Relatórios, Regras de
+   Automação, Localizadores do Órgão e Busca específica de
+   localizadores) - cada uma continua com seus próprios botões/status/
+   progresso, só que num bloco simples (título + divisor), em vez de
+   virar mais um <details> aninhado dentro do cartão. Nada de "menu
+   dentro de menu": todas as subseções ficam visíveis assim que o cartão
+   é aberto. */
+.subsecao-titulo {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-1);
+  margin: 0 0 var(--espaco-1);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--cor-texto-suave);
+}
+
+.subsecao-icone {
+  font-size: 13px;
+}
+
+.separador-subsecao {
+  border: none;
+  border-top: 1px solid var(--cor-borda-suave);
+  margin: var(--espaco-3) 0;
+}
+
 /* Cartão "de perfil" (Corregedoria, Gestão da Unidade, Magistrado):
    borda esquerda na cor primária + selo no cabeçalho, sinalizando a qual
    perfil aquela funcionalidade se destina. Só o cartão Corregedoria é

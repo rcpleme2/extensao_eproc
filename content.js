@@ -514,7 +514,17 @@ function listarRegrasAutomacaoAtivas() {
 
     const localizadorOrigem = (tds[3].textContent || "").trim() || "Nenhum";
     const criterioHtml = (tds[4].innerHTML || "").trim();
-    const destinoAcaoHtml = (tds[5].innerHTML || "").trim();
+
+    // A coluna "Localizador DESTINO/Ação" pode ter o mesmo padrao de DOIS
+    // blocos sobrepostos que a coluna "Outros Critérios" tem quando o
+    // conteudo e' longo: "dadosResumidos_{cod}" (truncado, oculto por
+    // padrao) e "dadosCompletos_{cod}" (o texto inteiro). Sem preferir o
+    // bloco "completo" aqui tambem, os detalhes da Ação Automatizada
+    // (o que exatamente sera' executado) saiam cortados no meio - essa
+    // era a causa do "Ação Automatizada" incompleto na exportacao.
+    const divDestinoCompleto = tds[5].querySelector('[id^="dadosCompletos_"]');
+    const origemDestinoAcao = divDestinoCompleto || tds[5];
+    const destinoAcaoHtml = (origemDestinoAcao.innerHTML || "").trim();
 
     // A coluna "Outros Critérios" tem, quando o conteudo e' longo, DOIS
     // blocos sobrepostos: "dadosResumidos_{cod}" (truncado, oculto por
@@ -536,16 +546,22 @@ function listarRegrasAutomacaoAtivas() {
     const criterioResumo = linhasCriterio[0] || "Sem critério definido";
     const criterioAlternativas = Math.max(0, linhasCriterio.length - 1);
 
-    const linhasDestino = textoComQuebras(tds[5])
+    const linhasDestino = textoComQuebras(origemDestinoAcao)
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
     const destinoResumo = linhasDestino[0] || "Sem destino definido";
-    const linhaEvento = linhasDestino.find((l) => l.startsWith("Evento:"));
-    const temAcaoProgramada = linhasDestino.some(
+    // A linha "AUTOMATIZADO"/"Ação Programada" e' so' o cabecalho do
+    // bloco - os detalhes de qual acao sera' executada (evento, texto,
+    // destino, etc.) vem nas linhas SEGUINTES. Pegar so' a linha
+    // "Evento:" descartava o resto; agora leva tudo dali pra frente.
+    const indiceAcaoProgramada = linhasDestino.findIndex(
       (l) => l.includes("AUTOMATIZADO") || l.includes("Ação Programada")
     );
-    const acaoResumo = temAcaoProgramada ? linhaEvento || "Ação automatizada programada" : "";
+    const acaoResumo =
+      indiceAcaoProgramada !== -1
+        ? linhasDestino.slice(indiceAcaoProgramada).join(" — ") || "Ação automatizada programada"
+        : "";
 
     const outrosCriteriosResumo = textoComQuebras(origemOutrosCriterios)
       .split("\n")

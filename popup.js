@@ -937,7 +937,6 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
   if (mensagem.tipo === "LISTAR_LOCALIZADORES_FINALIZADO") {
     areaProgressoNavLocalizadores.hidden = true;
-    btnCarregarLocalizadores.disabled = false;
 
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
@@ -956,6 +955,9 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         selectLocalizadorProcessos.appendChild(opcao);
       }
       areaSelectLocalizador.hidden = localizadores.length === 0;
+      // Sem nenhum localizador encontrado nao ha' nada mais a fazer com
+      // a lista carregada - reaparece o botao para tentar de novo.
+      if (localizadores.length === 0) btnCarregarLocalizadores.hidden = false;
 
       setStatusNavLocalizadores(
         localizadores.length > 0
@@ -971,6 +973,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosNavLocalizadores.hidden = false;
       areaErrosNavLocalizadores.textContent =
         mensagem.erro || "Falha desconhecida ao carregar os localizadores.";
+      btnCarregarLocalizadores.hidden = false;
     }
   }
 
@@ -1058,7 +1061,11 @@ function setStatusNavLocalizadores(texto, tipo) {
 }
 
 btnCarregarLocalizadores.addEventListener("click", async () => {
-  btnCarregarLocalizadores.disabled = true;
+  // Some assim que clicado, mesmo padrao do botao "Carregar unidades" do
+  // Relatório da Unidade - so' serve para um carregamento inicial (o
+  // dropdown que ele preenche continua ali depois); so' volta a
+  // aparecer se o carregamento falhar, para tentar de novo.
+  btnCarregarLocalizadores.hidden = true;
   areaErrosNavLocalizadores.hidden = true;
   areaSelectLocalizador.hidden = true;
   areaAcoesLocalizador.hidden = true;
@@ -1080,7 +1087,7 @@ btnCarregarLocalizadores.addEventListener("click", async () => {
     areaErrosNavLocalizadores.hidden = false;
     areaErrosNavLocalizadores.textContent = e && e.message ? e.message : String(e);
     areaProgressoNavLocalizadores.hidden = true;
-    btnCarregarLocalizadores.disabled = false;
+    btnCarregarLocalizadores.hidden = false;
   }
 });
 

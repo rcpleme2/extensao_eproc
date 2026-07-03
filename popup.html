@@ -73,84 +73,6 @@
     </div>
   </details>
 
-  <details class="card card--privilegiado" id="card-relatorios">
-    <summary class="card-titulo">
-      <span class="card-icone" aria-hidden="true">📊</span>
-      <span class="card-rotulo">Relatórios</span>
-      <span class="selo">perfil GESTÃO DA UNIDADE</span>
-    </summary>
-    <div class="card-corpo">
-      <div id="area-relatorio-info" class="status">
-        Gera o painel de conclusos e processos sem movimentação.
-      </div>
-
-      <div class="botoes">
-        <button id="btn-relatorios" class="btn">Gerar relatório</button>
-        <button
-          id="btn-abrir-tela-relatorio"
-          class="btn-secundario btn-icone"
-          title="Abrir a tela do Relatório Geral nesta aba"
-          aria-label="Abrir a tela do Relatório Geral nesta aba"
-        >↗</button>
-      </div>
-
-      <div id="area-progresso-relatorio" class="progresso-spinner" hidden>
-        <span class="spinner" aria-hidden="true"></span>
-        <span id="texto-progresso-relatorio"></span>
-      </div>
-
-      <div id="area-relatorio" class="relatorio" hidden>
-        <table class="tabela-relatorio">
-          <thead>
-            <tr>
-              <th scope="col">Situação</th>
-              <th scope="col">Total</th>
-              <th scope="col">Urgentes</th>
-              <th scope="col">+30 dias</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th scope="row">Despacho</th>
-              <td><button type="button" class="valor-link" id="valor-despacho" data-tipo="situacao" data-situacao="despacho" data-filtro="total" disabled></button></td>
-              <td><button type="button" class="valor-link" id="valor-despacho-urgentes" data-tipo="situacao" data-situacao="despacho" data-filtro="urgentes" disabled></button></td>
-              <td><button type="button" class="valor-link" id="valor-despacho-mais30dias" data-tipo="situacao" data-situacao="despacho" data-filtro="mais30Dias" disabled></button></td>
-            </tr>
-            <tr>
-              <th scope="row">Sentença</th>
-              <td><button type="button" class="valor-link" id="valor-sentenca" data-tipo="situacao" data-situacao="sentenca" data-filtro="total" disabled></button></td>
-              <td><button type="button" class="valor-link" id="valor-sentenca-urgentes" data-tipo="situacao" data-situacao="sentenca" data-filtro="urgentes" disabled></button></td>
-              <td><button type="button" class="valor-link" id="valor-sentenca-mais30dias" data-tipo="situacao" data-situacao="sentenca" data-filtro="mais30Dias" disabled></button></td>
-            </tr>
-          </tbody>
-        </table>
-
-        <table class="tabela-relatorio tabela-relatorio-sem-mov">
-          <thead>
-            <tr>
-              <th scope="col">Sem movimentação</th>
-              <th scope="col">30 dias</th>
-              <th scope="col">90 dias</th>
-              <th scope="col">120 dias</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th scope="row">Processos</th>
-              <td><button type="button" class="valor-link" id="valor-sem-mov-30" data-tipo="semMovimentacao" data-filtro="30" disabled></button></td>
-              <td><button type="button" class="valor-link" id="valor-sem-mov-90" data-tipo="semMovimentacao" data-filtro="90" disabled></button></td>
-              <td><button type="button" class="valor-link" id="valor-sem-mov-120" data-tipo="semMovimentacao" data-filtro="120" disabled></button></td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div id="aviso-urgencia" class="aviso" hidden></div>
-      </div>
-
-      <div id="area-erros-relatorio" class="erros" hidden></div>
-    </div>
-  </details>
-
   <details class="card card--privilegiado" id="card-corregedoria" hidden>
     <summary class="card-titulo">
       <span class="card-icone" aria-hidden="true">🏛️</span>
@@ -225,112 +147,193 @@
     </div>
   </details>
 
-  <details class="card card--privilegiado" id="card-regras">
+  <details class="card card--privilegiado" id="card-gestao-unidade">
     <summary class="card-titulo">
-      <span class="card-icone" aria-hidden="true">⚙️</span>
-      <span class="card-rotulo">Regras de Automação</span>
+      <span class="card-icone" aria-hidden="true">🏢</span>
+      <span class="card-rotulo">Gestão da Unidade</span>
       <span class="selo">perfil GESTÃO DA UNIDADE</span>
     </summary>
     <div class="card-corpo">
-      <div id="area-regras-info" class="status">
-        Exporta as regras ativas de tramitação automática.
-      </div>
-
-      <div class="botoes">
-        <button id="btn-exportar-regras" class="btn">Exportar regras ativas</button>
-      </div>
-
-      <div id="area-erros-regras" class="erros" hidden></div>
-    </div>
-  </details>
-
-  <details class="card card--privilegiado" id="card-localizadores">
-    <summary class="card-titulo">
-      <span class="card-icone" aria-hidden="true">🗂️</span>
-      <span class="card-rotulo">Localizadores do Órgão</span>
-      <span class="selo">perfil GESTÃO DA UNIDADE</span>
-    </summary>
-    <div class="card-corpo">
-      <div id="area-localizadores-info" class="status">
-        Exporta a lista completa de localizadores e seus totais.
-      </div>
-
-      <div class="opcoes">
-        <div class="linha-formatos">
-          <label class="opcao">
-            <input type="checkbox" id="chk-localizadores-pdf" checked />
-            PDF
-          </label>
-          <label class="opcao">
-            <input type="checkbox" id="chk-localizadores-excel" />
-            Excel
-          </label>
+      <div class="subsecao">
+        <h3 class="subsecao-titulo">
+          <span class="subsecao-icone" aria-hidden="true">📊</span>
+          Relatórios
+        </h3>
+        <div id="area-relatorio-info" class="status">
+          Gera o painel de conclusos e processos sem movimentação.
         </div>
-        <button id="btn-exportar-localizadores" class="btn">Exportar</button>
-      </div>
 
-      <div id="area-progresso-localizadores" class="progresso-spinner" hidden>
-        <span class="spinner" aria-hidden="true"></span>
-        <span id="texto-progresso-localizadores"></span>
-      </div>
-
-      <div id="area-erros-localizadores" class="erros" hidden></div>
-    </div>
-  </details>
-
-  <details class="card card--privilegiado" id="card-busca-localizadores">
-    <summary class="card-titulo">
-      <span class="card-icone" aria-hidden="true">🔎</span>
-      <span class="card-rotulo">Busca específica de localizadores</span>
-      <span class="selo">perfil GESTÃO DA UNIDADE</span>
-    </summary>
-    <div class="card-corpo">
-      <div id="area-nav-localizadores-info" class="status">
-        Escolha um localizador para abrir ou exportar seus processos.
-      </div>
-
-      <div class="botoes">
-        <button id="btn-carregar-localizadores" class="btn">Carregar localizadores</button>
-      </div>
-
-      <div id="area-progresso-nav-localizadores" class="progresso-spinner" hidden>
-        <span class="spinner" aria-hidden="true"></span>
-        <span id="texto-progresso-nav-localizadores"></span>
-      </div>
-
-      <div class="opcoes" id="area-select-localizador" hidden>
-        <select id="select-localizador-processos">
-          <option value="" selected disabled>Selecione um localizador...</option>
-        </select>
-      </div>
-
-      <div class="opcoes" id="area-acoes-localizador" hidden>
-        <button id="btn-ir-para-processos-localizador" class="btn-secundario">Ir para o relatório</button>
-        <div class="linha-formatos">
-          <label class="opcao">
-            <input type="checkbox" id="chk-processos-localizador-pdf" checked />
-            PDF
-          </label>
-          <label class="opcao">
-            <input type="checkbox" id="chk-processos-localizador-excel" />
-            Excel
-          </label>
+        <div class="botoes">
+          <button id="btn-relatorios" class="btn">Gerar relatório</button>
+          <button
+            id="btn-abrir-tela-relatorio"
+            class="btn-secundario btn-icone"
+            title="Abrir a tela do Relatório Geral nesta aba"
+            aria-label="Abrir a tela do Relatório Geral nesta aba"
+          >↗</button>
         </div>
-        <button id="btn-exportar-processos-localizador" class="btn">Exportar processos deste localizador</button>
-        <button id="btn-exportar-documentos-localizador" class="btn-secundario">Exportar documentos de cada processo (PDF único)</button>
+
+        <div id="area-progresso-relatorio" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-relatorio"></span>
+        </div>
+
+        <div id="area-relatorio" class="relatorio" hidden>
+          <table class="tabela-relatorio">
+            <thead>
+              <tr>
+                <th scope="col">Situação</th>
+                <th scope="col">Total</th>
+                <th scope="col">Urgentes</th>
+                <th scope="col">+30 dias</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Despacho</th>
+                <td><button type="button" class="valor-link" id="valor-despacho" data-tipo="situacao" data-situacao="despacho" data-filtro="total" disabled></button></td>
+                <td><button type="button" class="valor-link" id="valor-despacho-urgentes" data-tipo="situacao" data-situacao="despacho" data-filtro="urgentes" disabled></button></td>
+                <td><button type="button" class="valor-link" id="valor-despacho-mais30dias" data-tipo="situacao" data-situacao="despacho" data-filtro="mais30Dias" disabled></button></td>
+              </tr>
+              <tr>
+                <th scope="row">Sentença</th>
+                <td><button type="button" class="valor-link" id="valor-sentenca" data-tipo="situacao" data-situacao="sentenca" data-filtro="total" disabled></button></td>
+                <td><button type="button" class="valor-link" id="valor-sentenca-urgentes" data-tipo="situacao" data-situacao="sentenca" data-filtro="urgentes" disabled></button></td>
+                <td><button type="button" class="valor-link" id="valor-sentenca-mais30dias" data-tipo="situacao" data-situacao="sentenca" data-filtro="mais30Dias" disabled></button></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <table class="tabela-relatorio tabela-relatorio-sem-mov">
+            <thead>
+              <tr>
+                <th scope="col">Sem movimentação</th>
+                <th scope="col">30 dias</th>
+                <th scope="col">90 dias</th>
+                <th scope="col">120 dias</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Processos</th>
+                <td><button type="button" class="valor-link" id="valor-sem-mov-30" data-tipo="semMovimentacao" data-filtro="30" disabled></button></td>
+                <td><button type="button" class="valor-link" id="valor-sem-mov-90" data-tipo="semMovimentacao" data-filtro="90" disabled></button></td>
+                <td><button type="button" class="valor-link" id="valor-sem-mov-120" data-tipo="semMovimentacao" data-filtro="120" disabled></button></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div id="aviso-urgencia" class="aviso" hidden></div>
+        </div>
+
+        <div id="area-erros-relatorio" class="erros" hidden></div>
       </div>
 
-      <div id="area-progresso-processos-localizador" class="progresso-spinner" hidden>
-        <span class="spinner" aria-hidden="true"></span>
-        <span id="texto-progresso-processos-localizador"></span>
+      <hr class="separador-subsecao" />
+
+      <div class="subsecao">
+        <h3 class="subsecao-titulo">
+          <span class="subsecao-icone" aria-hidden="true">⚙️</span>
+          Regras de Automação
+        </h3>
+        <div id="area-regras-info" class="status">
+          Exporta as regras ativas de tramitação automática.
+        </div>
+
+        <div class="botoes">
+          <button id="btn-exportar-regras" class="btn">Exportar regras ativas</button>
+        </div>
+
+        <div id="area-erros-regras" class="erros" hidden></div>
       </div>
 
-      <div id="area-progresso-documentos-localizador" class="progresso-spinner" hidden>
-        <span class="spinner" aria-hidden="true"></span>
-        <span id="texto-progresso-documentos-localizador"></span>
+      <hr class="separador-subsecao" />
+
+      <div class="subsecao">
+        <h3 class="subsecao-titulo">
+          <span class="subsecao-icone" aria-hidden="true">🗂️</span>
+          Localizadores do Órgão
+        </h3>
+        <div id="area-localizadores-info" class="status">
+          Exporta a lista completa de localizadores e seus totais.
+        </div>
+
+        <div class="opcoes">
+          <div class="linha-formatos">
+            <label class="opcao">
+              <input type="checkbox" id="chk-localizadores-pdf" checked />
+              PDF
+            </label>
+            <label class="opcao">
+              <input type="checkbox" id="chk-localizadores-excel" />
+              Excel
+            </label>
+          </div>
+          <button id="btn-exportar-localizadores" class="btn">Exportar</button>
+        </div>
+
+        <div id="area-progresso-localizadores" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-localizadores"></span>
+        </div>
+
+        <div id="area-erros-localizadores" class="erros" hidden></div>
       </div>
 
-      <div id="area-erros-nav-localizadores" class="erros" hidden></div>
+      <hr class="separador-subsecao" />
+
+      <div class="subsecao">
+        <h3 class="subsecao-titulo">
+          <span class="subsecao-icone" aria-hidden="true">🔎</span>
+          Busca específica de localizadores
+        </h3>
+        <div id="area-nav-localizadores-info" class="status">
+          Escolha um localizador para abrir ou exportar seus processos.
+        </div>
+
+        <div class="botoes">
+          <button id="btn-carregar-localizadores" class="btn">Carregar localizadores</button>
+        </div>
+
+        <div id="area-progresso-nav-localizadores" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-nav-localizadores"></span>
+        </div>
+
+        <div class="opcoes" id="area-select-localizador" hidden>
+          <select id="select-localizador-processos">
+            <option value="" selected disabled>Selecione um localizador...</option>
+          </select>
+        </div>
+
+        <div class="opcoes" id="area-acoes-localizador" hidden>
+          <button id="btn-ir-para-processos-localizador" class="btn-secundario">Ir para o relatório</button>
+          <div class="linha-formatos">
+            <label class="opcao">
+              <input type="checkbox" id="chk-processos-localizador-pdf" checked />
+              PDF
+            </label>
+            <label class="opcao">
+              <input type="checkbox" id="chk-processos-localizador-excel" />
+              Excel
+            </label>
+          </div>
+          <button id="btn-exportar-processos-localizador" class="btn">Exportar relação de processos deste localizador</button>
+          <button id="btn-exportar-documentos-localizador" class="btn-secundario">Exportar na íntegra todos os processos nesse localizador</button>
+        </div>
+
+        <div id="area-progresso-processos-localizador" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-processos-localizador"></span>
+        </div>
+
+        <div id="area-progresso-documentos-localizador" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-documentos-localizador"></span>
+        </div>
+
+        <div id="area-erros-nav-localizadores" class="erros" hidden></div>
+      </div>
     </div>
   </details>
 

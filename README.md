@@ -3,12 +3,13 @@
 Extensão para Chrome/Edge com funcionalidades para o sistema **eproc**
 (usado por diversos tribunais brasileiros: TJPR, TJSC, TJAL, Justiça Federal,
 etc.), organizadas em cartões colapsáveis no painel lateral: **Exportar
-Documentos**, **Relatórios**, **Corregedoria** (só para esse perfil),
-**Regras de Automação**, **Localizadores do Órgão** e **Busca específica
-de localizadores**. O painel abre enxuto (só o primeiro cartão expandido);
-cada cartão expande ao clicar no título, e reabre sozinho quando alguma
-operação dele progride, conclui ou falha. Sucessos aparecem em verde e
-erros em vermelho na linha de status de cada cartão.
+Documentos**, **Gestão da Unidade** (que reúne Relatórios, Regras de
+Automação, Localizadores do Órgão e Busca específica de localizadores) e
+**Corregedoria** (só para esse perfil). O painel abre enxuto (só o
+primeiro cartão expandido); cada cartão expande ao clicar no título, e
+reabre sozinho quando alguma operação dele progride, conclui ou falha.
+Sucessos aparecem em verde e erros em vermelho na linha de status de
+cada cartão.
 
 Além do cartão **Corregedoria** (único que é realmente condicional - só
 aparece quando esse é o perfil ativo, ver seção própria abaixo), os
@@ -18,7 +19,11 @@ visíveis e utilizáveis por qualquer perfil:
 
 - **perfil MAGISTRADO**: Exportar Documentos.
 - **perfil GESTÃO DA UNIDADE**: Relatórios, Regras de Automação,
-  Localizadores do Órgão e Busca específica de localizadores.
+  Localizadores do Órgão e Busca específica de localizadores - reunidos
+  num único cartão "Gestão da Unidade", cada um em sua própria subseção
+  (título + divisor), não em sub-menus aninhados: assim que o cartão é
+  aberto, todos os botões de todas as quatro funcionalidades já ficam à
+  vista, sem precisar abrir mais nada.
 
 ## Exportar Documentos
 
@@ -569,15 +574,33 @@ manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
    "[Sem prioridade definida]" em vez do rótulo "[ Prioridade ]" da
    própria página, que é mais confuso fora de contexto.
 4. Gera um documento HTML novo, com um "cartão" por regra ativa. Cada
-   cartão traz, no topo, um **fluxograma** (Origem → Critério → Destino →
-   Ação automatizada, quando houver) para entender de relance o que
-   aquela regra faz, e logo abaixo o detalhamento completo e legível:
+   cartão traz, no topo, um **fluxograma numerado em sequência vertical**
+   (1 Origem → 2 Critério → 3 Destino → 4 Ação automatizada, quando
+   houver) para entender de relance o que aquela regra faz — cada passo
+   numa caixa colorida própria, empilhada de cima para baixo com uma seta
+   entre elas. Esse layout vertical substitui a versão anterior (caixas
+   numa linha horizontal com quebra automática): com textos de tamanhos
+   bem diferentes entre as regras, a quebra de linha da versão horizontal
+   ficava imprevisível e as setas pareciam soltas; empilhado e numerado, a
+   ordem de execução fica clara não importa o tamanho de cada texto.
+   Logo abaixo do fluxograma vem o detalhamento completo e legível:
    número/prioridade, grupo, localizador de origem, o critério que
    dispara a regra, o localizador de destino/ação (incluindo eventos
    automatizados programados, quando houver) e outros critérios (ex.:
    juízo do processo, localizador adicional). O conteúdo detalhado é o
    mesmo da página original (nada é resumido ou omitido ali), só que
    reorganizado em blocos rotulados em vez da tabela apertada.
+
+   Tanto a caixa **"Ação automatizada"** do fluxograma quanto o campo
+   **"Localizador DESTINO / Ação"** do detalhamento levam em conta que a
+   coluna correspondente da tabela original pode ter dois blocos
+   sobrepostos quando o conteúdo é longo (um truncado, escondido por
+   padrão, e um completo) — o mesmo padrão que a coluna "Outros
+   Critérios" já tinha. Sem preferir sempre o bloco completo, os detalhes
+   de qual ação exatamente seria executada (evento, documento, texto,
+   etc.) podiam sair cortados; e o resumo do fluxograma pegava só a linha
+   "Evento: ..." e descartava o resto — agora leva tudo a partir do
+   cabeçalho "AUTOMATIZADO"/"Ação Programada" em diante.
 5. Fecha a aba oculta e abre o documento em uma **aba nova visível**, com
    um link de atalho em cada cartão para editar aquela regra ou ver seu
    histórico diretamente no eproc.
@@ -635,7 +658,10 @@ direto até a lista de processos de um deles, ou exportar um relatório
 desses processos - sem precisar abrir a tela de Localizadores
 manualmente e procurar a linha certa.
 
-Ao clicar em **"Carregar localizadores"**:
+Ao clicar em **"Carregar localizadores"** (o botão **some assim que
+clicado** — mesmo padrão do "Carregar unidades" do Relatório da Unidade;
+só volta a aparecer se o carregamento falhar ou não encontrar nenhum
+localizador, para tentar de novo):
 
 1. A extensão roda a mesma coleta multi-página usada pela exportação em
    PDF/Excel (aba oculta, volta para a página 1 se necessário, percorre
@@ -655,16 +681,17 @@ a. **"Ir para o relatório"**: navega a aba em que o painel foi aberto
    localizador — a mesma página que abriria clicando no número da coluna
    "Total de processos" na listagem (URL já capturada, com sessão/hash
    inclusos, durante a coleta).
-b. **"Exportar processos deste localizador"** (com PDF e/ou planilha
-   Excel marcados): gera um relatório só com os processos desse
-   localizador, com três colunas: **Número Processo**, **Classe** e
-   **Inclusão no localizador**. O relatório é gerado em segundo plano
-   (percorrendo todas as páginas da listagem de processos, com a mesma
-   correção de "volta pra página 1" já usada na exportação de
-   Localizadores) e ordenado pela **Inclusão no localizador da data mais
-   antiga para a mais nova**. Os arquivos saem em `Downloads/eproc/`
-   como `processos_localizador_<nome_do_localizador>_<data>.pdf`/`.xls`.
-c. **"Exportar documentos de cada processo (PDF único)"**: entra, um de
+b. **"Exportar relação de processos deste localizador"** (com PDF e/ou
+   planilha Excel marcados) — nome escolhido para não ser confundido com
+   a opção (c): gera um relatório só com os processos desse localizador,
+   com três colunas: **Número Processo**, **Classe** e **Inclusão no
+   localizador**. O relatório é gerado em segundo plano (percorrendo
+   todas as páginas da listagem de processos, com a mesma correção de
+   "volta pra página 1" já usada na exportação de Localizadores) e
+   ordenado pela **Inclusão no localizador da data mais antiga para a
+   mais nova**. Os arquivos saem em `Downloads/eproc/` como
+   `processos_localizador_<nome_do_localizador>_<data>.pdf`/`.xls`.
+c. **"Exportar na íntegra todos os processos nesse localizador"**: entra, um de
    cada vez, em CADA processo da lista do localizador escolhido (numa
    aba oculta controlada pela própria extensão) e monta, para cada um,
    um PDF único combinado com todos os seus documentos — mesmo formato
@@ -682,8 +709,9 @@ c. **"Exportar documentos de cada processo (PDF único)"**: entra, um de
    processo. Processos sem nenhum documento ou com falha ao abrir são
    pulados e aparecem como aviso ao final, sem interromper os demais.
 
-Se precisar carregar a lista de novo (por exemplo, depois que os números
-mudarem), basta clicar em "Carregar localizadores" novamente.
+Como o botão "Carregar localizadores" some depois de carregado, para
+atualizar a lista (por exemplo, depois que os números mudarem) basta
+fechar e reabrir o painel — ele volta a aparecer do zero.
 
 ## Abrir o painel a partir da própria página
 

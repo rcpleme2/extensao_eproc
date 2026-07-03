@@ -4198,35 +4198,48 @@ function construirDocumentoRegras(regras, tituloPagina) {
             }</div>`
           : "";
 
+      // Sequencia vertical numerada (1 Origem -> 2 Critério -> 3 Destino
+      // -> 4 Ação automatizada, quando existir), em vez de caixas numa
+      // linha horizontal com "flex-wrap": com textos de tamanhos bem
+      // diferentes (nome de localizador curto, criterio longo, etc.), o
+      // wrap quebrava as caixas de forma imprevisivel e as setas ficavam
+      // soltas entre linhas - a leitura ficava confusa. Empilhado e
+      // numerado, a ordem de execucao fica clara independente do
+      // tamanho de cada texto, e sempre continua legivel no popup.
+      const passos = [
+        { classe: "fluxo-origem", titulo: "Origem", texto: r.localizadorOrigem, extra: "" },
+        {
+          classe: "fluxo-criterio",
+          titulo: "Critério",
+          texto: r.criterioResumo,
+          extra:
+            (r.criterioAlternativas > 0
+              ? `<div class="fluxo-badge">+${r.criterioAlternativas} alternativa(s)</div>`
+              : "") + fluxoExtra,
+        },
+        { classe: "fluxo-destino", titulo: "Destino", texto: r.destinoResumo, extra: "" },
+      ];
+      if (r.acaoResumo) {
+        passos.push({ classe: "fluxo-acao", titulo: "Ação automatizada", texto: r.acaoResumo, extra: "" });
+      }
+
       const fluxo = `
     <div class="fluxo">
-      <div class="fluxo-caixa fluxo-origem">
-        <div class="fluxo-caixa-titulo">Origem</div>
-        <div>${escaparHtml(r.localizadorOrigem)}</div>
-      </div>
-      <div class="fluxo-seta" aria-hidden="true">&rarr;</div>
-      <div class="fluxo-coluna">
-        <div class="fluxo-caixa fluxo-criterio">
-          <div class="fluxo-caixa-titulo">Critério</div>
-          <div>${escaparHtml(r.criterioResumo)}</div>
-          ${r.criterioAlternativas > 0 ? `<div class="fluxo-badge">+${r.criterioAlternativas} alternativa(s)</div>` : ""}
-        </div>
-        ${fluxoExtra}
-      </div>
-      <div class="fluxo-seta" aria-hidden="true">&rarr;</div>
-      <div class="fluxo-caixa fluxo-destino">
-        <div class="fluxo-caixa-titulo">Destino</div>
-        <div>${escaparHtml(r.destinoResumo)}</div>
-      </div>
+      ${passos
+        .map(
+          (passo, indice) => `
       ${
-        r.acaoResumo
-          ? `<div class="fluxo-seta" aria-hidden="true">&rarr;</div>
-      <div class="fluxo-caixa fluxo-acao">
-        <div class="fluxo-caixa-titulo">Ação automatizada</div>
-        <div>${escaparHtml(r.acaoResumo)}</div>
-      </div>`
+        indice > 0
+          ? `<div class="fluxo-seta" aria-hidden="true">&darr;</div>`
           : ""
       }
+      <div class="fluxo-caixa ${passo.classe}">
+        <div class="fluxo-caixa-titulo"><span class="fluxo-numero">${indice + 1}</span> ${escaparHtml(passo.titulo)}</div>
+        <div>${escaparHtml(passo.texto)}</div>
+        ${passo.extra}
+      </div>`
+        )
+        .join("")}
     </div>`;
 
       return `
@@ -4266,20 +4279,23 @@ function construirDocumentoRegras(regras, tituloPagina) {
   .regra-cabecalho { display:flex; justify-content:space-between; align-items:baseline; border-bottom:2px solid #2c6ea6; padding-bottom:8px; margin-bottom:12px; }
   .regra-numero { font-size:16px; font-weight:700; color:#1c3d5a; }
   .regra-prioridade { font-size:12.5px; color:#2c6ea6; font-weight:600; }
-  .fluxo { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
-  .fluxo-caixa { background:#f4f7fa; border:1px solid #c8d6e0; border-radius:6px; padding:7px 10px; font-size:12px; line-height:1.4; max-width:220px; }
-  .fluxo-caixa-titulo { font-size:9.5px; text-transform:uppercase; letter-spacing:0.03em; font-weight:700; color:#2c6ea6; margin-bottom:2px; }
+  .fluxo { display:flex; flex-direction:column; align-items:stretch; gap:2px; margin-bottom:14px; max-width:420px; }
+  .fluxo-caixa { background:#f4f7fa; border:1px solid #c8d6e0; border-left-width:4px; border-radius:6px; padding:8px 12px; font-size:13px; line-height:1.4; }
+  .fluxo-caixa-titulo { display:flex; align-items:center; gap:6px; font-size:9.5px; text-transform:uppercase; letter-spacing:0.03em; font-weight:700; color:#2c6ea6; margin-bottom:3px; }
+  .fluxo-numero { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; border-radius:50%; background:#2c6ea6; color:#fff; font-size:9.5px; font-weight:700; }
   .fluxo-origem { background:#eef1f5; border-color:#c3cdd6; }
   .fluxo-criterio { background:#fff6e0; border-color:#f0d68a; }
-  .fluxo-criterio .fluxo-caixa-titulo { color:#8a6d00; }
+  .fluxo-criterio .fluxo-caixa-titulo, .fluxo-criterio .fluxo-numero { color:#8a6d00; }
+  .fluxo-criterio .fluxo-numero { background:#8a6d00; }
   .fluxo-destino { background:#e9f7ee; border-color:#a9dcb9; }
-  .fluxo-destino .fluxo-caixa-titulo { color:#1a7f37; }
+  .fluxo-destino .fluxo-caixa-titulo, .fluxo-destino .fluxo-numero { color:#1a7f37; }
+  .fluxo-destino .fluxo-numero { background:#1a7f37; }
   .fluxo-acao { background:#eef1fd; border-color:#c2caf5; }
-  .fluxo-acao .fluxo-caixa-titulo { color:#3d4fc4; }
-  .fluxo-seta { font-size:16px; color:#9aa7b0; }
-  .fluxo-coluna { display:flex; flex-direction:column; gap:4px; }
-  .fluxo-extra { font-size:11px; color:#666; max-width:220px; }
-  .fluxo-badge { font-size:10px; color:#888; margin-top:2px; }
+  .fluxo-acao .fluxo-caixa-titulo, .fluxo-acao .fluxo-numero { color:#3d4fc4; }
+  .fluxo-acao .fluxo-numero { background:#3d4fc4; }
+  .fluxo-seta { font-size:14px; color:#9aa7b0; text-align:center; line-height:1; margin:-2px 0; padding-left:8px; }
+  .fluxo-extra { font-size:11.5px; color:#666; margin-top:5px; padding-top:5px; border-top:1px dashed #d8dee4; }
+  .fluxo-badge { display:inline-block; font-size:10px; color:#888; margin-top:3px; }
   dl { margin:0; }
   dt { font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; color:#888; font-weight:700; margin-top:10px; }
   dt:first-child { margin-top:0; }
