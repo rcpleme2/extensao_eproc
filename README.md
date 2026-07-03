@@ -445,8 +445,8 @@ extração (mesmo processo usado nas Remessas em Aberto).
    - **Acervo antigo em tramitação**: processos do grupo MOVIMENTO
      autuados há mais de 2 e 5 anos, preenchendo o limite superior da
      data de autuação (`#txtDataAutuacaoFim`).
-   - O total de processos de cada Localizador da unidade, ordenado do
-     maior para o menor total.
+   - O **nome de cada Localizador** da unidade, em ordem alfabética
+     (**sem** o total de processos — ver aviso abaixo).
    - As Remessas em Aberto da unidade: Juiz Leigo, Processo, Classe
      Judicial, Data Remessa e Dias da Remessa.
 
@@ -489,12 +489,21 @@ extração (mesmo processo usado nas Remessas em Aberto).
    esperar o dropdown do Tagify renderizar. Só cai para o modo antigo
    (clicar em "Listar todos" e ler os itens do dropdown do Tagify) se
    esse fetch não encontrar a URL do endpoint na página ou a chamada
-   falhar. Esse endpoint, porém, devolve **só os nomes** dos
-   localizadores — não tem o total de processos de cada um —, então o
-   **total de processos continua vindo de uma consulta por localizador**
-   (uma aba nova por localizador, uma de cada vez), já que esse número
-   depende da combinação de filtros da consulta, não é um dado fixo do
-   localizador em si.
+   falhar.
+
+   Esse endpoint, porém, devolve **só os nomes** dos localizadores — sem
+   nenhum total de processos —, e não existe (até onde verificamos)
+   nenhum endpoint equivalente que devolva o total de todos de uma vez só
+   para uma unidade arbitrária (o total depende da combinação de filtros
+   de uma consulta no Relatório Geral, não é um dado fixo do localizador
+   em si). Descobrir esse número um por um (uma aba nova por localizador)
+   ficava lento demais para unidades com muitos localizadores, então **o
+   relatório, por ora, traz só a lista de nomes** — o PDF sempre inclui
+   um aviso explicando que a única forma de obter o total de processos de
+   um localizador específico é se habilitar na própria unidade e usar a
+   ferramenta **"Localizadores do Órgão"** do painel (que já mostra esse
+   total, já que ali a extração é direto da tabela da tela, sem precisar
+   de nenhuma consulta a mais).
 
    As Remessas em Aberto vêm de uma tela separada, acessada pelo menu
    lateral **Relatórios → Relatório de remessas em aberto**

@@ -2814,15 +2814,23 @@ async function consultarBlocoUnidade(urlBase, valorOrgaoJuizo, nomeSituacao, val
 }
 
 
-// Le' o numero de processos de cada Localizador de uma unidade -
-// DIFERENTE do resto do painel (que usa a tela "Localizadores do
-// Órgão"): aqui a extracao e' feita direto no Relatório Geral, ja' que
-// e' onde o campo "Localizador" (Tagify) fica disponivel apos escolher
-// um Órgão/Juízo. Aduz cada localizador um de cada vez: seleciona o
-// Órgão, le' as opcoes do campo Localizador, e para cada uma roda uma
-// consulta (numa aba nova por consulta, mesmo padrao de estabilidade ja'
-// usado para o campo Tagify de "Informação complementar") anotando o
-// total de processos encontrado.
+// Le' os nomes dos Localizadores de uma unidade - DIFERENTE do resto do
+// painel (que usa a tela "Localizadores do Órgão"): aqui a extracao e'
+// feita direto no Relatório Geral, ja' que e' onde o campo "Localizador"
+// (Tagify) fica disponivel apos escolher um Órgão/Juízo (necessario para
+// listar os localizadores de QUALQUER unidade, nao so' a do perfil
+// logado - "Localizadores do Órgão" só mostra os da unidade habilitada
+// no momento).
+//
+// NAO traz o total de processos de cada um: obter esse numero exigiria
+// uma consulta a parte por localizador (uma aba nova cada), o que ficava
+// lento demais para unidades com muitos localizadores, e nao existe (até
+// onde verificamos) nenhum endpoint que devolva os totais de todos de
+// uma vez so' para uma unidade arbitraria. Por ora, quem precisar do
+// total por localizador de uma unidade especifica precisa se habilitar
+// nela e usar a ferramenta "Localizadores do Órgão" do painel - o
+// relatório ja' avisa isso (ver "avisos" em
+// "exportarRelatorioGerencialUnidade").
 async function consultarLocalizadoresUnidadeViaRelatorioGeral(urlBase, valorOrgaoJuizo, notificar) {
   notificar("Lendo os localizadores disponíveis no Relatório Geral...");
   const { opcoes, erro: erroListagem } = await abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJuizo);
@@ -2834,38 +2842,8 @@ async function consultarLocalizadoresUnidadeViaRelatorioGeral(urlBase, valorOrga
     };
   }
 
-  const localizadores = [];
-  const erros = [];
-
-  // Quando o proprio item do dropdown ja' traz o total entre parenteses
-  // (ex.: "GABINETE (42)"), usa esse numero direto - nao precisa abrir
-  // uma aba e rodar uma consulta a mais so' para descobrir algo que a
-  // pagina ja' mostrou. So' cai para a consulta individual (mais lenta,
-  // uma aba por localizador) os itens em que esse numero nao veio junto.
-  const comContagemPronta = opcoes.filter((o) => o.contagem != null);
-  const semContagem = opcoes.filter((o) => o.contagem == null);
-
-  for (const opcao of comContagemPronta) {
-    localizadores.push({ nome: opcao.nome, totalProcessos: opcao.contagem });
-  }
-
-  if (semContagem.length > 0) {
-    for (let i = 0; i < semContagem.length; i += 1) {
-      const opcao = semContagem[i];
-      notificar(`Consultando localizador ${i + 1}/${semContagem.length}: ${opcao.nome}...`);
-      const r = await abrirAbaEConsultarUmaVez(urlBase, {
-        valorSituacao: null,
-        urgente: false,
-        diasSituacao: null,
-        valorOrgaoJuizo,
-        valorLocalizador: opcao.texto,
-      });
-      localizadores.push({ nome: opcao.nome, totalProcessos: r.contagem || 0 });
-      if (r.erro) erros.push(`${opcao.nome}: ${r.erro}`);
-    }
-  }
-
-  return { localizadores, erro: erros.length > 0 ? erros.join(" | ") : null };
+  const localizadores = opcoes.map((opcao) => ({ nome: opcao.nome }));
+  return { localizadores, erro: erroListagem || null };
 }
 
 // Orquestra o Relatório Gerencial da Unidade: navega a aba atual ate' o
@@ -3005,7 +2983,10 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
   let erroLocalizadores = null;
   if (opcoesFinais.localizadores) {
     const resultado = await consultarLocalizadoresUnidadeViaRelatorioGeral(abaAtual.url, valorUnidade, notificar);
-    localizadoresOrdenados = [...resultado.localizadores].sort((a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0));
+    // Sem total de processos para ordenar por ele (ver comentario em
+    // "consultarLocalizadoresUnidadeViaRelatorioGeral") - so' resta a
+    // ordem alfabetica.
+    localizadoresOrdenados = [...resultado.localizadores].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
     erroLocalizadores = resultado.erro;
   }
 
@@ -3097,6 +3078,13 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
     avisos.push(`Acervo antigo: ${acervoAntigo.erros.join(" | ")}`);
   }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
+  if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
+    avisos.push(
+      "Localizadores: a lista abaixo traz só os nomes - por enquanto, a única forma de obter o total de " +
+        'processos de cada localizador é se habilitar na própria unidade e usar a ferramenta "Localizadores ' +
+        'do Órgão" do painel.'
+    );
+  }
   if (opcoesFinais.remessas && erroRemessas) avisos.push(`Remessas em Aberto: ${erroRemessas}`);
 
   const bytesCapa = await construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoesResumo, avisos);
@@ -3106,9 +3094,9 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, nome
   paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
 
   if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
-    const bytesLocalizadores = await construirPdfLocalizadores(
+    const bytesLocalizadores = await construirPdfListaLocalizadores(
       localizadoresOrdenados,
-      `Localizadores da unidade "${nomeUnidade}" — ${localizadoresOrdenados.length} registro(s)`
+      `Localizadores da unidade "${nomeUnidade}" — ${localizadoresOrdenados.length} registro(s) (sem total de processos - ver aviso)`
     );
     const pdfLocalizadores = await PDFDocument.load(bytesLocalizadores);
     const paginasCopiadas = await pdfFinal.copyPages(pdfLocalizadores, pdfLocalizadores.getPageIndices());
@@ -3862,6 +3850,19 @@ function construirPdfLocalizadores(itens, tituloDocumento) {
     { titulo: "Descrição", largura: larguraUtil * 0.58, campo: "descricao" },
     { titulo: "Total de processos", largura: larguraUtil * 0.16, campo: "totalProcessos" },
   ];
+  return construirPdfTabela(itens, colunas, tituloDocumento);
+}
+
+// Usada so' pelo Relatório da Unidade: diferente de
+// "construirPdfLocalizadores" (usada pela tela "Localizadores do Órgão",
+// que tem descricao e total de processos disponiveis), aqui a extracao
+// via Relatório Geral so' traz o nome de cada localizador (ver
+// "consultarLocalizadoresUnidadeViaRelatorioGeral") - entao a tabela tem
+// uma unica coluna, sem colunas vazias de "Descrição"/"Total de
+// processos" que nunca seriam preenchidas.
+function construirPdfListaLocalizadores(itens, tituloDocumento) {
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const colunas = [{ titulo: "Localizador", largura: larguraUtil, campo: "nome" }];
   return construirPdfTabela(itens, colunas, tituloDocumento);
 }
 
