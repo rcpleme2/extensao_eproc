@@ -1,99 +1,280 @@
-/* Varias classes abaixo (.opcoes, .progresso, .progresso-relatorio, ...)
-   definem "display" explicitamente para virar flexbox quando visiveis.
-   Isso tem a mesma especificidade que a regra padrao do navegador para
-   o atributo "hidden" ([hidden] { display: none }), e como regra de
-   autor sempre vence regra de user-agent, o "display: flex" ganhava e o
-   elemento nunca ficava realmente escondido, so' o atributo mudava sem
-   efeito visual. Essa regra com !important garante que "hidden" sempre
-   prevalece, independente de qualquer outra regra de display. */
+/* Design tokens da extensão: paleta alinhada à identidade institucional
+   usada nos PDFs exportados (azul #1c3d5a / #2c6ea6, cinzas neutros).
+   Toda cor/espçamento do painel sai daqui - nada de hex solto nas
+   regras abaixo. */
+:root {
+  --cor-primaria: #2c6ea6;
+  --cor-primaria-escura: #1c3d5a;
+  --cor-primaria-hover: #24597f;
+  --cor-texto: #26313a;
+  --cor-texto-suave: #5c6b78;
+  --cor-fundo: #f4f6f8;
+  --cor-cartao: #ffffff;
+  --cor-borda: #dfe4e8;
+  --cor-borda-suave: #ecf0f3;
+  --cor-realce-fundo: #f0f4f8;
+  --cor-erro: #a33c38;
+  --cor-erro-fundo: #fdecea;
+  --cor-erro-borda: #f5c2c0;
+  --cor-aviso: #7a5c00;
+  --cor-aviso-fundo: #fff8e1;
+  --cor-aviso-borda: #f0d98c;
+  --cor-ok: #1a7f37;
+  --cor-ok-fundo: #eaf6ee;
+  --cor-desabilitado: #b7c4cf;
+  --raio: 6px;
+  --raio-cartao: 8px;
+  --espaco-1: 6px;
+  --espaco-2: 10px;
+  --espaco-3: 14px;
+  --fonte-base: 13px;
+  --fonte-pequena: 11.5px;
+}
+
+/* Varias classes abaixo (.opcoes, .progresso, ...) definem "display"
+   explicitamente para virar flexbox quando visiveis. Isso tem a mesma
+   especificidade que a regra padrao do navegador para o atributo
+   "hidden" ([hidden] { display: none }), e como regra de autor sempre
+   vence regra de user-agent, o "display: flex" ganhava e o elemento
+   nunca ficava realmente escondido. Essa regra com !important garante
+   que "hidden" sempre prevalece. */
 [hidden] {
   display: none !important;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   min-width: 300px;
-  padding: 12px;
-  font-size: 13px;
-  color: #222;
-  background: #f4f6f8;
-  box-sizing: border-box;
+  margin: 0;
+  padding: var(--espaco-2);
+  font-size: var(--fonte-base);
+  color: var(--cor-texto);
+  background: var(--cor-fundo);
 }
 
+/* ---- Cabeçalho do painel ---- */
+
 .cabecalho-app {
-  margin-bottom: 12px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--espaco-1);
+  margin-bottom: var(--espaco-2);
+  padding: 2px 2px 8px;
+  border-bottom: 2px solid var(--cor-primaria);
 }
 
 .cabecalho-app h1 {
   font-size: 15px;
   font-weight: 700;
   margin: 0;
-  color: #1c3d5a;
+  color: var(--cor-primaria-escura);
 }
 
-/* Cada secao principal (Exportar Documentos / Relatorios) fica dentro de
-   um cartao proprio, com cabecalho destacado, para deixar clara a
-   separacao entre as duas funcionalidades da extensao. */
+.cabecalho-sub {
+  font-size: var(--fonte-pequena);
+  color: var(--cor-texto-suave);
+  white-space: nowrap;
+}
+
+/* ---- Cartões colapsáveis ----
+   Cada funcionalidade vive num <details class="card">: o painel abre
+   enxuto (só "Exportar Documentos" expandido) e o usuário expande a
+   seção que precisar. O <summary> é o cabeçalho clicável, com chevron
+   indicando o estado. */
+
 .card {
-  background: #fff;
-  border: 1px solid #dfe4e8;
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 14px;
+  background: var(--cor-cartao);
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio-cartao);
+  margin-bottom: var(--espaco-2);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
 }
 
-.card:last-child {
+.card:last-of-type {
   margin-bottom: 0;
 }
 
 .card-titulo {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  gap: var(--espaco-1);
+  padding: 10px 12px;
+  font-size: 12.5px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: #2c6ea6;
-  margin: 0 0 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #eaeef1;
+  letter-spacing: 0.04em;
+  color: var(--cor-primaria);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.card-titulo::-webkit-details-marker {
+  display: none;
+}
+
+/* Chevron do estado aberto/fechado, na ponta direita do cabeçalho. */
+.card-titulo::after {
+  content: "";
+  margin-left: auto;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--cor-texto-suave);
+  border-bottom: 2px solid var(--cor-texto-suave);
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+  flex: 0 0 auto;
+}
+
+.card[open] > .card-titulo::after {
+  transform: rotate(225deg);
+}
+
+.card[open] > .card-titulo {
+  border-bottom: 1px solid var(--cor-borda-suave);
+}
+
+.card-titulo:hover {
+  background: var(--cor-realce-fundo);
 }
 
 .card-icone {
   font-size: 15px;
 }
 
+.card-rotulo {
+  flex: 0 1 auto;
+}
+
+.card-corpo {
+  padding: var(--espaco-2) 12px 12px;
+}
+
+/* Cartão condicional/privilegiado (Corregedoria): borda esquerda na cor
+   primária + selo no cabeçalho, sinalizando que só aparece para um
+   perfil específico. */
+.card--privilegiado {
+  border-left: 3px solid var(--cor-primaria);
+}
+
+.selo {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--cor-primaria-escura);
+  background: var(--cor-realce-fundo);
+  border: 1px solid var(--cor-borda);
+  border-radius: 10px;
+  padding: 2px 7px;
+  margin-left: var(--espaco-1);
+}
+
+/* ---- Texto de status (dinâmico) ---- */
+
 .status {
-  background: #f0f4f8;
-  border: 1px solid #d3dce6;
-  border-radius: 4px;
+  background: var(--cor-realce-fundo);
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
   padding: 8px;
-  margin-bottom: 10px;
+  margin-bottom: var(--espaco-2);
+  color: var(--cor-texto-suave);
+  line-height: 1.45;
+}
+
+.status--ok {
+  background: var(--cor-ok-fundo);
+  border-color: var(--cor-ok);
+  color: var(--cor-ok);
+}
+
+.status--erro {
+  background: var(--cor-erro-fundo);
+  border-color: var(--cor-erro-borda);
+  color: var(--cor-erro);
+}
+
+/* ---- Botões ----
+   Três variações, usadas em todo o painel (inclusive no modal):
+   .btn (primário), .btn-secundario (contorno) e .btn-ghost (texto). */
+
+button {
+  font: inherit;
+}
+
+.btn,
+.btn-secundario,
+.btn-ghost {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: var(--raio);
+  font-size: var(--fonte-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.btn {
+  border: 1px solid var(--cor-primaria);
+  background: var(--cor-primaria);
+  color: #fff;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--cor-primaria-hover);
+  border-color: var(--cor-primaria-hover);
+}
+
+.btn-secundario {
+  border: 1px solid var(--cor-primaria);
+  background: var(--cor-cartao);
+  color: var(--cor-primaria);
+}
+
+.btn-secundario:hover:not(:disabled) {
+  background: var(--cor-realce-fundo);
+}
+
+.btn-ghost {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--cor-texto-suave);
+  font-weight: 500;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.btn:disabled,
+.btn-secundario:disabled {
+  background: var(--cor-desabilitado);
+  border-color: var(--cor-desabilitado);
+  color: #fff;
+  cursor: not-allowed;
+}
+
+.btn-icone {
+  flex: 0 0 auto;
+  width: 34px;
+  padding: 7px 0;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .botoes {
   display: flex;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: var(--espaco-2);
 }
 
-button {
-  flex: 1;
-  padding: 6px 8px;
-  border: 1px solid #2c6ea6;
-  background: #2c6ea6;
-  color: #fff;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-button:disabled {
-  background: #b7c4cf;
-  border-color: #b7c4cf;
-  cursor: not-allowed;
-}
+/* ---- Blocos de opções (radios, checkboxes, selects) ---- */
 
 .processo {
   margin-bottom: 8px;
@@ -102,130 +283,95 @@ button:disabled {
 .opcoes {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 10px;
+  gap: var(--espaco-1);
+  margin-bottom: var(--espaco-2);
   padding: 8px;
-  background: #f9f9f9;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
+  background: var(--cor-fundo);
+  border: 1px solid var(--cor-borda-suave);
+  border-radius: var(--raio);
 }
 
-.opcao-radio {
+.opcao {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--espaco-1);
   cursor: pointer;
 }
 
-.opcoes button {
+.opcao input {
+  accent-color: var(--cor-primaria);
+}
+
+/* Linha compacta de formatos de exportação (PDF / Excel lado a lado). */
+.linha-formatos {
+  display: flex;
+  gap: var(--espaco-3);
+}
+
+.opcoes .btn,
+.opcoes .btn-secundario {
   margin-top: 4px;
 }
 
 .opcoes select {
   width: 100%;
   padding: 6px 8px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  font-size: 13px;
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+  background: var(--cor-cartao);
+  font-size: var(--fonte-base);
+  color: var(--cor-texto);
 }
 
-.aviso-md-unico {
+/* ---- Avisos (uma classe só para os antigos aviso-md-unico e
+   aviso-urgencia) ---- */
+
+.aviso {
   margin: 2px 0 4px;
   padding: 6px 8px;
-  background: #fff8e1;
-  border: 1px solid #f0d98c;
-  border-radius: 4px;
-  color: #7a5c00;
-  font-size: 11.5px;
-  line-height: 1.4;
+  background: var(--cor-aviso-fundo);
+  border: 1px solid var(--cor-aviso-borda);
+  border-radius: var(--raio);
+  color: var(--cor-aviso);
+  font-size: var(--fonte-pequena);
+  line-height: 1.45;
 }
+
+/* ---- Progresso ----
+   Dois formatos com a mesma linguagem visual: barra determinate (só no
+   download de documentos, que tem contagem) e spinner (todo o resto). */
 
 .progresso {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--espaco-1);
   margin-bottom: 8px;
 }
 
 progress {
   flex: 1;
+  height: 8px;
+  accent-color: var(--cor-primaria);
 }
 
-.lista-documentos {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 60vh;
-  overflow-y: auto;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-}
-
-.lista-documentos li {
-  padding: 4px 8px;
-  border-bottom: 1px solid #f0f0f0;
-  display: flex;
-  justify-content: space-between;
-}
-
-.lista-documentos li:last-child {
-  border-bottom: none;
-}
-
-.tipo {
-  color: #888;
-  font-size: 11px;
-}
-
-.erros {
-  margin-top: 8px;
-  background: #fdecea;
-  border: 1px solid #f5c2c0;
-  border-radius: 4px;
-  padding: 8px;
-  color: #a33;
-}
-
-.relatorio {
-  margin-top: 10px;
-}
-
-.aviso-urgencia {
-  margin-top: 8px;
-  padding: 6px;
-  background: #fff8e1;
-  border: 1px solid #f0d98c;
-  border-radius: 4px;
-  color: #7a5c00;
-  font-size: 12px;
-}
-
-.btn-icone {
-  flex: 0 0 auto;
-  width: 34px;
-  padding: 6px 0;
-  font-size: 15px;
-  line-height: 1;
-}
-
-.progresso-relatorio {
+.progresso-spinner {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
   padding: 8px;
-  background: #f0f4f8;
-  border: 1px solid #d3dce6;
-  border-radius: 4px;
+  background: var(--cor-realce-fundo);
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+  color: var(--cor-texto-suave);
 }
 
 .spinner {
   flex: 0 0 auto;
   width: 14px;
   height: 14px;
-  border: 2px solid #c7d6e3;
-  border-top-color: #2c6ea6;
+  border: 2px solid var(--cor-borda);
+  border-top-color: var(--cor-primaria);
   border-radius: 50%;
   animation: girar 0.8s linear infinite;
 }
@@ -236,9 +382,51 @@ progress {
   }
 }
 
-/* Tabela de resultados do relatorio: uma linha por situacao, uma coluna
-   por metrica - bem mais facil de ler de relance do que a frase corrida
-   usada antes ("Conclusos para despacho: N (urgentes: N, +30 dias: N)"). */
+/* ---- Lista de documentos detectados ---- */
+
+.lista-documentos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--cor-borda-suave);
+  border-radius: var(--raio);
+}
+
+.lista-documentos li {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--cor-borda-suave);
+  display: flex;
+  justify-content: space-between;
+}
+
+.lista-documentos li:last-child {
+  border-bottom: none;
+}
+
+.tipo {
+  color: var(--cor-texto-suave);
+  font-size: 11px;
+}
+
+/* ---- Erros ---- */
+
+.erros {
+  margin-top: 8px;
+  background: var(--cor-erro-fundo);
+  border: 1px solid var(--cor-erro-borda);
+  border-radius: var(--raio);
+  padding: 8px;
+  color: var(--cor-erro);
+}
+
+/* ---- Tabelas do relatório rápido ---- */
+
+.relatorio {
+  margin-top: var(--espaco-2);
+}
+
 .tabela-relatorio {
   width: 100%;
   border-collapse: collapse;
@@ -246,33 +434,33 @@ progress {
 }
 
 .tabela-relatorio-sem-mov {
-  margin-top: 10px;
+  margin-top: var(--espaco-2);
 }
 
 .tabela-relatorio th,
 .tabela-relatorio td {
   padding: 6px 8px;
   text-align: center;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--cor-borda-suave);
 }
 
 .tabela-relatorio thead th {
-  background: #eef3f7;
-  color: #45596b;
+  background: var(--cor-primaria-escura);
+  color: #fff;
   font-weight: 600;
 }
 
 .tabela-relatorio tbody th {
   text-align: left;
-  background: #f9fafb;
+  background: var(--cor-fundo);
   font-weight: 600;
-  color: #333;
+  color: var(--cor-texto);
 }
 
 .tabela-relatorio tbody td {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  color: #1c3d5a;
+  color: var(--cor-primaria-escura);
   padding: 0;
 }
 
@@ -285,13 +473,13 @@ progress {
   font: inherit;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  color: #1c3d5a;
+  color: var(--cor-primaria-escura);
   cursor: pointer;
 }
 
 .valor-link:hover:not(:disabled) {
-  background: #eaf1f8;
-  color: #1a5fb4;
+  background: var(--cor-realce-fundo);
+  color: var(--cor-primaria);
   text-decoration: underline;
 }
 
@@ -300,69 +488,35 @@ progress {
   opacity: 0.6;
 }
 
+/* ---- Modal ---- */
+
 .modal-overlay {
   position: fixed;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(28, 61, 90, 0.45);
   z-index: 100;
 }
 
 .modal-caixa {
   width: calc(100% - 48px);
   max-width: 300px;
-  background: #fff;
-  border-radius: 8px;
+  background: var(--cor-cartao);
+  border-radius: var(--raio-cartao);
   padding: 16px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 .modal-texto {
   margin: 0 0 12px;
-  font-size: 13px;
-  color: #222;
+  font-size: var(--fonte-base);
+  color: var(--cor-texto);
 }
 
 .modal-botoes {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.modal-botoes button {
-  padding: 8px 10px;
-  border: none;
-  border-radius: 5px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.modal-btn-primario {
-  background: #2c6ea6;
-  color: #fff;
-}
-
-.modal-btn-primario:hover {
-  background: #24597f;
-}
-
-.modal-btn-excel {
-  background: #1a7f37;
-  color: #fff;
-}
-
-.modal-btn-excel:hover {
-  background: #145f29;
-}
-
-.modal-btn-cancelar {
-  background: none;
-  color: #666;
-}
-
-.modal-btn-cancelar:hover {
-  text-decoration: underline;
 }

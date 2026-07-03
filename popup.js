@@ -55,8 +55,30 @@ radioIndividuais.addEventListener("change", atualizarAvisoMdUnico);
 radioPdfUnico.addEventListener("change", atualizarAvisoMdUnico);
 radioMdUnico.addEventListener("change", atualizarAvisoMdUnico);
 
-function setStatus(texto) {
-  areaStatus.textContent = texto;
+// Aplica texto + estado visual a uma area de status. "tipo" opcional:
+// "ok" (verde, operacao concluida), "erro" (vermelho) ou ausente
+// (neutro, andamento/ajuda). Compartilhado por todos os setStatus* do
+// painel, para sucesso e erro terem cara de sucesso e erro em vez de
+// ficarem identicos ao texto de ajuda.
+function aplicarStatus(el, texto, tipo) {
+  el.textContent = texto;
+  el.classList.toggle("status--ok", tipo === "ok");
+  el.classList.toggle("status--erro", tipo === "erro");
+  // Atividade numa secao (progresso/resultado/erro) abre o cartao dela,
+  // para nada acontecer escondido atras de um cartao colapsado.
+  abrirCartaoDe(el);
+}
+
+// Garante que o cartao (details) que contem o elemento esteja aberto -
+// chamado ao iniciar operacoes/receber resultados, para o usuario nunca
+// perder um progresso ou erro escondido num cartao colapsado.
+function abrirCartaoDe(el) {
+  const detalhes = el.closest("details");
+  if (detalhes) detalhes.open = true;
+}
+
+function setStatus(texto, tipo) {
+  aplicarStatus(areaStatus, texto, tipo);
 }
 
 async function getAbaAtiva() {
@@ -189,8 +211,8 @@ const areaErrosRelatorio = document.getElementById("area-erros-relatorio");
 // Cada cartao (Exportar Documentos / Relatórios) tem sua propria area de
 // status e de erros - mante-los separados evita que uma acao numa secao
 // sobrescreva a mensagem que o usuario estava vendo na outra.
-function setStatusRelatorio(texto) {
-  areaRelatorioInfo.textContent = texto;
+function setStatusRelatorio(texto, tipo) {
+  aplicarStatus(areaRelatorioInfo, texto, tipo);
 }
 
 function formatarContagem(valor) {
@@ -271,7 +293,7 @@ async function executarAberturaRelatorio(pedido, exportarExcel) {
       throw new Error((resposta && resposta.erro) || "Falha ao abrir o relatório detalhado.");
     }
   } catch (e) {
-    setStatusRelatorio("Erro ao abrir o relatório detalhado.");
+    setStatusRelatorio("Erro ao abrir o relatório detalhado.", "erro");
     areaErrosRelatorio.hidden = false;
     areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
     definirBotoesValorHabilitados(true);
@@ -320,7 +342,7 @@ btnRelatorios.addEventListener("click", async () => {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar o relatório.");
     }
   } catch (e) {
-    setStatusRelatorio("Erro ao iniciar o relatório.");
+    setStatusRelatorio("Erro ao iniciar o relatório.", "erro");
     areaErrosRelatorio.hidden = false;
     areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
     areaProgressoRelatorio.hidden = true;
@@ -339,9 +361,9 @@ btnAbrirTelaRelatorio.addEventListener("click", async () => {
     if (!resposta || !resposta.ok) {
       throw new Error((resposta && resposta.erro) || "Falha ao abrir a tela do relatório.");
     }
-    setStatusRelatorio("Tela do Relatório Geral aberta nesta aba.");
+    setStatusRelatorio("Tela do Relatório Geral aberta nesta aba.", "ok");
   } catch (e) {
-    setStatusRelatorio("Erro ao abrir a tela do relatório.");
+    setStatusRelatorio("Erro ao abrir a tela do relatório.", "erro");
     areaErrosRelatorio.hidden = false;
     areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
   } finally {
@@ -372,8 +394,8 @@ const areaErrosCorregedoria = document.getElementById("area-erros-corregedoria")
 // "exigirUnidadeSelecionada" abaixo).
 let unidadeSelecionadaCorregedoria = null;
 
-function setStatusCorregedoria(texto) {
-  areaCorregedoriaInfo.textContent = texto;
+function setStatusCorregedoria(texto, tipo) {
+  aplicarStatus(areaCorregedoriaInfo, texto, tipo);
 }
 
 // Todo relatório do painel da Corregedoria (hoje so' o Relatório
@@ -427,7 +449,7 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar o carregamento.");
     }
   } catch (e) {
-    setStatusCorregedoria("Erro ao carregar as unidades.");
+    setStatusCorregedoria("Erro ao carregar as unidades.", "erro");
     areaErrosCorregedoria.hidden = false;
     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
     areaProgressoUnidades.hidden = true;
@@ -491,7 +513,7 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
     }
   } catch (e) {
-    setStatusCorregedoria("Erro ao gerar o relatório gerencial.");
+    setStatusCorregedoria("Erro ao gerar o relatório gerencial.", "erro");
     areaErrosCorregedoria.hidden = false;
     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
     areaProgressoRelatorioGerencial.hidden = true;
@@ -518,7 +540,7 @@ btnRelatorioPanoramico.addEventListener("click", async () => {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
     }
   } catch (e) {
-    setStatusCorregedoria("Erro ao gerar o relatório geral.");
+    setStatusCorregedoria("Erro ao gerar o relatório geral.", "erro");
     areaErrosCorregedoria.hidden = false;
     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
     areaProgressoPanoramico.hidden = true;
@@ -549,7 +571,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     btnDetectar.disabled = false;
     atualizarEstadoRadiosConformeDocumentos();
     atualizarEstadoBotaoBaixar();
-    setStatus(`Concluido! Arquivos salvos em Downloads/${mensagem.pasta}`);
+    setStatus(`Concluido! Arquivos salvos em Downloads/${mensagem.pasta}`, "ok");
     if (mensagem.erros && mensagem.erros.length > 0) {
       areaErros.hidden = false;
       areaErros.textContent =
@@ -601,9 +623,9 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         avisoUrgenciaEl.hidden = true;
       }
 
-      setStatusRelatorio("Relatório gerado com sucesso.");
+      setStatusRelatorio("Relatório gerado com sucesso.", "ok");
     } else {
-      setStatusRelatorio("Erro ao gerar o relatório.");
+      setStatusRelatorio("Erro ao gerar o relatório.", "erro");
       areaErrosRelatorio.hidden = false;
       areaErrosRelatorio.textContent = mensagem.erro || "Falha desconhecida ao gerar o relatório.";
     }
@@ -615,9 +637,9 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     btnAbrirTelaRelatorio.disabled = false;
 
     if (mensagem.ok) {
-      setStatusRelatorio("Relatório detalhado aberto em uma nova aba.");
+      setStatusRelatorio("Relatório detalhado aberto em uma nova aba.", "ok");
     } else {
-      setStatusRelatorio("Erro ao abrir o relatório detalhado.");
+      setStatusRelatorio("Erro ao abrir o relatório detalhado.", "erro");
       areaErrosRelatorio.hidden = false;
       areaErrosRelatorio.textContent =
         mensagem.erro || "Falha desconhecida ao abrir o relatório detalhado.";
@@ -654,7 +676,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
           : "Nenhuma unidade encontrada no filtro Órgão/Juízo."
       );
     } else {
-      setStatusCorregedoria("Erro ao carregar as unidades.");
+      setStatusCorregedoria("Erro ao carregar as unidades.", "erro");
       areaErrosCorregedoria.hidden = false;
       areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao carregar as unidades.";
@@ -675,10 +697,11 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       setStatusCorregedoria(
         `Concluído! Relatório Gerencial de "${resultado.unidade || ""}" salvo em Downloads/eproc/ (${
           resultado.totalLocalizadores || 0
-        } localizador(es), ${resultado.totalRemessas || 0} remessa(s) em aberto).`
+        } localizador(es), ${resultado.totalRemessas || 0} remessa(s) em aberto).`,
+        "ok"
       );
     } else {
-      setStatusCorregedoria("Erro ao gerar o relatório gerencial.");
+      setStatusCorregedoria("Erro ao gerar o relatório gerencial.", "erro");
       areaErrosCorregedoria.hidden = false;
       areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao gerar o relatório gerencial.";
@@ -699,10 +722,11 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       setStatusCorregedoria(
         `Concluído! Relatório Geral salvo em Downloads/eproc/ (${
           resultado.totalSemMovimentacao || 0
-        } linha(s) de sem movimentação, ${resultado.totalAtuacao || 0} linha(s) de atuação).`
+        } linha(s) de sem movimentação, ${resultado.totalAtuacao || 0} linha(s) de atuação).`,
+        "ok"
       );
     } else {
-      setStatusCorregedoria("Erro ao gerar o relatório geral.");
+      setStatusCorregedoria("Erro ao gerar o relatório geral.", "erro");
       areaErrosCorregedoria.hidden = false;
       areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao gerar o relatório geral.";
@@ -714,8 +738,8 @@ const areaRegrasInfo = document.getElementById("area-regras-info");
 const btnExportarRegras = document.getElementById("btn-exportar-regras");
 const areaErrosRegras = document.getElementById("area-erros-regras");
 
-function setStatusRegras(texto) {
-  areaRegrasInfo.textContent = texto;
+function setStatusRegras(texto, tipo) {
+  aplicarStatus(areaRegrasInfo, texto, tipo);
 }
 
 // Igual ao padrao ja' usado em "Localizadores do Órgão"/"Relatório
@@ -734,7 +758,7 @@ btnExportarRegras.addEventListener("click", async () => {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
     }
   } catch (e) {
-    setStatusRegras("Erro ao iniciar a exportação.");
+    setStatusRegras("Erro ao iniciar a exportação.", "erro");
     areaErrosRegras.hidden = false;
     areaErrosRegras.textContent = e && e.message ? e.message : String(e);
     btnExportarRegras.disabled = false;
@@ -749,8 +773,8 @@ const areaProgressoLocalizadores = document.getElementById("area-progresso-local
 const textoProgressoLocalizadores = document.getElementById("texto-progresso-localizadores");
 const areaErrosLocalizadores = document.getElementById("area-erros-localizadores");
 
-function setStatusLocalizadores(texto) {
-  areaLocalizadoresInfo.textContent = texto;
+function setStatusLocalizadores(texto, tipo) {
+  aplicarStatus(areaLocalizadoresInfo, texto, tipo);
 }
 
 btnExportarLocalizadores.addEventListener("click", async () => {
@@ -777,7 +801,7 @@ btnExportarLocalizadores.addEventListener("click", async () => {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
     }
   } catch (e) {
-    setStatusLocalizadores("Erro ao iniciar a exportação.");
+    setStatusLocalizadores("Erro ao iniciar a exportação.", "erro");
     areaErrosLocalizadores.hidden = false;
     areaErrosLocalizadores.textContent = e && e.message ? e.message : String(e);
     areaProgressoLocalizadores.hidden = true;
@@ -801,10 +825,11 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       const resultado = mensagem.resultado || {};
       setStatusLocalizadores(
         `Concluído! ${resultado.total || 0} localizador(es) exportado(s) para Downloads/eproc/.` +
-          (resultado.erroColeta ? ` Aviso: ${resultado.erroColeta}` : "")
+          (resultado.erroColeta ? ` Aviso: ${resultado.erroColeta}` : ""),
+        "ok"
       );
     } else {
-      setStatusLocalizadores("Erro ao exportar os localizadores.");
+      setStatusLocalizadores("Erro ao exportar os localizadores.", "erro");
       areaErrosLocalizadores.hidden = false;
       areaErrosLocalizadores.textContent =
         mensagem.erro || "Falha desconhecida ao exportar os localizadores.";
@@ -820,9 +845,9 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
-      setStatusRegras(`${resultado.total || 0} regra(s) ativa(s) exportada(s) em uma nova aba.`);
+      setStatusRegras(`${resultado.total || 0} regra(s) ativa(s) exportada(s) em uma nova aba.`, "ok");
     } else {
-      setStatusRegras("Erro ao exportar as regras.");
+      setStatusRegras("Erro ao exportar as regras.", "erro");
       areaErrosRegras.hidden = false;
       areaErrosRegras.textContent = mensagem.erro || "Falha desconhecida ao exportar as regras.";
     }
@@ -863,7 +888,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         areaErrosNavLocalizadores.textContent = `Aviso: ${resultado.erroColeta}`;
       }
     } else {
-      setStatusNavLocalizadores("Erro ao carregar os localizadores.");
+      setStatusNavLocalizadores("Erro ao carregar os localizadores.", "erro");
       areaErrosNavLocalizadores.hidden = false;
       areaErrosNavLocalizadores.textContent =
         mensagem.erro || "Falha desconhecida ao carregar os localizadores.";
@@ -883,10 +908,11 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       const resultado = mensagem.resultado || {};
       setStatusNavLocalizadores(
         `Concluído! ${resultado.total || 0} processo(s) exportado(s) para Downloads/eproc/.` +
-          (resultado.erroColeta ? ` Aviso: ${resultado.erroColeta}` : "")
+          (resultado.erroColeta ? ` Aviso: ${resultado.erroColeta}` : ""),
+        "ok"
       );
     } else {
-      setStatusNavLocalizadores("Erro ao exportar os processos do localizador.");
+      setStatusNavLocalizadores("Erro ao exportar os processos do localizador.", "erro");
       areaErrosNavLocalizadores.hidden = false;
       areaErrosNavLocalizadores.textContent =
         mensagem.erro || "Falha desconhecida ao exportar os processos do localizador.";
@@ -914,8 +940,8 @@ const textoProgressoProcessosLocalizador = document.getElementById("texto-progre
 // no dropdown na hora de exportar o relatorio de processos dele.
 let localizadoresCarregados = [];
 
-function setStatusNavLocalizadores(texto) {
-  areaNavLocalizadoresInfo.textContent = texto;
+function setStatusNavLocalizadores(texto, tipo) {
+  aplicarStatus(areaNavLocalizadoresInfo, texto, tipo);
 }
 
 btnCarregarLocalizadores.addEventListener("click", async () => {
@@ -937,7 +963,7 @@ btnCarregarLocalizadores.addEventListener("click", async () => {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar o carregamento.");
     }
   } catch (e) {
-    setStatusNavLocalizadores("Erro ao iniciar o carregamento.");
+    setStatusNavLocalizadores("Erro ao iniciar o carregamento.", "erro");
     areaErrosNavLocalizadores.hidden = false;
     areaErrosNavLocalizadores.textContent = e && e.message ? e.message : String(e);
     areaProgressoNavLocalizadores.hidden = true;
@@ -1013,7 +1039,7 @@ btnExportarProcessosLocalizador.addEventListener("click", async () => {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
     }
   } catch (e) {
-    setStatusNavLocalizadores("Erro ao iniciar a exportação.");
+    setStatusNavLocalizadores("Erro ao iniciar a exportação.", "erro");
     areaErrosNavLocalizadores.hidden = false;
     areaErrosNavLocalizadores.textContent = e && e.message ? e.message : String(e);
     areaProgressoProcessosLocalizador.hidden = true;
