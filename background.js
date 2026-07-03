@@ -1849,6 +1849,344 @@ async function abrirAbaEExtrairRemessasEmAberto(urlBase, nomeDescritivoUnidade) 
   }
 }
 
+// ---- Relatório Geral da Corregedoria (panorama de todas as unidades) ----
+
+// Links de menu das duas telas panoramicas usadas nesse relatorio (acao=
+// confirmados no menu lateral do perfil CORREGEDORIA da pagina real de
+// Remessas em Aberto enviada pelo usuario).
+function clicarLinkSemMovimentacaoTodasVarasNaPagina() {
+  const link = document.querySelector('a[href*="acao=relatorio_sem_movimentacao_listar_geral"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+function clicarLinkAtuacaoJuizLeigoNaPagina() {
+  const link = document.querySelector('a[href*="acao=relatorio_atuacao_auxiliar_justica"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Extrator GENERICO de tabela de resultado, best-effort - usado nas duas
+// telas panoramicas ("Processos sem Movimentação N Dias (todas Varas)" e
+// "Relatório de Atuação Conciliador/Juiz Leigo"), das quais NAO temos
+// amostra HTML (diferente das demais telas desta extensao, calibradas
+// contra paginas reais). Estrategia defensiva, com log "[eproc]"
+// detalhado para calibrar depois com o HTML real se falhar:
+// 1. Se "diasPreencher" vier, tenta achar um campo de dias (input number
+//    ou id/name contendo "dias") e preenche.
+// 2. Clica num botao "Consultar" se existir (a tela pode ja' abrir
+//    consultada), esperando um tempo para o resultado carregar.
+// 3. Extrai a tabela: primeiro via API do DataTables (mesmo dual-path
+//    das Remessas em Aberto); senao, a maior tabela visivel com <th> e
+//    linhas de dados (.infraTable ou table generica).
+// Retorna { cabecalhos: [..], linhas: [[..]], erro } - colunas limitadas
+// as 8 primeiras para caber no PDF. Nunca lanca excecao.
+function extrairTabelaGenericaNaPagina(diasPreencher) {
+  const LIMITE_COLUNAS = 8;
+  const LIMITE_LINHAS = 400;
+
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function textoLimpo(el) {
+    return (el && el.textContent ? el.textContent : "").replace(/\s+/g, " ").trim();
+  }
+
+  function extrairDeDataTable() {
+    if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) return null;
+    const tabelas = Array.from(document.querySelectorAll("table")).filter((t) =>
+      jQuery.fn.DataTable.isDataTable(t)
+    );
+    if (tabelas.length === 0) return null;
+    const dt = jQuery(tabelas[0]).DataTable();
+    const cabecalhos = Array.from(tabelas[0].querySelectorAll("thead th"))
+      .map(textoLimpo)
+      .slice(0, LIMITE_COLUNAS);
+    // page.len(-1) mostra tudo; rows().data() pode conter objetos ou
+    // arrays dependendo da configuracao da tela - normaliza para texto.
+    try {
+      dt.page.len(-1).draw(false);
+    } catch (e) {
+      // paginacao pode nao existir - segue com o que estiver visivel
+    }
+    const div = document.createElement("div");
+    const linhas = dt
+      .rows({ search: "applied" })
+      .data()
+      .toArray()
+      .slice(0, LIMITE_LINHAS)
+      .map((linha) => {
+        const valores = Array.isArray(linha) ? linha : Object.values(linha);
+        return valores.slice(0, LIMITE_COLUNAS).map((v) => {
+          div.innerHTML = v == null ? "" : String(v);
+          return (div.textContent || "").replace(/\s+/g, " ").trim();
+        });
+      });
+    return { cabecalhos, linhas };
+  }
+
+  function extrairDeTabelaHtml() {
+    const candidatas = Array.from(document.querySelectorAll("table.infraTable, table.eproc-table, table"))
+      .map((t) => ({ tabela: t, linhas: t.querySelectorAll("tbody tr, tr").length }))
+      .filter((c) => c.linhas > 1)
+      .sort((a, b) => b.linhas - a.linhas);
+    if (candidatas.length === 0) return null;
+    const tabela = candidatas[0].tabela;
+
+    const ths = Array.from(tabela.querySelectorAll("th"));
+    const cabecalhos = ths.map(textoLimpo).filter(Boolean).slice(0, LIMITE_COLUNAS);
+
+    const linhas = Array.from(tabela.querySelectorAll("tr"))
+      .filter((tr) => tr.querySelectorAll("td").length > 0)
+      .slice(0, LIMITE_LINHAS)
+      .map((tr) =>
+        Array.from(tr.querySelectorAll("td"))
+          .slice(0, LIMITE_COLUNAS)
+          .map(textoLimpo)
+      );
+    if (linhas.length === 0) return null;
+    return { cabecalhos, linhas };
+  }
+
+  return (async () => {
+    try {
+      if (diasPreencher != null) {
+        const candidatos = Array.from(
+          document.querySelectorAll('input[type="number"], input[id*="ias" i], input[name*="ias" i]')
+        );
+        const campoDias = candidatos.find((el) => /dia/i.test(el.id + " " + el.name));
+        const alvo = campoDias || candidatos[0];
+        if (alvo) {
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+          nativeSetter.call(alvo, String(diasPreencher));
+          alvo.dispatchEvent(new Event("input", { bubbles: true }));
+          alvo.dispatchEvent(new Event("change", { bubbles: true }));
+          console.log("[eproc]", "Campo de dias preenchido:", alvo.id || alvo.name);
+        } else {
+          console.warn("[eproc]", "Nenhum campo de dias encontrado nesta tela - seguindo sem preencher.");
+        }
+      }
+
+      const botaoConsultar = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]')).find(
+        (el) => /consultar/i.test(el.textContent || el.value || "")
+      );
+      if (botaoConsultar) {
+        console.log("[eproc]", "Clicando em Consultar...");
+        botaoConsultar.click();
+        // A consulta pode ser AJAX ou recarregar a pagina; espera um
+        // tempo generoso e segue - se recarregar, este script morre e o
+        // chamador retenta a extracao numa nova chamada.
+        await aguardar(4000);
+      } else {
+        console.log("[eproc]", "Nenhum botão Consultar encontrado - a tela pode já abrir consultada.");
+      }
+
+      const resultado = extrairDeDataTable() || extrairDeTabelaHtml();
+      if (!resultado || resultado.linhas.length === 0) {
+        console.warn("[eproc]", "Nenhuma tabela de resultado encontrada. Título da página:", document.title);
+        return {
+          cabecalhos: [],
+          linhas: [],
+          erro: "Nenhuma tabela de resultado encontrada nesta tela (envie o HTML da página para calibrar a extração).",
+        };
+      }
+      console.log("[eproc]", "Tabela extraída:", resultado.linhas.length, "linha(s),", resultado.cabecalhos.length, "coluna(s).");
+      return { cabecalhos: resultado.cabecalhos, linhas: resultado.linhas, erro: null };
+    } catch (e) {
+      return { cabecalhos: [], linhas: [], erro: e && e.message ? e.message : String(e) };
+    }
+  })();
+}
+
+// Abre uma aba oculta, clica no link de menu indicado, espera carregar e
+// roda o extrator generico de tabela. Se a primeira extracao falhar por
+// navegacao no meio (o Consultar de algumas telas recarrega a pagina,
+// matando o script injetado), tenta extrair de novo na pagina ja'
+// consultada.
+async function abrirAbaEExtrairTabelaRelatorio(urlBase, funcClicarLink, nomeRelatorio, diasPreencher) {
+  let aba;
+  try {
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: funcClicarLink,
+    });
+
+    if (!linkEncontrado) {
+      return {
+        cabecalhos: [],
+        linhas: [],
+        erro: `Link "${nomeRelatorio}" não encontrado no menu lateral. Abra uma página do eproc com o menu lateral e tente novamente.`,
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    let resultado = null;
+    try {
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: extrairTabelaGenericaNaPagina,
+        args: [diasPreencher != null ? diasPreencher : null],
+      });
+      resultado = result;
+    } catch (e) {
+      console.warn("[eproc]", nomeRelatorio, "- primeira extração interrompida (provável recarregamento):", String(e));
+    }
+
+    if (!resultado || (resultado.erro && resultado.linhas.length === 0)) {
+      // Retentativa na pagina ja' consultada/recarregada, sem preencher
+      // dias de novo (o filtro persiste no formulário reenviado).
+      await aguardarCarregamentoAba(aba.id).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: extrairTabelaGenericaNaPagina,
+        args: [null],
+      });
+      if (result && result.linhas.length > 0) resultado = result;
+      else if (!resultado) resultado = result;
+    }
+
+    return resultado || { cabecalhos: [], linhas: [], erro: "Sem resultado ao ler a tabela do relatório." };
+  } catch (e) {
+    return { cabecalhos: [], linhas: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+  }
+}
+
+// Monta um PDF-tabela a partir de cabecalhos/linhas dinamicos (colunas
+// descobertas em tempo de execucao, diferente das tabelas fixas de
+// Localizadores/Remessas): distribui a largura util igualmente entre as
+// colunas e converte cada linha (array) num objeto para o formato que
+// "construirPdfTabela" espera.
+function construirPdfTabelaDinamica(cabecalhos, linhas, tituloDocumento) {
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const num = Math.max(1, cabecalhos.length);
+  const colunas = cabecalhos.map((titulo, i) => ({
+    titulo: titulo || `Coluna ${i + 1}`,
+    largura: larguraUtil / num,
+    campo: `c${i}`,
+  }));
+  const itens = linhas.map((linha) => {
+    const item = {};
+    linha.forEach((valor, i) => {
+      if (i < num) item[`c${i}`] = valor;
+    });
+    return item;
+  });
+  return construirPdfTabela(itens, colunas, tituloDocumento);
+}
+
+// Orquestra o Relatório Geral da Corregedoria (panorama de TODAS as
+// unidades - nao exige unidade escolhida, diferente do Relatório da
+// Unidade): extrai as duas telas panoramicas e gera um unico PDF com
+// capa institucional + as duas tabelas.
+async function exportarRelatorioPanoramico(aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  notificar(`Extraindo processos sem movimentação há mais de ${DIAS_PANORAMA_SEM_MOVIMENTACAO} dias (todas as varas)...`);
+  const semMov = await abrirAbaEExtrairTabelaRelatorio(
+    abaAtual.url,
+    clicarLinkSemMovimentacaoTodasVarasNaPagina,
+    "Processos sem Movimentação N Dias (todas Varas)",
+    DIAS_PANORAMA_SEM_MOVIMENTACAO
+  );
+
+  notificar("Extraindo o Relatório de Atuação Conciliador/Juiz Leigo...");
+  const atuacao = await abrirAbaEExtrairTabelaRelatorio(
+    abaAtual.url,
+    clicarLinkAtuacaoJuizLeigoNaPagina,
+    "Relatório de Atuação Conciliador/Juiz Leigo",
+    null
+  );
+
+  if (semMov.linhas.length === 0 && atuacao.linhas.length === 0) {
+    throw new Error(
+      `Nenhum dado extraído. Sem movimentação: ${semMov.erro || "vazio"}. Atuação: ${atuacao.erro || "vazio"}.`
+    );
+  }
+
+  notificar("Gerando PDF...");
+  const dataInformacao = new Date().toLocaleString("pt-BR");
+
+  const secoesResumo = [
+    {
+      titulo: "CONTEÚDO DESTE RELATÓRIO",
+      linhas: [
+        {
+          rotulo: `Processos sem movimentação há mais de ${DIAS_PANORAMA_SEM_MOVIMENTACAO} dias (todas as varas)`,
+          valor: semMov.linhas.length,
+        },
+        { rotulo: "Atuação Conciliador/Juiz Leigo (linhas)", valor: atuacao.linhas.length },
+      ],
+    },
+  ];
+  const avisos = [];
+  if (semMov.erro) avisos.push(`Sem movimentação (todas as varas): ${semMov.erro}`);
+  if (atuacao.erro) avisos.push(`Atuação Conciliador/Juiz Leigo: ${atuacao.erro}`);
+
+  const bytesCapa = await construirCapaRelatorioGerencial(
+    "Todas as unidades",
+    dataInformacao,
+    secoesResumo,
+    avisos
+  );
+  const pdfFinal = await PDFDocument.create();
+  const pdfCapa = await PDFDocument.load(bytesCapa);
+  const paginasCapa = await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices());
+  paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
+
+  if (semMov.linhas.length > 0) {
+    const bytes = await construirPdfTabelaDinamica(
+      semMov.cabecalhos,
+      semMov.linhas,
+      `Processos sem movimentação há mais de ${DIAS_PANORAMA_SEM_MOVIMENTACAO} dias (todas as varas) — ${semMov.linhas.length} linha(s)`
+    );
+    const pdf = await PDFDocument.load(bytes);
+    const paginas = await pdfFinal.copyPages(pdf, pdf.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  if (atuacao.linhas.length > 0) {
+    const bytes = await construirPdfTabelaDinamica(
+      atuacao.cabecalhos,
+      atuacao.linhas,
+      `Atuação Conciliador/Juiz Leigo — ${atuacao.linhas.length} linha(s)`
+    );
+    const pdf = await PDFDocument.load(bytes);
+    const paginas = await pdfFinal.copyPages(pdf, pdf.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  const bytesFinais = await pdfFinal.save();
+  const nomeArquivo = `eproc/relatorio_geral_corregedoria_${new Date().toISOString().slice(0, 10)}.pdf`;
+  await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytesFinais));
+
+  notificar("Finalizando...");
+  return {
+    totalSemMovimentacao: semMov.linhas.length,
+    totalAtuacao: atuacao.linhas.length,
+  };
+}
+
 // Roda ja' na tela do Relatório Geral, apos uma consulta ter sido feita:
 // abre o menu "Exportar" da tabela de resultados (botao dropdown do
 // DataTables Buttons) e clica na opcao "Excel", disparando o download da
@@ -3941,6 +4279,29 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({
             tipo: "RELATORIO_GERENCIAL_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_PANORAMICO") {
+    // Mesmo padrao das demais operacoes em segundo plano.
+    exportarRelatorioPanoramico((texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_PANORAMICO", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "RELATORIO_PANORAMICO_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_PANORAMICO_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })
