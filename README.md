@@ -459,7 +459,7 @@ extração.
    de novo).
 2. Ao **escolher uma unidade** no menu, o painel mostra "Informações
    serão extraídas de: `<nome da unidade>`" e libera a lista **"Itens a
-   incluir no PDF"** (7 checkboxes, um por seção do relatório — todos
+   incluir no PDF"** (checkboxes, um por seção do relatório — todos
    marcados por padrão) e o botão **"Exportar Relatório da Unidade
    (PDF)"**. Esse relatório sempre confere se uma unidade foi escolhida
    antes de rodar — sem isso, mostra o erro "Selecione uma unidade na
@@ -482,9 +482,25 @@ extração.
      relatório as que têm pelo menos 1 processo (ex.: "SUSPENSAO: 12",
      "SOBRESTADO CONVÊNIO: 3") — as dezenas de variantes zeradas ficam de
      fora, para não poluir o relatório. O **Total** vem por último,
-     depois de todos os processos individuais listados acima.
+     depois de todos os processos individuais listados acima. Além do
+     total, o relatório também traz a **relação de processos** (linhas
+     reais do resultado, não só a contagem) numa tabela em página à
+     parte, logo depois da capa.
+   - **Relação de processos ativos**: o próprio Relatório Geral filtrado
+     só pela unidade, sem nenhum outro campo preenchido (Situação, dias,
+     etc.) — equivalente a rodar a consulta "com os campos em branco",
+     trazendo todos os processos ativos daquela unidade numa tabela em
+     página à parte.
    - O **nome de cada Localizador** da unidade, em ordem alfabética
      (**sem** o total de processos — ver aviso abaixo).
+
+   As duas "relações de processos" (ativos e suspensos) são lidas direto
+   da API do DataTables que alimenta a tabela de resultado do Relatório
+   Geral (`#tblProcessoLista`, mesma técnica já usada em outras tabelas
+   desta extensão) — mostra tudo de uma vez (sem paginação) antes de ler,
+   colunas limitadas às 8 primeiras para caber na página. Se a extração
+   falhar por qualquer motivo, um aviso aparece na capa e a seção
+   simplesmente não entra no PDF, sem interromper o resto do relatório.
 
    Desmarcar um item pula tanto a(s) consulta(s) dele quanto o trecho
    correspondente no PDF — não é só uma questão de esconder o resultado,
@@ -513,10 +529,14 @@ extração.
    processos — bem mais fácil de escanear visualmente do que um
    parágrafo corrido com todos os nomes separados por vírgula. Continua
    em novas páginas (sempre com o mesmo cabeçalho/rodapé) só se a lista
-   for grande demais para caber no que sobrou da página. Essa mesma
-   identidade visual também vale para os PDFs de Localizadores/Processos
-   por Localizador exportados fora do painel da Corregedoria, já que
-   reaproveitam o mesmo gerador de tabela.
+   for grande demais para caber no que sobrou da página. Já as relações
+   de processos ativos/suspensos usam página virada (paisagem), uma
+   tabela por seção, com colunas dinâmicas de acordo com o que a própria
+   tela do eproc mostrar (título, cabeçalho e zebrado seguem a mesma
+   identidade visual). Essa mesma identidade visual também vale para os
+   PDFs de Localizadores/Processos por Localizador exportados fora do
+   painel da Corregedoria, já que reaproveitam o mesmo gerador de
+   tabela.
 
    A extração dos Localizadores **não** usa a tela "Localizadores do
    Órgão" (diferente do resto do painel) — o Relatório Geral tem seu
@@ -615,7 +635,14 @@ para confirmar o caminho atual do menu.
 O cartão **"Localizadores do Órgão"** exporta a lista completa de
 Localizadores do Órgão (tela `acao=localizador_orgao_listar` do eproc) em
 PDF e/ou planilha Excel, com três colunas: **Localizador** (nome), a
-**Descrição do Localizador** e o **Total de processos**.
+**Descrição do Localizador** e o **Total de processos**. Como a
+descrição é um campo opcional raramente preenchido, o PDF **omite
+essa coluna por completo** quando nenhum localizador da unidade tem
+descrição — mostrando só Localizador + Total de processos, com a
+largura redistribuída entre as duas colunas. Isso evita uma tabela com
+uma faixa enorme em branco no meio (o caso mais comum na prática); a
+coluna só aparece quando pelo menos um localizador realmente tem algo
+preenchido ali.
 
 Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
 
@@ -701,13 +728,14 @@ c. **"Exportar na íntegra todos os processos nesse localizador"**: entra, um de
    baixar cada um, montar o PDF), pode demorar bastante para
    localizadores com muitos processos — o progresso mostra qual
    processo e documento estão sendo tratados no momento. Os arquivos
-   saem em `Downloads/eproc/documentos_localizador_<nome_do_localizador>/`,
-   **uma pasta por processo (nome da pasta = número do processo)**,
-   contendo um único arquivo `<nome_do_localizador>.pdf` — assim,
-   exportar o mesmo processo por localizadores diferentes não sobrescreve
-   nada, cada exportação fica em seu próprio arquivo dentro da pasta do
-   processo. Processos sem nenhum documento ou com falha ao abrir são
-   pulados e aparecem como aviso ao final, sem interromper os demais.
+   saem em `Downloads/eproc/<número do processo>/Exportado -
+   <localizador>.pdf` — a mesma pasta por processo usada pelo resto da
+   extensão (não uma pasta própria por localizador), com o arquivo
+   nomeado pelo localizador escolhido; assim, exportar o mesmo processo
+   por localizadores diferentes não sobrescreve nada, cada exportação
+   fica em seu próprio arquivo dentro da pasta do processo. Processos sem
+   nenhum documento ou com falha ao abrir são pulados e aparecem como
+   aviso ao final, sem interromper os demais.
 
 Como o botão "Carregar localizadores" some depois de carregado, para
 atualizar a lista (por exemplo, depois que os números mudarem) basta

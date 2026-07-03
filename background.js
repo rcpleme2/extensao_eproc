@@ -1492,6 +1492,62 @@ function consultarUmaVezNaPagina(parametros) {
     throw new Error("Tempo esgotado esperando o resultado da consulta.");
   }
 
+  // Le' a "relação de processos" (linhas da tabela de resultado, nao so'
+  // o total) direto da API do DataTables que alimenta "#tblProcessoLista"
+  // - mesma tecnica ja' usada para outras tabelas desta extensao (mais
+  // confiavel que raspar o DOM renderizado, e da' pra "mostrar tudo" sem
+  // precisar navegar entre paginas). Usado pelo Relatório da Unidade para
+  // trazer a lista de processos ativos/suspensos, alem do total. Nunca
+  // lanca excecao: sempre resolve com { cabecalhos, linhas, erro }.
+  async function extrairLinhasTblProcessoLista() {
+    const LIMITE_COLUNAS = 8;
+    const LIMITE_LINHAS = 500;
+    try {
+      if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
+        return { cabecalhos: [], linhas: [], erro: "jQuery DataTables não disponível nesta página." };
+      }
+      const tabelaEl = jQuery("#tblProcessoLista");
+      if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tblProcessoLista")) {
+        return { cabecalhos: [], linhas: [], erro: 'Tabela "#tblProcessoLista" não encontrada ou ainda não inicializada.' };
+      }
+      const dt = tabelaEl.DataTable();
+
+      const aguardarRedesenho = () =>
+        Promise.race([
+          new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true))),
+          aguardar(8000).then(() => false),
+        ]);
+
+      // Mostra todas as linhas de uma vez (sem paginacao do DataTables)
+      // antes de ler - senao so' pegariamos a pagina atual visivel.
+      const promessaMostrarTudo = aguardarRedesenho();
+      dt.page.len(-1).draw(false);
+      await promessaMostrarTudo;
+
+      const cabecalhos = Array.from(document.querySelectorAll("#tblProcessoLista thead th"))
+        .map((th) => (th.textContent || "").replace(/\s+/g, " ").trim())
+        .slice(0, LIMITE_COLUNAS);
+
+      const div = document.createElement("div");
+      const linhas = dt
+        .rows({ search: "applied" })
+        .data()
+        .toArray()
+        .slice(0, LIMITE_LINHAS)
+        .map((linha) => {
+          const valores = Array.isArray(linha) ? linha : Object.values(linha);
+          return valores.slice(0, LIMITE_COLUNAS).map((v) => {
+            div.innerHTML = v == null ? "" : String(v);
+            return (div.textContent || "").replace(/\s+/g, " ").trim();
+          });
+        });
+
+      return { cabecalhos, linhas, erro: null };
+    } catch (e) {
+      return { cabecalhos: [], linhas: [], erro: e && e.message ? e.message : String(e) };
+    }
+  }
+
   return (async () => {
     try {
       // Se um Órgão/Juízo especifico foi pedido (Relatório Gerencial da
@@ -1551,9 +1607,15 @@ function consultarUmaVezNaPagina(parametros) {
 
       await aguardar(200);
       const contagem = await clicarConsultarELer();
-      return { contagem, erro: null };
+
+      let tabela = null;
+      if (parametros.extrairTabela) {
+        tabela = await extrairLinhasTblProcessoLista();
+      }
+
+      return { contagem, tabela, erro: null };
     } catch (e) {
-      return { contagem: null, erro: e && e.message ? e.message : String(e) };
+      return { contagem: null, tabela: null, erro: e && e.message ? e.message : String(e) };
     }
   })();
 }
@@ -2671,6 +2733,7 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   conclusosSentenca: true,
   semMovimentacao: true,
   suspensos: true,
+  processosAtivos: true,
   localizadores: true,
 };
 
@@ -2719,20 +2782,44 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     }
   }
 
+  // Relação de processos ativos: o proprio Relatório Geral, filtrado so'
+  // pela unidade, sem nenhum outro campo preenchido (Situação, dias,
+  // etc.) - equivalente a rodar a tela "com os campos sem preencher",
+  // que lista todos os processos ativos daquela unidade. "extrairTabela"
+  // pede pra' ler as linhas reais do resultado (nao so' o total).
+  const processosAtivos = { total: null, tabela: null, erros: [] };
+  if (opcoesFinais.processosAtivos) {
+    notificar("Consultando a relação de processos ativos...");
+    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      valorSituacao: null,
+      urgente: false,
+      diasSituacao: null,
+      valorOrgaoJuizo: valorUnidade,
+      extrairTabela: true,
+    });
+    processosAtivos.total = r.contagem;
+    processosAtivos.tabela = r.tabela;
+    if (r.erro) processosAtivos.erros.push(r.erro);
+    if (r.tabela && r.tabela.erro) processosAtivos.erros.push(r.tabela.erro);
+  }
+
   // Suspensos/sobrestados: grupo "S" inteiro do filtro Situação (todas
   // as ~40 variantes de suspensão/sobrestamento de uma vez).
-  const suspensos = { total: null, mais90Dias: null, detalhamento: [], erros: [] };
+  const suspensos = { total: null, mais90Dias: null, detalhamento: [], tabela: null, erros: [] };
   if (opcoesFinais.suspensos) {
-    notificar("Consultando suspensos/sobrestados: total...");
+    notificar("Consultando suspensos/sobrestados: total e relação de processos...");
     {
       const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
         grupoSituacao: "S",
         urgente: false,
         diasSituacao: null,
         valorOrgaoJuizo: valorUnidade,
+        extrairTabela: true,
       });
       suspensos.total = r.contagem;
+      suspensos.tabela = r.tabela;
       if (r.erro) suspensos.erros.push(`total: ${r.erro}`);
+      if (r.tabela && r.tabela.erro) suspensos.erros.push(`relação de processos: ${r.tabela.erro}`);
     }
     notificar(`Consultando suspensos/sobrestados: há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias...`);
     {
@@ -2815,6 +2902,12 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
       ],
     });
   }
+  if (opcoesFinais.processosAtivos) {
+    secoesResumo.push({
+      titulo: "PROCESSOS ATIVOS",
+      linhas: [{ rotulo: "Total", valor: processosAtivos.total == null ? "?" : processosAtivos.total }],
+    });
+  }
 
   const avisos = [];
   if (opcoesFinais.conclusosDecisao && despacho.erros.length > 0) {
@@ -2828,6 +2921,9 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   }
   if (opcoesFinais.suspensos && suspensos.erros.length > 0) {
     avisos.push(`Suspensos/sobrestados: ${suspensos.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.processosAtivos && processosAtivos.erros.length > 0) {
+    avisos.push(`Processos ativos: ${processosAtivos.erros.join(" | ")}`);
   }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
   if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
@@ -2850,6 +2946,33 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   const pdfFinal = await PDFDocument.create();
   const paginasCapa = await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices());
   paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
+
+  // Tabelas com a "relação de processos" propriamente dita (linhas reais
+  // do resultado, nao so' o total) - anexadas como paginas extras, uma
+  // tabela por secao, so' quando a extracao encontrou alguma linha
+  // (best-effort: ver "extrairLinhasTblProcessoLista"; se falhar, o
+  // aviso correspondente ja' foi acrescentado acima e a secao so' fica
+  // de fora, sem quebrar o resto do relatório).
+  if (opcoesFinais.processosAtivos && processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
+    const bytesTabela = await construirPdfTabelaDinamica(
+      processosAtivos.tabela.cabecalhos,
+      processosAtivos.tabela.linhas,
+      `Processos ativos da unidade "${nomeUnidade}" — ${processosAtivos.tabela.linhas.length} processo(s)`
+    );
+    const pdfTabela = await PDFDocument.load(bytesTabela);
+    const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+  if (opcoesFinais.suspensos && suspensos.tabela && suspensos.tabela.linhas.length > 0) {
+    const bytesTabela = await construirPdfTabelaDinamica(
+      suspensos.tabela.cabecalhos,
+      suspensos.tabela.linhas,
+      `Suspensos/sobrestados da unidade "${nomeUnidade}" — ${suspensos.tabela.linhas.length} processo(s)`
+    );
+    const pdfTabela = await PDFDocument.load(bytesTabela);
+    const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
 
   const bytesFinais = await pdfFinal.save();
   const nomeArquivo = `eproc/relatorio_gerencial_${sanitizarNomeArquivo(nomeUnidade)}_${new Date()
@@ -3580,13 +3703,28 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
   return pdf.save();
 }
 
+// Na pratica, a maioria dos localizadores de uma unidade NAO tem
+// descricao preenchida (e' um campo opcional) - com a coluna "Descrição"
+// sempre presente e ocupando 58% da largura da pagina, o resultado
+// tipico era uma tabela com uma faixa enorme em branco no meio,
+// desequilibrada e esquisita de olhar. Quando NENHUM item tem descricao,
+// a coluna e' omitida por completo (so' Localizador + Total de
+// processos, com o espaco redistribuido); ela so' aparece quando pelo
+// menos um localizador realmente tem algo preenchido ali.
 function construirPdfLocalizadores(itens, tituloDocumento) {
   const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
-  const colunas = [
-    { titulo: "Localizador", largura: larguraUtil * 0.26, campo: "nome" },
-    { titulo: "Descrição", largura: larguraUtil * 0.58, campo: "descricao" },
-    { titulo: "Total de processos", largura: larguraUtil * 0.16, campo: "totalProcessos" },
-  ];
+  const temAlgumaDescricao = itens.some((item) => (item.descricao || "").trim() !== "");
+
+  const colunas = temAlgumaDescricao
+    ? [
+        { titulo: "Localizador", largura: larguraUtil * 0.26, campo: "nome" },
+        { titulo: "Descrição", largura: larguraUtil * 0.58, campo: "descricao" },
+        { titulo: "Total de processos", largura: larguraUtil * 0.16, campo: "totalProcessos" },
+      ]
+    : [
+        { titulo: "Localizador", largura: larguraUtil * 0.8, campo: "nome" },
+        { titulo: "Total de processos", largura: larguraUtil * 0.2, campo: "totalProcessos" },
+      ];
   return construirPdfTabela(itens, colunas, tituloDocumento);
 }
 
@@ -4041,11 +4179,11 @@ async function abrirAbaEListarDocumentosDoProcesso(urlProcesso) {
 // dezenas de abas ocultas simultaneas).
 //
 // Estrutura de pastas pedida: uma pasta por processo (nome = numero do
-// processo) e, dentro dela, um unico arquivo cujo nome e' o do
-// localizador escolhido - assim, ao exportar o mesmo localizador mais de
-// uma vez (ou localizadores diferentes para o mesmo processo), cada
-// exportacao fica em seu proprio arquivo dentro da pasta do processo, sem
-// sobrescrever a anterior.
+// processo, direto dentro de "eproc/", igual as outras exportacoes de
+// processo desta extensao) e, dentro dela, um unico arquivo "Exportado -
+// <localizador>.pdf" - assim, ao exportar o mesmo processo por
+// localizadores diferentes, cada exportacao fica em seu proprio arquivo
+// dentro da mesma pasta do processo, sem sobrescrever a anterior.
 async function exportarDocumentosProcessosLocalizador(nomeLocalizador, urlProcessos, aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
@@ -4063,7 +4201,6 @@ async function exportarDocumentosProcessosLocalizador(nomeLocalizador, urlProces
   }
 
   const nomeLocalizadorArquivo = sanitizarNomeArquivo(nomeLocalizador);
-  const pastaRaiz = `eproc/documentos_localizador_${nomeLocalizadorArquivo}`;
   const total = itens.length;
   const erros = [];
   let concluidos = 0;
@@ -4099,7 +4236,7 @@ async function exportarDocumentosProcessosLocalizador(nomeLocalizador, urlProces
         );
       });
 
-      const nomeArquivo = `${pastaRaiz}/${sanitizarNomeArquivo(numeroProcesso)}/${nomeLocalizadorArquivo}.pdf`;
+      const nomeArquivo = `eproc/${sanitizarNomeArquivo(numeroProcesso)}/Exportado - ${nomeLocalizadorArquivo}.pdf`;
       await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytesFinais));
     } catch (e) {
       erros.push({ nome: numeroProcesso, mensagem: e && e.message ? e.message : String(e) });
