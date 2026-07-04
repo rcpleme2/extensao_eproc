@@ -37,7 +37,7 @@
   "web_accessible_resources": [
     {
       "resources": ["libs/pdf.worker.min.js"],
-      "matches": ["https://eproc1g.tjpr.jus.br/eproc/*", "https://eproc1g.tre.tjpr.jus.br/eproc/*"]
+      "matches": ["https://eproc1g.tjpr.jus.br/*", "https://eproc1g.tre.tjpr.jus.br/*"]
     }
   ]
 }
