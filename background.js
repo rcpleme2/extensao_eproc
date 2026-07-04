@@ -1685,8 +1685,17 @@ function consultarUmaVezNaPagina(parametros) {
         return (td.textContent || "").replace(/\s+/g, " ").trim();
       }
 
+      // Quando a consulta nao encontra nenhum processo, o DataTables
+      // desenha uma unica linha "vazia" (classe "dataTables_empty", 1
+      // <td> so' com colspan cobrindo todas as colunas e o texto "Nenhum
+      // registro encontrado") em vez de simplesmente nao ter <tr> nenhum
+      // no <tbody> - um filtro de "tem pelo menos 1 <td>" deixava essa
+      // linha passar como se fosse um processo de verdade (mesmo bug ja'
+      // corrigido em "extrairLinhasRemessasJuizesLeigosNaPagina"). Exigir
+      // o mesmo numero de <td> que de colunas no cabecalho descarta essa
+      // linha "vazia".
       const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
-        (tr) => tr.querySelectorAll("td").length > 0
+        (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
       );
       const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) =>
         Array.from(tr.querySelectorAll("td")).slice(0, LIMITE_COLUNAS).map(textoCelula)
@@ -2164,9 +2173,36 @@ function consultarSituacoesEspecificasNaPagina(opcoesDoBloco) {
     return encontrou;
   }
 
+  // Antes esperava a badge de contagem MUDAR DE TEXTO para considerar a
+  // consulta concluida, com um fallback de ate' 2s (8 tentativas de
+  // 250ms) para o caso do texto ficar igual ao anterior - o que e' o
+  // caso COMUM aqui, ja' que a maioria das ~40 situações do grupo tem 0
+  // processos: toda vez que duas situações seguidas resultavam em "(0)",
+  // o item pagava os 2s inteiros do fallback antes de seguir pra
+  // proxima, mesmo a consulta real tendo terminado bem antes. Trocado
+  // pelo proprio evento "draw.dt" do DataTable (a mesma tecnica ja' usada
+  // em "extrairLinhasTblProcessoLista" pra' esperar a tabela redesenhar) -
+  // dispara assim que a tabela termina de atualizar, independente do
+  // texto da contagem ter mudado ou nao, e' bem mais rapido no caso comum
+  // e continua correto no caso raro de duas contagens iguais seguidas.
+  // So' cai para o polling antigo (mais lento, mas ja' testado) se por
+  // algum motivo o jQuery/DataTable nao estiver disponivel nesta pagina.
   async function clicarConsultarELer() {
     const botaoConsultar = document.querySelector('button.btnConsultar[form="frmProcessoLista"]');
     if (!botaoConsultar) throw new Error('Botão "Consultar" não encontrado nesta página.');
+
+    const temDataTable =
+      typeof jQuery !== "undefined" && jQuery.fn && jQuery.fn.DataTable && jQuery.fn.DataTable.isDataTable("#tblProcessoLista");
+
+    if (temDataTable) {
+      const tabelaEl = jQuery("#tblProcessoLista");
+      const promessaRedesenho = new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true)));
+      botaoConsultar.click();
+      const desenhou = await Promise.race([promessaRedesenho, aguardar(10000).then(() => false)]);
+      const badge = document.getElementById("tblProcessoLista_info-badge");
+      if (!desenhou || !badge) throw new Error("Tempo esgotado esperando o resultado da consulta.");
+      return extrairContagem(badge.textContent);
+    }
 
     const badgeAntes = document.getElementById("tblProcessoLista_info-badge");
     const textoAntes = badgeAntes ? badgeAntes.textContent : null;
@@ -2296,6 +2332,7 @@ async function abrirAbaEConsultarSituacoesEspecificas(urlBase, valorOrgaoJuizo, 
     const [{ result } = {}] = await comTimeout(
       chrome.scripting.executeScript({
         target: { tabId: aba.id },
+        world: "MAIN",
         func: consultarSituacoesEspecificasNaPagina,
         args: [opcoesDoBloco],
       }),
@@ -4146,10 +4183,16 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   // entre parenteses junto do Total (ex.: "Total 21 (5 suspensos há mais
   // de 90 dias)"), ja' que e' so' um recorte do proprio total, nao um
   // numero independente.
+  // Sem parenteses quando o total e' 0 (nao ha' processo nenhum, entao o
+  // recorte de excesso de prazo nao acrescenta informação nenhuma) ou
+  // quando o excesso e' desconhecido (erro na consulta); com total > 0 e
+  // excesso 0, escreve "nenhum" em vez de "0" (mais natural que "0 há
+  // mais de 90 dias").
   const totalComExcesso = (total, excesso, sufixo) => {
     const totalTexto = total == null ? "?" : String(total);
-    if (excesso == null) return totalTexto;
-    return `${totalTexto} (${excesso} ${sufixo})`;
+    if (excesso == null || !total) return totalTexto;
+    const excessoTexto = excesso === 0 ? "nenhum" : String(excesso);
+    return `${totalTexto} (${excessoTexto} ${sufixo})`;
   };
   const linhasBloco = (bloco) => [
     { rotulo: "Urgentes", valor: bloco.urgentes == null ? "?" : bloco.urgentes },

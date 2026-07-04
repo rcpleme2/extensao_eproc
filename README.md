@@ -491,7 +491,12 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      comarca escolhida acima), mas o **nome completo original** é o que
      aparece na confirmação abaixo e é usado de fato no relatório/PDF.
      Nomes sem nenhum " de " (ex.: siglas curtas) caem numa comarca
-     "(Outras)".
+     "(Outras)". Exceção conhecida: comarcas cujo próprio nome tem "de"
+     (hoje só **"Cândido de Abreu"**) entrariam erradas nesse split
+     ingênuo pelo ÚLTIMO " de " — ex.: "... do Juízo Único de Cândido de
+     Abreu" viraria comarca "Abreu" — por isso essas comarcas ficam numa
+     lista de exceções, verificadas pelo nome inteiro antes de qualquer
+     tentativa de split.
 3. Ao **escolher um juízo/vara** no segundo menu, o painel mostra
    "Informações serão extraídas de: `<nome completo da unidade>`" e
    libera a lista **"Itens a incluir no PDF"** (checkboxes, um por seção
@@ -549,19 +554,36 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      contagem de **suspensos há mais de 90 dias entre parênteses** (ex.:
      "Total 21 (5 suspensos há mais de 90 dias)") — em vez de uma linha
      própria para esse recorte, já que é só um subconjunto do próprio
-     Total, não um número independente. Além do
+     Total, não um número independente. O parêntese só aparece quando o
+     Total é maior que 0 (com Total 0 não há nada a detalhar) e mostra
+     **"nenhum"** em vez de "0" quando não há nenhum processo com mais de
+     90 dias (ex.: "Total 10 (nenhum suspensos há mais de 90 dias)") —
+     mesma regra usada em Conclusos para decisão/sentença, abaixo. Além do
      total, o relatório também traz a **relação de processos**, em
      **página retrato**, com só os campos **Nº do Processo, Data da
      Autuação, Situação, Localizador e Data/Hora** (a tabela real do eproc
      traz mais colunas, como Sigilo e Classe, que ficam de fora aqui) —
-     casados pelo texto do cabeçalho, igual à relação de processos ativos. Esse
+     casados pelo texto do cabeçalho, igual à relação de processos ativos
+     (mesmo filtro contra a linha "vazia" do DataTables quando não há
+     nenhum processo — ver nota na seção de Remessas aos juízes leigos
+     abaixo, que teve o mesmo problema). Esse
      detalhamento por situação é a parte mais demorada do relatório (uma
      consulta por situação), então roda **em paralelo**: a lista de ~40
      situações do grupo é dividida em **9 blocos** (o máximo de abas
      ocultas simultâneas permitido, ver "Limite de abas ocultas
      simultâneas" abaixo) e cada bloco é consultado numa **aba oculta
      própria, simultaneamente** às demais (em vez de uma única aba
-     consultando as ~40 situações uma de cada vez). Cada bloco tem um
+     consultando as ~40 situações uma de cada vez). Dentro de cada bloco,
+     cada situação espera o evento **`draw.dt`** do próprio DataTable da
+     tela (o mesmo mecanismo já usado para esperar a tabela de processos
+     terminar de carregar) em vez de comparar o texto da contagem antes/
+     depois com um intervalo fixo de espera — como a maioria das ~40
+     situações costuma ter 0 processos, duas consultas seguidas com
+     contagem igual ("0") faziam esse método antigo esperar até 2s
+     "achando" que a consulta ainda não tinha terminado, mesmo já tendo
+     concluído há muito tempo; o `draw.dt` elimina essa espera
+     desnecessária e deixa o detalhamento sensivelmente mais rápido no
+     caso comum. Cada bloco tem um
      orçamento interno de 60s (verificado ENTRE uma situação e outra,
      preservando o que já foi apurado até ali) e um timeout externo de
      75s como rede de segurança; se algum bloco não terminar a tempo (ou
@@ -577,7 +599,9 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      mais) e, **por último, o Total**, com a contagem de **processos há
      mais de 90 dias entre parênteses** (ex.: "Total 10 (3 há mais de 90
      dias)") — mesmo formato usado em Suspensos/Sobrestados, também sem
-     uma linha própria para esse recorte. As 3 sub-consultas de cada
+     uma linha própria para esse recorte, sem o parêntese quando o Total é
+     0 e escrevendo **"nenhum"** em vez de "0" quando não há nenhum
+     processo com mais de 90 dias. As 3 sub-consultas de cada
      bloco (total/urgentes/atraso), e os dois blocos (decisão e sentença)
      entre si, rodam **em paralelo**.
    - Processos sem movimentação há mais de 30, 90 e 120 dias — as 3

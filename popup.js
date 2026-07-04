@@ -475,6 +475,14 @@ const areaErrosCorregedoria = document.getElementById("area-erros-corregedoria")
 // "exigirUnidadeSelecionada" abaixo).
 let unidadeSelecionadaCorregedoria = null;
 
+// Algumas comarcas do Paraná tem "de" no PRÓPRIO nome (ex.: "Cândido de
+// Abreu") - separar pelo ÚLTIMO " de " cortaria errado nesses casos (ex.:
+// "... do Juízo Único de Cândido de Abreu" viraria comarca "Abreu" em vez
+// de "Cândido de Abreu", já que o último " de " fica DENTRO do próprio
+// nome da comarca). Lista de exceções conhecidas: quando o nome termina
+// com uma delas, a comarca é a exceção inteira, sem tentar nenhum split.
+const COMARCAS_COM_DE_NO_NOME = ["Cândido de Abreu"];
+
 // Nomes de unidade do eproc seguem o padrão "<Juízo/Vara> de <Comarca>"
 // (ex.: "Juizado Especial Cível, Criminal e da Fazenda Pública de
 // Piraquara") - separa a Comarca (tudo depois do ÚLTIMO " de ") do nome
@@ -485,6 +493,17 @@ let unidadeSelecionadaCorregedoria = null;
 // nome completo é mantido como está.
 function separarComarcaDoJuizo(nomeCompleto) {
   const texto = (nomeCompleto || "").trim();
+
+  for (const comarcaExcecao of COMARCAS_COM_DE_NO_NOME) {
+    const sufixo = ` de ${comarcaExcecao}`;
+    if (texto.toLowerCase().endsWith(sufixo.toLowerCase())) {
+      return {
+        comarca: comarcaExcecao,
+        juizo: texto.slice(0, texto.length - sufixo.length).trim() || texto,
+      };
+    }
+  }
+
   const marcador = " de ";
   const indice = texto.lastIndexOf(marcador);
   if (indice === -1) {

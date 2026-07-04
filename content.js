@@ -463,8 +463,26 @@ chrome.storage.onChanged.addListener((mudancas, area) => {
 // ler dados dela.
 const ID_WRAPPER_COMARCA_JUIZO = "eproc-exportador-comarca-juizo";
 
+// Algumas comarcas do Paraná tem "de" no PRÓPRIO nome (ex.: "Cândido de
+// Abreu") - separar pelo ÚLTIMO " de " cortaria errado nesses casos (ex.:
+// "... do Juízo Único de Cândido de Abreu" viraria comarca "Abreu" em vez
+// de "Cândido de Abreu"). Mesma lista de exceções usada em
+// "separarComarcaDoJuizo" (popup.js).
+const COMARCAS_COM_DE_NO_NOME_ORGAO = ["Cândido de Abreu"];
+
 function separarComarcaDoJuizoOrgao(nomeCompleto) {
   const texto = (nomeCompleto || "").trim();
+
+  for (const comarcaExcecao of COMARCAS_COM_DE_NO_NOME_ORGAO) {
+    const sufixo = ` de ${comarcaExcecao}`;
+    if (texto.toLowerCase().endsWith(sufixo.toLowerCase())) {
+      return {
+        comarca: comarcaExcecao,
+        juizo: texto.slice(0, texto.length - sufixo.length).trim() || texto,
+      };
+    }
+  }
+
   const marcador = " de ";
   const indice = texto.lastIndexOf(marcador);
   if (indice === -1) {
