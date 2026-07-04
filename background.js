@@ -21,6 +21,43 @@ const COR_CINZA_BORDA = rgb(0.82, 0.85, 0.87);
 const COR_BRANCO = rgb(1, 1, 1);
 const COR_ALERTA_VERMELHO = rgb(0.75, 0.1, 0.1);
 
+// Fator vertical (em relação à altura de uma linha de texto) usado para
+// posicionar o TOPO da faixa "zebra" (fundo cinza claro, linhas
+// alternadas) acima da linha de base da primeira linha de texto de cada
+// linha da tabela. Precisa ser grande o bastante para cobrir a parte
+// mais alta dos caracteres realmente desenhados (maiúsculas e,
+// principalmente, acentos comuns em português como "ç", "ã", "é"), que
+// sobem ~0,7-0,8x a altura da linha acima da linha de base - um fator
+// menor (ex.: 0,3, usado antes) deixa esse topo "pendurado" no fundo
+// branco, só entrando na faixa cinza a partir da metade da letra para
+// baixo.
+const FATOR_TOPO_ZEBRA_TABELA = 0.6;
+
+// Desenha, quando a linha for uma linha "ímpar" (contagem a partir de 0),
+// a faixa de fundo alternada (zebrado) por trás de uma linha de tabela -
+// helper único compartilhado por todas as tabelas com zebrado da
+// extensão (Processos Ativos/Suspensos/Paralisados/Mandados,
+// Localizadores, Processos do Localizador, panorama da Corregedoria e
+// Remessas aos Juízes Leigos), para manter o mesmo posicionamento
+// vertical (e a mesma correção, se for preciso ajustar de novo) num
+// único lugar em vez de cópias divergentes. "y" é a linha de base da
+// PRIMEIRA linha de texto da linha da tabela (o mesmo "y" usado para
+// desenhar o texto); "alturaLinha" é a altura total reservada para essa
+// linha (incluindo o espaçamento até a próxima); "alturaLinhaTexto" é a
+// altura de uma única linha de texto dentro da célula (usada só para
+// calcular o deslocamento do topo da faixa, não a altura da faixa em
+// si).
+function desenharZebraLinhaTabela(pagina, { x, y, largura, alturaLinha, alturaLinhaTexto, indiceLinhaZebra, cor = COR_CINZA_CLARO }) {
+  if (indiceLinhaZebra % 2 !== 1) return;
+  pagina.drawRectangle({
+    x,
+    y: y - alturaLinha + alturaLinhaTexto * FATOR_TOPO_ZEBRA_TABELA,
+    width: largura,
+    height: alturaLinha,
+    color: cor,
+  });
+}
+
 // ---- Semáforo global de abas ocultas ----
 //
 // O Relatório da Unidade (e outras rotinas desta extensão) abre várias
@@ -3607,15 +3644,14 @@ async function construirPdfRemessasJuizesLeigos(linhas, nomeUnidade) {
         desenharCabecalhoColunas();
       }
 
-      if (indiceLinhaZebra % 2 === 1) {
-        pagina.drawRectangle({
-          x: margem,
-          y: y - alturaLinha + REMESSAS_ALTURA_LINHA * 0.3,
-          width: larguraUtil,
-          height: alturaLinha,
-          color: COR_CINZA_CLARO,
-        });
-      }
+      desenharZebraLinhaTabela(pagina, {
+        x: margem,
+        y,
+        largura: larguraUtil,
+        alturaLinha,
+        alturaLinhaTexto: REMESSAS_ALTURA_LINHA,
+        indiceLinhaZebra,
+      });
       indiceLinhaZebra += 1;
 
       let x = margem + 4;
@@ -3747,15 +3783,14 @@ async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) 
       desenharCabecalhoColunas();
     }
 
-    if (indiceLinhaZebra % 2 === 1) {
-      pagina.drawRectangle({
-        x: margem,
-        y: y - alturaLinha + ALTURA_LINHA * 0.3,
-        width: larguraUtil,
-        height: alturaLinha,
-        color: COR_CINZA_CLARO,
-      });
-    }
+    desenharZebraLinhaTabela(pagina, {
+      x: margem,
+      y,
+      largura: larguraUtil,
+      alturaLinha,
+      alturaLinhaTexto: ALTURA_LINHA,
+      indiceLinhaZebra,
+    });
     indiceLinhaZebra += 1;
 
     let x = margem + 4;
@@ -5463,17 +5498,14 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
       novaPagina(false);
     }
 
-    // Faixa zebrada (linhas pares com fundo cinza claro) para facilitar
-    // acompanhar cada linha visualmente numa tabela longa.
-    if (indiceLinhaZebra % 2 === 1) {
-      pagina.drawRectangle({
-        x: margem,
-        y: y - alturaLinha + PDF_LOCALIZADORES_ALTURA_LINHA * 0.3,
-        width: larguraPagina - margem * 2,
-        height: alturaLinha,
-        color: COR_CINZA_CLARO,
-      });
-    }
+    desenharZebraLinhaTabela(pagina, {
+      x: margem,
+      y,
+      largura: larguraPagina - margem * 2,
+      alturaLinha,
+      alturaLinhaTexto: PDF_LOCALIZADORES_ALTURA_LINHA,
+      indiceLinhaZebra,
+    });
     indiceLinhaZebra += 1;
 
     let x = margem + 4;
