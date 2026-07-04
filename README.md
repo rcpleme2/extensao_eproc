@@ -529,7 +529,11 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      relatório as que têm pelo menos 1 processo (ex.: "SUSPENSAO: 12",
      "SOBRESTADO CONVÊNIO: 3") — as dezenas de variantes zeradas ficam de
      fora, para não poluir o relatório. O **Total** vem por último,
-     depois de todos os processos individuais listados acima. Além do
+     depois de todos os processos individuais listados acima, com a
+     contagem de **suspensos há mais de 90 dias entre parênteses** (ex.:
+     "Total 21 (5 suspensos há mais de 90 dias)") — em vez de uma linha
+     própria para esse recorte, já que é só um subconjunto do próprio
+     Total, não um número independente. Além do
      total, o relatório também traz a **relação de processos**, em
      **página retrato**, com só os campos **Nº do Processo, Data da
      Autuação, Situação, Localizador e Data/Hora** (a tabela real do eproc
@@ -554,9 +558,12 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      incompleto.
    - Conclusos para decisão e para sentença: Urgentes, Não urgentes
      (calculado como Total − Urgentes, sem precisar de uma consulta a
-     mais), Aguardando há mais de 90 dias e, **por último, o Total**. As 3
-     sub-consultas de cada bloco (total/urgentes/atraso), e os dois
-     blocos (decisão e sentença) entre si, rodam **em paralelo**.
+     mais) e, **por último, o Total**, com a contagem de **processos há
+     mais de 90 dias entre parênteses** (ex.: "Total 10 (3 há mais de 90
+     dias)") — mesmo formato usado em Suspensos/Sobrestados, também sem
+     uma linha própria para esse recorte. As 3 sub-consultas de cada
+     bloco (total/urgentes/atraso), e os dois blocos (decisão e sentença)
+     entre si, rodam **em paralelo**.
    - Processos sem movimentação há mais de 30, 90 e 120 dias — as 3
      faixas também consultadas **em paralelo**.
    - **Remessas aos juízes leigos**: extraída da tela própria do menu

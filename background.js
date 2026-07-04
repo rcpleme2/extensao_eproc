@@ -4141,14 +4141,23 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   notificar("Gerando PDF...");
 
   const dataInformacao = new Date().toLocaleString("pt-BR");
+  // O excesso de prazo (suspensos +90 dias / conclusos +90 dias) nao
+  // entra mais como uma linha propria no resumo - vira um complemento
+  // entre parenteses junto do Total (ex.: "Total 21 (5 suspensos há mais
+  // de 90 dias)"), ja' que e' so' um recorte do proprio total, nao um
+  // numero independente.
+  const totalComExcesso = (total, excesso, sufixo) => {
+    const totalTexto = total == null ? "?" : String(total);
+    if (excesso == null) return totalTexto;
+    return `${totalTexto} (${excesso} ${sufixo})`;
+  };
   const linhasBloco = (bloco) => [
     { rotulo: "Urgentes", valor: bloco.urgentes == null ? "?" : bloco.urgentes },
     { rotulo: "Não urgentes", valor: bloco.naoUrgentes == null ? "?" : bloco.naoUrgentes },
     {
-      rotulo: `Aguardando há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`,
-      valor: bloco.mais90Dias == null ? "?" : bloco.mais90Dias,
+      rotulo: "Total",
+      valor: totalComExcesso(bloco.total, bloco.mais90Dias, `há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`),
     },
-    { rotulo: "Total", valor: bloco.total == null ? "?" : bloco.total },
   ];
 
   // So' entram no PDF as seções que o usuario marcou - nao so' esconder o
@@ -4169,12 +4178,15 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     secoesResumo.push({
       titulo: "SUSPENSOS / SOBRESTADOS",
       linhas: [
-        {
-          rotulo: `Suspensos há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`,
-          valor: suspensos.mais90Dias == null ? "?" : suspensos.mais90Dias,
-        },
         ...(suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem })),
-        { rotulo: "Total", valor: suspensos.total == null ? "?" : suspensos.total },
+        {
+          rotulo: "Total",
+          valor: totalComExcesso(
+            suspensos.total,
+            suspensos.mais90Dias,
+            `suspensos há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`
+          ),
+        },
       ],
     });
   }
