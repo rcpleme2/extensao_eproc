@@ -23,7 +23,16 @@ visíveis e utilizáveis por qualquer perfil:
   num único cartão "Gestão da Unidade", cada um em sua própria subseção
   (título + divisor), não em sub-menus aninhados: assim que o cartão é
   aberto, todos os botões de todas as quatro funcionalidades já ficam à
-  vista, sem precisar abrir mais nada.
+  vista, sem precisar abrir mais nada. Quando o perfil ativo é
+  CORREGEDORIA, esse cartão continua visível (para indicar que a
+  funcionalidade existe), mas fica desabilitado (esmaecido, sem abrir),
+  já que não se aplica a esse perfil.
+
+A ordem padrão dos cartões é **Corregedoria > Gestão da Unidade >
+Exportar Documentos**, mas cada um tem uma alça (⠿) ao lado do ícone
+que pode ser arrastada com o mouse para reordená-los como preferir; a
+ordem escolhida fica salva (`chrome.storage.local`) e é reaplicada da
+próxima vez que o painel for aberto.
 
 ## Exportar Documentos
 
@@ -667,9 +676,11 @@ DESATIVADA **" ao lado de cada linha). Essa tabela é difícil de ler de
 relance: as colunas são estreitas e cada regra mistura critério, ação e
 outros filtros num texto corrido.
 
-O cartão **"Regras de Automação"** tem um botão **"Exportar regras
-ativas"**, sempre habilitado — não é preciso estar (nem navegar
-manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
+O cartão **"Regras de Automação"** tem duas caixas de seleção de formato
+(**HTML** e **PDF**, HTML marcada por padrão — pode marcar as duas) e um
+botão **"Exportar regras ativas"**, sempre habilitado — não é preciso
+estar (nem navegar manualmente) na tela "Automatizar Tramitação
+Processual". Ao clicar:
 
 1. A extensão abre uma aba oculta a partir da URL da aba atual e clica no
    link "Automatizar Localizadores do Órgão" do menu lateral (menu
@@ -684,16 +695,28 @@ manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
    número da regra. Regras sem prioridade aparecem como
    "[Sem prioridade definida]" em vez do rótulo "[ Prioridade ]" da
    própria página, que é mais confuso fora de contexto.
-4. Gera um documento HTML novo, com um "cartão" por regra ativa. Cada
-   cartão traz, no topo, um **fluxograma numerado em sequência vertical**
-   (1 Origem → 2 Critério → 3 Destino → 4 Ação automatizada, quando
-   houver) para entender de relance o que aquela regra faz — cada passo
-   numa caixa colorida própria, empilhada de cima para baixo com uma seta
-   entre elas. Esse layout vertical substitui a versão anterior (caixas
-   numa linha horizontal com quebra automática): com textos de tamanhos
-   bem diferentes entre as regras, a quebra de linha da versão horizontal
-   ficava imprevisível e as setas pareciam soltas; empilhado e numerado, a
-   ordem de execução fica clara não importa o tamanho de cada texto.
+4. Gera o(s) documento(s) no(s) formato(s) marcado(s), com um "cartão" por
+   regra ativa. Cada cartão traz, no topo, um **fluxograma numerado em
+   sequência vertical** (1 Origem → 2 Critério → 3 Destino → 4 Ação
+   automatizada, quando houver) para entender de relance o que aquela
+   regra faz — cada passo numa caixa colorida própria, empilhada de cima
+   para baixo com uma seta entre elas, todas com o número bem visível
+   (branco sobre o fundo colorido do círculo). Esse layout vertical
+   substitui a versão anterior (caixas numa linha horizontal com quebra
+   automática): com textos de tamanhos bem diferentes entre as regras, a
+   quebra de linha da versão horizontal ficava imprevisível e as setas
+   pareciam soltas; empilhado e numerado, a ordem de execução fica clara
+   não importa o tamanho de cada texto.
+
+   Quando a regra tem um **Localizador de Erro** definido (para onde o
+   processo vai se a ação automatizada falhar), ele ganha destaque
+   próprio: uma **seta lateral vermelha** saindo da caixa "Ação
+   automatizada" para uma **caixa vermelha** ao lado, em vez de aparecer
+   como só mais uma linha dentro do texto corrido da ação. E a própria
+   caixa "Ação automatizada" mostra cada informação (ação programada,
+   evento, texto etc.) em **linhas separadas por um traço fino**, em vez
+   de tudo colado num único parágrafo.
+
    Logo abaixo do fluxograma vem o detalhamento completo e legível:
    número/prioridade, grupo, localizador de origem, o critério que
    dispara a regra, o localizador de destino/ação (incluindo eventos
@@ -712,9 +735,14 @@ manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
    etc.) podiam sair cortados; e o resumo do fluxograma pegava só a linha
    "Evento: ..." e descartava o resto — agora leva tudo a partir do
    cabeçalho "AUTOMATIZADO"/"Ação Programada" em diante.
-5. Fecha a aba oculta e abre o documento em uma **aba nova visível**, com
-   um link de atalho em cada cartão para editar aquela regra ou ver seu
-   histórico diretamente no eproc.
+5. Se **HTML** estiver marcado, fecha a aba oculta e abre o documento em
+   uma **aba nova visível**, com um link de atalho em cada cartão para
+   editar aquela regra ou ver seu histórico diretamente no eproc. Se
+   **PDF** estiver marcado, baixa um arquivo `regras_automacao_<data>.pdf`
+   com o mesmo fluxograma (caixas, setas, numeração e a caixa vermelha do
+   Localizador de Erro redesenhados com as mesmas cores) e o mesmo
+   detalhamento — útil para arquivar ou anexar em outro lugar, já que o
+   HTML só existe como aba aberta no navegador.
 
 Se o link "Automatizar Localizadores do Órgão" não for encontrado na aba
 oculta (ex.: o rótulo do menu mudou), a extensão avisa exatamente qual

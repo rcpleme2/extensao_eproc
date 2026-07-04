@@ -471,9 +471,21 @@ observadorEventos.observe(document.body, { childList: true, subtree: true });
 // Copia o elemento, troca cada <br> por uma quebra de linha real e devolve
 // o texto puro - usado para conseguir separar o conteudo das celulas em
 // "linhas" de forma confiavel (textContent sozinho ignora <br>).
+//
+// Blocos (div/p/li/tr/h1-h6) tambem representam uma quebra visual na
+// pagina, mas "textContent" ignora fronteiras de elemento (so' <br> vira
+// quebra real) - sem tratar isso tambem, duas linhas em <div>s/<p>s
+// separadas (comum na coluna "Localizador DESTINO/Ação" do eproc, onde o
+// cabecalho "AUTOMATIZADO" e os detalhes da acao programada vem em blocos
+// proprios sem <br> entre eles) saiam coladas uma na outra (ex.: "LANÇAR
+// EVENTOAUTOMATIZADOEvento: ..."), o que tornava o "Ação Automatizada" do
+// relatório ilegível.
 function textoComQuebras(elemento) {
   const clone = elemento.cloneNode(true);
   clone.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
+  clone.querySelectorAll("div, p, li, tr, h1, h2, h3, h4, h5, h6").forEach((bloco) => {
+    bloco.appendChild(document.createTextNode("\n"));
+  });
   return (clone.textContent || "").replace(/[ \t]+/g, " ").trim();
 }
 
@@ -558,10 +570,29 @@ function listarRegrasAutomacaoAtivas() {
     const indiceAcaoProgramada = linhasDestino.findIndex(
       (l) => l.includes("AUTOMATIZADO") || l.includes("Ação Programada")
     );
-    const acaoResumo =
-      indiceAcaoProgramada !== -1
-        ? linhasDestino.slice(indiceAcaoProgramada).join(" — ") || "Ação automatizada programada"
+    const linhasAcao = indiceAcaoProgramada !== -1 ? linhasDestino.slice(indiceAcaoProgramada) : [];
+
+    // O "Localizador de Erro" (para onde o processo vai se a acao
+    // automatizada falhar) e' destacado a parte no relatório (seta + caixa
+    // vermelha), em vez de so' mais uma linha dentro do texto corrido da
+    // Ação Automatizada - por isso sai da lista antes de montar o resumo.
+    const indiceLocalizadorErro = linhasAcao.findIndex((l) => /localizador de erro/i.test(l));
+    const localizadorErro =
+      indiceLocalizadorErro !== -1
+        ? linhasAcao[indiceLocalizadorErro].replace(/^.*localizador de erro:?\s*/i, "").trim()
         : "";
+    const linhasAcaoSemErro =
+      indiceLocalizadorErro !== -1
+        ? [...linhasAcao.slice(0, indiceLocalizadorErro), ...linhasAcao.slice(indiceLocalizadorErro + 1)]
+        : linhasAcao;
+
+    const acaoResumo =
+      linhasAcaoSemErro.length > 0 ? linhasAcaoSemErro.join(" — ") || "Ação automatizada programada" : "";
+    // Linhas separadas (sem juntar tudo num paragrafo so' com " — "), para
+    // o relatório poder desenhar cada informação (ação programada, evento,
+    // texto etc.) em seu proprio bloco, com um divisor entre elas, em vez
+    // de um texto corrido dificil de escanear.
+    const acaoLinhas = linhasAcaoSemErro.length > 0 ? linhasAcaoSemErro : [];
 
     const outrosCriteriosResumo = textoComQuebras(origemOutrosCriterios)
       .split("\n")
@@ -587,6 +618,8 @@ function listarRegrasAutomacaoAtivas() {
       criterioAlternativas,
       destinoResumo,
       acaoResumo,
+      acaoLinhas,
+      localizadorErro,
       outrosCriteriosResumo,
       linkEditar: linkEditar ? linkEditar.href : "",
       linkLog: linkLog ? linkLog.href : "",

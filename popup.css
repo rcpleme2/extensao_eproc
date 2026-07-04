@@ -239,6 +239,49 @@ body {
   margin-left: var(--espaco-1);
 }
 
+/* ---- Reordenação dos cartões de perfil por arraste (drag-and-drop) ----
+   A "alça" (⠿) é o unico gatilho do arraste - o restante do <summary>
+   continua abrindo/fechando o cartão normalmente ao clicar. Durante o
+   arraste, o cartão de origem fica esmaecido e o cartão sobre o qual o
+   mouse está passando ganha uma borda superior destacada, indicando onde
+   ele vai ser solto. */
+.card-alca {
+  flex: 0 0 auto;
+  cursor: grab;
+  color: var(--cor-texto-suave);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.card-alca:active {
+  cursor: grabbing;
+}
+
+.card--arrastando {
+  opacity: 0.4;
+}
+
+.card--alvo-de-drop {
+  box-shadow: 0 -3px 0 0 var(--cor-primaria);
+}
+
+/* Cartão presente mas desabilitado para o perfil ativo (ex.: "Gestão da
+   Unidade" quando o perfil CORREGEDORIA está ativo): continua visível
+   (para o usuário saber que a funcionalidade existe) mas esmaecido, sem
+   abrir e sem clicar em nada dentro dele. */
+.card--desabilitado {
+  opacity: 0.55;
+}
+
+.card--desabilitado > .card-titulo {
+  cursor: not-allowed;
+}
+
+.card--desabilitado .card-titulo::after {
+  display: none;
+}
+
 /* ---- Texto de status (dinâmico) ---- */
 
 .status {

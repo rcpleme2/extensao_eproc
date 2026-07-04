@@ -5340,6 +5340,14 @@ function construirDocumentoRegras(regras, tituloPagina) {
       // soltas entre linhas - a leitura ficava confusa. Empilhado e
       // numerado, a ordem de execucao fica clara independente do
       // tamanho de cada texto, e sempre continua legivel no popup.
+      // Texto da Ação Automatizada em linhas SEPARADAS (uma por informação
+      // - ação programada, evento, texto etc.), cada uma com um divisor
+      // sutil entre si, em vez de um paragrafo corrido colando tudo num
+      // bloco so' (o que ficava dificil de escanear, especialmente quando
+      // a pagina do eproc nao usa <br> entre essas informações).
+      const linhasAcao = r.acaoLinhas && r.acaoLinhas.length > 0 ? r.acaoLinhas : r.acaoResumo ? [r.acaoResumo] : [];
+      const acaoHtml = linhasAcao.map((linha) => `<div class="fluxo-acao-linha">${escaparHtml(linha)}</div>`).join("");
+
       const passos = [
         { classe: "fluxo-origem", titulo: "Origem", texto: r.localizadorOrigem, extra: "" },
         {
@@ -5353,26 +5361,45 @@ function construirDocumentoRegras(regras, tituloPagina) {
         },
         { classe: "fluxo-destino", titulo: "Destino", texto: r.destinoResumo, extra: "" },
       ];
-      if (r.acaoResumo) {
-        passos.push({ classe: "fluxo-acao", titulo: "Ação automatizada", texto: r.acaoResumo, extra: "" });
+      if (linhasAcao.length > 0) {
+        passos.push({ classe: "fluxo-acao", titulo: "Ação automatizada", texto: null, extra: acaoHtml });
       }
+
+      // A caixa da Ação Automatizada, quando a regra tem um "Localizador
+      // de Erro" definido, ganha uma seta LATERAL apontando para uma
+      // caixa vermelha à parte com esse localizador - destacando
+      // visualmente para onde o processo vai se a ação automatizada
+      // falhar, em vez de misturar essa informação no meio do texto
+      // corrido da ação.
+      const caixaErro = r.localizadorErro
+        ? `
+      <div class="fluxo-seta-lateral" aria-hidden="true">&rarr;</div>
+      <div class="fluxo-caixa fluxo-erro">
+        <div class="fluxo-caixa-titulo">Localizador de Erro</div>
+        <div>${escaparHtml(r.localizadorErro)}</div>
+      </div>`
+        : "";
 
       const fluxo = `
     <div class="fluxo">
       ${passos
-        .map(
-          (passo, indice) => `
-      ${
-        indice > 0
-          ? `<div class="fluxo-seta" aria-hidden="true">&darr;</div>`
-          : ""
-      }
+        .map((passo, indice) => {
+          const seta = indice > 0 ? `<div class="fluxo-seta" aria-hidden="true">&darr;</div>` : "";
+          const caixa = `
       <div class="fluxo-caixa ${passo.classe}">
         <div class="fluxo-caixa-titulo"><span class="fluxo-numero">${indice + 1}</span> ${escaparHtml(passo.titulo)}</div>
-        <div>${escaparHtml(passo.texto)}</div>
+        ${passo.texto !== null ? `<div>${escaparHtml(passo.texto)}</div>` : ""}
         ${passo.extra}
-      </div>`
-        )
+      </div>`;
+          // So' a caixa da Ação Automatizada (ultimo passo, quando tem
+          // Localizador de Erro) entra numa linha horizontal junto com a
+          // seta lateral e a caixa vermelha - as demais seguem empilhadas
+          // normalmente.
+          if (passo.classe === "fluxo-acao" && caixaErro) {
+            return `${seta}<div class="fluxo-linha-com-erro">${caixa}${caixaErro}</div>`;
+          }
+          return `${seta}${caixa}`;
+        })
         .join("")}
     </div>`;
 
@@ -5413,21 +5440,29 @@ function construirDocumentoRegras(regras, tituloPagina) {
   .regra-cabecalho { display:flex; justify-content:space-between; align-items:baseline; border-bottom:2px solid #2c6ea6; padding-bottom:8px; margin-bottom:12px; }
   .regra-numero { font-size:16px; font-weight:700; color:#1c3d5a; }
   .regra-prioridade { font-size:12.5px; color:#2c6ea6; font-weight:600; }
-  .fluxo { display:flex; flex-direction:column; align-items:stretch; gap:2px; margin-bottom:14px; max-width:420px; }
+  .fluxo { display:flex; flex-direction:column; align-items:stretch; gap:2px; margin-bottom:14px; max-width:560px; }
   .fluxo-caixa { background:#f4f7fa; border:1px solid #c8d6e0; border-left-width:4px; border-radius:6px; padding:8px 12px; font-size:13px; line-height:1.4; }
   .fluxo-caixa-titulo { display:flex; align-items:center; gap:6px; font-size:9.5px; text-transform:uppercase; letter-spacing:0.03em; font-weight:700; color:#2c6ea6; margin-bottom:3px; }
   .fluxo-numero { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; border-radius:50%; background:#2c6ea6; color:#fff; font-size:9.5px; font-weight:700; }
   .fluxo-origem { background:#eef1f5; border-color:#c3cdd6; }
   .fluxo-criterio { background:#fff6e0; border-color:#f0d68a; }
-  .fluxo-criterio .fluxo-caixa-titulo, .fluxo-criterio .fluxo-numero { color:#8a6d00; }
-  .fluxo-criterio .fluxo-numero { background:#8a6d00; }
+  .fluxo-criterio .fluxo-caixa-titulo { color:#8a6d00; }
+  .fluxo-criterio .fluxo-numero { background:#8a6d00; color:#fff; }
   .fluxo-destino { background:#e9f7ee; border-color:#a9dcb9; }
-  .fluxo-destino .fluxo-caixa-titulo, .fluxo-destino .fluxo-numero { color:#1a7f37; }
-  .fluxo-destino .fluxo-numero { background:#1a7f37; }
+  .fluxo-destino .fluxo-caixa-titulo { color:#1a7f37; }
+  .fluxo-destino .fluxo-numero { background:#1a7f37; color:#fff; }
   .fluxo-acao { background:#eef1fd; border-color:#c2caf5; }
-  .fluxo-acao .fluxo-caixa-titulo, .fluxo-acao .fluxo-numero { color:#3d4fc4; }
-  .fluxo-acao .fluxo-numero { background:#3d4fc4; }
+  .fluxo-acao .fluxo-caixa-titulo { color:#3d4fc4; }
+  .fluxo-acao .fluxo-numero { background:#3d4fc4; color:#fff; }
   .fluxo-seta { font-size:14px; color:#9aa7b0; text-align:center; line-height:1; margin:-2px 0; padding-left:8px; }
+  .fluxo-acao-linha { padding-top:4px; margin-top:4px; }
+  .fluxo-acao-linha:first-child { padding-top:0; margin-top:0; border-top:none; }
+  .fluxo-acao-linha + .fluxo-acao-linha { border-top:1px dashed #c2caf5; }
+  .fluxo-linha-com-erro { display:flex; align-items:stretch; gap:4px; }
+  .fluxo-linha-com-erro .fluxo-caixa.fluxo-acao { flex:1 1 auto; min-width:0; }
+  .fluxo-seta-lateral { flex:0 0 auto; display:flex; align-items:center; font-size:16px; color:#c0392b; padding:0 2px; }
+  .fluxo-erro { flex:0 0 auto; max-width:170px; background:#fdecea; border-color:#f1a9a0; }
+  .fluxo-erro .fluxo-caixa-titulo { color:#c0392b; }
   .fluxo-extra { font-size:11.5px; color:#666; margin-top:5px; padding-top:5px; border-top:1px dashed #d8dee4; }
   .fluxo-badge { display:inline-block; font-size:10px; color:#888; margin-top:3px; }
   dl { margin:0; }
@@ -5447,13 +5482,269 @@ function construirDocumentoRegras(regras, tituloPagina) {
 </html>`;
 }
 
-// Orquestra tudo: abre a aba oculta, coleta as regras ativas e abre o
-// documento HTML numa aba nova. Reporta progresso pelo mesmo callback
-// usado no resto da extensao.
-async function exportarRegrasAutomacao(aoProgredir) {
+// ---- Geracao do PDF de Regras de Automação ----
+//
+// Mesma informacao do documento HTML (construirDocumentoRegras), redesenhada
+// com pdf-lib: cada regra vira um "cartao" com o fluxo Origem -> Critério ->
+// Destino -> Ação Automatizada empilhado (caixas coloridas + setas), e,
+// quando a regra tem Localizador de Erro, uma caixa vermelha ao lado da
+// Ação Automatizada ligada por uma seta lateral - mesma linguagem visual
+// da versao HTML, para quem preferir baixar/arquivar em PDF em vez de
+// abrir a aba com o HTML.
+const PDF_REGRAS_CORES = {
+  origem: { fundo: rgb(0xee / 255, 0xf1 / 255, 0xf5 / 255), acento: rgb(0x8b / 255, 0x99 / 255, 0xa6 / 255), titulo: COR_PRIMARIA },
+  criterio: { fundo: rgb(0xff / 255, 0xf6 / 255, 0xe0 / 255), acento: rgb(0x8a / 255, 0x6d / 255, 0x00 / 255), titulo: rgb(0x8a / 255, 0x6d / 255, 0x00 / 255) },
+  destino: { fundo: rgb(0xe9 / 255, 0xf7 / 255, 0xee / 255), acento: rgb(0x1a / 255, 0x7f / 255, 0x37 / 255), titulo: rgb(0x1a / 255, 0x7f / 255, 0x37 / 255) },
+  acao: { fundo: rgb(0xee / 255, 0xf1 / 255, 0xfd / 255), acento: rgb(0x3d / 255, 0x4f / 255, 0xc4 / 255), titulo: rgb(0x3d / 255, 0x4f / 255, 0xc4 / 255) },
+  erro: { fundo: rgb(0xfd / 255, 0xec / 255, 0xea / 255), acento: COR_ALERTA_VERMELHO, titulo: COR_ALERTA_VERMELHO },
+};
+
+// Desenha uma caixa do fluxo (Origem/Critério/Destino/Ação/Erro): faixa de
+// acento a esquerda, circulo numerado (quando "numero" e' informado - a
+// caixa de erro nao tem numero, so' o titulo), titulo e um ou mais
+// paragrafos de texto, opcionalmente separados por um traço fino entre si
+// (usado na Ação Automatizada, para nao colar as informações num bloco so').
+// Devolve a altura ocupada, para o chamador avançar o "y".
+function desenharCaixaFluxoPdf(pagina, { x, yTopo, largura, numero, titulo, paragrafos, cores, fonteNormal, fonteNegrito, comDivisores }) {
+  const padX = 8;
+  const padY = 7;
+  const larguraTexto = largura - padX * 2 - (numero !== null ? 16 : 0);
+  const xTexto = x + padX + (numero !== null ? 16 : 0);
+  const tamanhoTexto = 8.5;
+  const alturaLinhaTexto = 11.5;
+
+  const linhasPorParagrafo = paragrafos
+    .filter((p) => (p || "").trim() !== "")
+    .map((p) => quebrarLinhas(sanitizarTextoPdf(p), fonteNormal, tamanhoTexto, larguraTexto));
+
+  const alturaTitulo = 20;
+  const totalLinhasTexto = linhasPorParagrafo.reduce((soma, ls) => soma + Math.max(ls.length, 1), 0);
+  const alturaDivisores = comDivisores && linhasPorParagrafo.length > 1 ? (linhasPorParagrafo.length - 1) * 6 : 0;
+  const alturaCaixa = padY * 2 + alturaTitulo + totalLinhasTexto * alturaLinhaTexto + alturaDivisores;
+
+  pagina.drawRectangle({
+    x,
+    y: yTopo - alturaCaixa,
+    width: largura,
+    height: alturaCaixa,
+    color: cores.fundo,
+    borderColor: cores.acento,
+    borderWidth: 0.75,
+  });
+  pagina.drawRectangle({ x, y: yTopo - alturaCaixa, width: 3, height: alturaCaixa, color: cores.acento });
+
+  const yTituloBase = yTopo - padY - 9;
+  if (numero !== null) {
+    const cx = x + padX + 7;
+    const cy = yTituloBase + 2.5;
+    pagina.drawEllipse({ x: cx, y: cy, xScale: 6.5, yScale: 6.5, color: cores.acento });
+    pagina.drawText(String(numero), {
+      x: cx - (String(numero).length > 1 ? 4.5 : 2.3),
+      y: cy - 3,
+      size: 8,
+      font: fonteNegrito,
+      color: COR_BRANCO,
+    });
+  }
+  pagina.drawText(sanitizarTextoPdf(titulo).toUpperCase(), {
+    x: x + padX + (numero !== null ? 16 : 0),
+    y: yTituloBase,
+    size: 8,
+    font: fonteNegrito,
+    color: cores.titulo,
+  });
+
+  let y = yTopo - padY - alturaTitulo;
+  linhasPorParagrafo.forEach((linhas, indice) => {
+    if (indice > 0 && comDivisores) {
+      pagina.drawLine({
+        start: { x: xTexto, y: y + 4 },
+        end: { x: x + largura - padX, y: y + 4 },
+        thickness: 0.5,
+        color: COR_CINZA_BORDA,
+      });
+      y -= 6;
+    }
+    linhas.forEach((linha) => {
+      pagina.drawText(linha, { x: xTexto, y, size: tamanhoTexto, font: fonteNormal, color: COR_CINZA_TEXTO });
+      y -= alturaLinhaTexto;
+    });
+  });
+
+  return alturaCaixa;
+}
+
+// Seta simples (linha + ponta em "V") entre duas caixas - vertical (entre
+// os passos empilhados) ou horizontal (da Ação Automatizada para a caixa
+// de erro), conforme "direcao".
+function desenharSetaPdf(pagina, { x, y, comprimento, direcao, cor }) {
+  if (direcao === "baixo") {
+    pagina.drawLine({ start: { x, y }, end: { x, y: y - comprimento }, thickness: 1, color: cor });
+    pagina.drawLine({ start: { x: x - 3, y: y - comprimento + 4 }, end: { x, y: y - comprimento }, thickness: 1, color: cor });
+    pagina.drawLine({ start: { x: x + 3, y: y - comprimento + 4 }, end: { x, y: y - comprimento }, thickness: 1, color: cor });
+  } else {
+    pagina.drawLine({ start: { x, y }, end: { x: x + comprimento, y }, thickness: 1, color: cor });
+    pagina.drawLine({ start: { x: x + comprimento - 4, y: y + 3 }, end: { x: x + comprimento, y }, thickness: 1, color: cor });
+    pagina.drawLine({ start: { x: x + comprimento - 4, y: y - 3 }, end: { x: x + comprimento, y }, thickness: 1, color: cor });
+  }
+}
+
+async function construirPdfRegras(regras, tituloPagina) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  let pagina = null;
+  let y = 0;
+
+  function novaPagina(comTitulo) {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+    if (comTitulo) {
+      pagina.drawText(sanitizarTextoPdf("Regras de automação ativas"), {
+        x: margem,
+        y,
+        size: 14,
+        font: fonteNegrito,
+        color: COR_PRIMARIA_ESCURA,
+      });
+      y -= 16;
+      pagina.drawText(sanitizarTextoPdf(`${tituloPagina} — ${regras.length} regra(s) ativa(s)`), {
+        x: margem,
+        y,
+        size: 9,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
+      });
+      y -= 22;
+    }
+  }
+  novaPagina(true);
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina(false);
+    }
+  }
+
+  for (const r of regras) {
+    garantirEspaco(60);
+
+    pagina.drawText(sanitizarTextoPdf(`Regra ${r.numero || "?"}`), { x: margem, y, size: 12, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+    const textoPrioridade = sanitizarTextoPdf(r.prioridade || "");
+    if (textoPrioridade) {
+      const larguraPrioridade = fonteNegrito.widthOfTextAtSize(textoPrioridade, 9.5);
+      pagina.drawText(textoPrioridade, { x: margem + larguraUtil - larguraPrioridade, y: y + 1, size: 9.5, font: fonteNegrito, color: COR_PRIMARIA });
+    }
+    y -= 6;
+    pagina.drawLine({ start: { x: margem, y }, end: { x: margem + larguraUtil, y }, thickness: 1.25, color: COR_PRIMARIA });
+    y -= 14;
+
+    const linhasAcao = r.acaoLinhas && r.acaoLinhas.length > 0 ? r.acaoLinhas : r.acaoResumo ? [r.acaoResumo] : [];
+    const temErro = Boolean(r.localizadorErro);
+    const larguraAcao = temErro ? larguraUtil * 0.62 : larguraUtil;
+    const larguraErro = larguraUtil * 0.3;
+
+    const passos = [
+      { titulo: "Origem", cores: PDF_REGRAS_CORES.origem, paragrafos: [r.localizadorOrigem], largura: larguraUtil },
+      { titulo: "Critério", cores: PDF_REGRAS_CORES.criterio, paragrafos: [r.criterioResumo], largura: larguraUtil },
+      { titulo: "Destino", cores: PDF_REGRAS_CORES.destino, paragrafos: [r.destinoResumo], largura: larguraUtil },
+    ];
+    if (linhasAcao.length > 0) {
+      passos.push({ titulo: "Ação automatizada", cores: PDF_REGRAS_CORES.acao, paragrafos: linhasAcao, largura: larguraAcao, comDivisores: true });
+    }
+
+    passos.forEach((passo, indice) => {
+      garantirEspaco(30);
+      if (indice > 0) {
+        desenharSetaPdf(pagina, { x: margem + larguraUtil / 2, y, comprimento: 8, direcao: "baixo", cor: rgb(0.6, 0.65, 0.68) });
+        y -= 11;
+      }
+      const ehAcaoComErro = passo.titulo === "Ação automatizada" && temErro;
+      const alturaCaixa = desenharCaixaFluxoPdf(pagina, {
+        x: margem,
+        yTopo: y,
+        largura: passo.largura,
+        numero: indice + 1,
+        titulo: passo.titulo,
+        paragrafos: passo.paragrafos,
+        cores: passo.cores,
+        fonteNormal,
+        fonteNegrito,
+        comDivisores: passo.comDivisores,
+      });
+      if (ehAcaoComErro) {
+        const xErro = margem + larguraAcao + 26;
+        desenharSetaPdf(pagina, {
+          x: margem + larguraAcao + 4,
+          y: y - alturaCaixa / 2,
+          comprimento: 18,
+          direcao: "direita",
+          cor: COR_ALERTA_VERMELHO,
+        });
+        desenharCaixaFluxoPdf(pagina, {
+          x: xErro,
+          yTopo: y,
+          largura: larguraErro,
+          numero: null,
+          titulo: "Localizador de Erro",
+          paragrafos: [r.localizadorErro],
+          cores: PDF_REGRAS_CORES.erro,
+          fonteNormal,
+          fonteNegrito,
+        });
+      }
+      y -= alturaCaixa;
+    });
+
+    y -= 8;
+
+    const camposTexto = [
+      ["Grupo", r.grupo],
+      ["Localizador Origem", r.localizadorOrigem],
+      ["Tipo de Controle / Critério", r.criterioResumo],
+      ["Localizador Destino / Ação", r.destinoResumo],
+      ["Outros Critérios", (r.outrosCriteriosResumo || []).join(" — ") || "Nenhum"],
+    ];
+    for (const [rotulo, valor] of camposTexto) {
+      const linhasRotulo = quebrarLinhas(sanitizarTextoPdf(rotulo), fonteNegrito, 8, larguraUtil);
+      const linhasValor = quebrarLinhas(sanitizarTextoPdf(String(valor || "-")), fonteNormal, 9.5, larguraUtil);
+      garantirEspaco(14 + linhasValor.length * 12);
+      pagina.drawText(linhasRotulo[0] || rotulo, { x: margem, y, size: 8, font: fonteNegrito, color: COR_CINZA_TEXTO });
+      y -= 12;
+      linhasValor.forEach((linha) => {
+        pagina.drawText(linha, { x: margem, y, size: 9.5, font: fonteNormal, color: rgb(0.13, 0.13, 0.13) });
+        y -= 12;
+      });
+      y -= 2;
+    }
+
+    y -= 6;
+    pagina.drawLine({ start: { x: margem, y }, end: { x: margem + larguraUtil, y }, thickness: 0.5, color: COR_CINZA_BORDA });
+    y -= 16;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+
+  return pdf.save();
+}
+
+// Orquestra tudo: abre a aba oculta, coleta as regras ativas uma unica vez
+// e entrega o resultado nos formatos marcados - "html" (aba nova, como
+// antes) e/ou "pdf" (baixa um arquivo, mesmo padrao dos demais PDFs da
+// extensao). Reporta progresso pelo mesmo callback usado no resto da
+// extensao.
+async function exportarRegrasAutomacao(aoProgredir, formatos) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
   };
+  const opcoes = formatos || { html: true, pdf: false };
 
   const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!abaAtual || !abaAtual.url) {
@@ -5467,8 +5758,15 @@ async function exportarRegrasAutomacao(aoProgredir) {
   if (regras.length === 0) throw new Error("Nenhuma regra ativa encontrada.");
 
   notificar("Gerando documento...");
-  const html = construirDocumentoRegras(regras, tituloPagina);
-  await chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(html) });
+  if (opcoes.html) {
+    const html = construirDocumentoRegras(regras, tituloPagina);
+    await chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(html) });
+  }
+  if (opcoes.pdf) {
+    const bytes = await construirPdfRegras(regras, tituloPagina);
+    const dataAtual = new Date().toISOString().slice(0, 10);
+    await baixarUm(`regras_automacao_${dataAtual}.pdf`, construirDataUrlBinario("application/pdf", bytes));
+  }
 
   notificar("Finalizando...");
   return { total: regras.length };
@@ -5691,7 +5989,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     // na hora e avisa o resultado final por uma mensagem separada.
     exportarRegrasAutomacao((texto) => {
       chrome.runtime.sendMessage({ tipo: "PROGRESSO_REGRAS", texto }).catch(() => {});
-    })
+    }, mensagem.formatos)
       .then((resultado) => {
         chrome.runtime.sendMessage({ tipo: "REGRAS_FINALIZADO", ok: true, resultado }).catch(() => {});
       })

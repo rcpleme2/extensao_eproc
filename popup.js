@@ -415,6 +415,23 @@ btnAbrirTelaRelatorio.addEventListener("click", async () => {
 });
 
 const cardCorregedoria = document.getElementById("card-corregedoria");
+const cardGestaoUnidade = document.getElementById("card-gestao-unidade");
+
+// Perfil CORREGEDORIA não usa "Gestão da Unidade" (ela é do perfil de
+// gestão da própria vara/juízo) - mas em vez de esconder o cartão como o
+// de Corregedoria (que só existe para quem tem esse perfil), ele
+// continua visível e desabilitado: sinaliza que a funcionalidade existe,
+// só não se aplica ao perfil atual.
+function definirGestaoUnidadeDesabilitada(desabilitada) {
+  cardGestaoUnidade.classList.toggle("card--desabilitado", desabilitada);
+  if (desabilitada) cardGestaoUnidade.open = false;
+}
+
+cardGestaoUnidade.querySelector(".card-titulo").addEventListener("click", (evento) => {
+  if (cardGestaoUnidade.classList.contains("card--desabilitado")) {
+    evento.preventDefault();
+  }
+});
 const areaCorregedoriaInfo = document.getElementById("area-corregedoria-info");
 const btnRelatorioGerencialUnidade = document.getElementById("btn-relatorio-gerencial-unidade");
 const areaProgressoUnidades = document.getElementById("area-progresso-unidades");
@@ -503,12 +520,16 @@ async function atualizarCardCorregedoria() {
     const aba = await getAbaAtiva();
     if (!aba || !aba.id) {
       cardCorregedoria.hidden = true;
+      definirGestaoUnidadeDesabilitada(false);
       return;
     }
     const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LER_PERFIL_ATUAL" }).catch(() => null);
-    cardCorregedoria.hidden = !(resposta && resposta.perfil === "CORREGEDORIA");
+    const ehCorregedoria = Boolean(resposta && resposta.perfil === "CORREGEDORIA");
+    cardCorregedoria.hidden = !ehCorregedoria;
+    definirGestaoUnidadeDesabilitada(ehCorregedoria);
   } catch (e) {
     cardCorregedoria.hidden = true;
+    definirGestaoUnidadeDesabilitada(false);
   }
 }
 
@@ -906,6 +927,8 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 const areaRegrasInfo = document.getElementById("area-regras-info");
 const btnExportarRegras = document.getElementById("btn-exportar-regras");
 const areaErrosRegras = document.getElementById("area-erros-regras");
+const chkRegrasHtml = document.getElementById("chk-regras-html");
+const chkRegrasPdf = document.getElementById("chk-regras-pdf");
 
 function setStatusRegras(texto, tipo) {
   aplicarStatus(areaRegrasInfo, texto, tipo);
@@ -917,12 +940,19 @@ function setStatusRegras(texto, tipo) {
 // manualmente) na tela "Automatizar Tramitação Processual". So' confirma
 // que comecou; o resultado final chega pela mensagem REGRAS_FINALIZADO.
 btnExportarRegras.addEventListener("click", async () => {
+  const formatos = { html: chkRegrasHtml.checked, pdf: chkRegrasPdf.checked };
+  if (!formatos.html && !formatos.pdf) {
+    areaErrosRegras.hidden = false;
+    areaErrosRegras.textContent = "Marque ao menos um formato (HTML ou PDF).";
+    return;
+  }
+
   btnExportarRegras.disabled = true;
   areaErrosRegras.hidden = true;
   setStatusRegras("Exportando regras em segundo plano (sua aba atual não é alterada)...");
 
   try {
-    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_REGRAS_AUTOMACAO" });
+    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_REGRAS_AUTOMACAO", formatos });
     if (!resposta || !resposta.ok) {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
     }
@@ -1014,7 +1044,10 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
-      setStatusRegras(`${resultado.total || 0} regra(s) ativa(s) exportada(s) em uma nova aba.`, "ok");
+      const destinos = [];
+      if (chkRegrasHtml.checked) destinos.push("uma nova aba (HTML)");
+      if (chkRegrasPdf.checked) destinos.push("um arquivo PDF baixado");
+      setStatusRegras(`${resultado.total || 0} regra(s) ativa(s) exportada(s) em ${destinos.join(" e ")}.`, "ok");
     } else {
       setStatusRegras("Erro ao exportar as regras.", "erro");
       areaErrosRegras.hidden = false;
@@ -1295,4 +1328,84 @@ btnExportarDocumentosLocalizador.addEventListener("click", async () => {
     areaProgressoDocumentosLocalizador.hidden = true;
     btnExportarDocumentosLocalizador.disabled = false;
   }
+});
+
+// ---- Reordenar os cartões de perfil arrastando com o mouse ----
+//
+// A ordem padrão (Corregedoria > Gestão da Unidade > Magistrado, já
+// refletida na ordem dos <details> no HTML) pode ser alterada pelo
+// usuário arrastando a alça (⠿) de cada cartão; a ordem escolhida é
+// persistida no chrome.storage.local e reaplicada toda vez que o painel
+// é reaberto. Só a alça inicia o arraste - clicar no resto do <summary>
+// continua abrindo/fechando o cartão normalmente.
+const CHAVE_ORDEM_CARDS = "ordemCardsPerfil";
+const listaCardsPerfil = document.getElementById("lista-cards-perfil");
+
+function aplicarOrdemCards(ordemIds) {
+  if (!ordemIds || ordemIds.length === 0) return;
+  for (const id of ordemIds) {
+    const card = document.getElementById(id);
+    if (card) listaCardsPerfil.appendChild(card);
+  }
+}
+
+function salvarOrdemCards() {
+  const ordemIds = Array.from(listaCardsPerfil.children)
+    .filter((el) => el.classList && el.classList.contains("card"))
+    .map((el) => el.id);
+  chrome.storage.local.set({ [CHAVE_ORDEM_CARDS]: ordemIds });
+}
+
+chrome.storage.local.get([CHAVE_ORDEM_CARDS], (dados) => {
+  aplicarOrdemCards(dados && dados[CHAVE_ORDEM_CARDS]);
+});
+
+let cardArrastando = null;
+
+listaCardsPerfil.querySelectorAll(".card-alca").forEach((alca) => {
+  alca.addEventListener("dragstart", (evento) => {
+    cardArrastando = alca.closest(".card");
+    cardArrastando.classList.add("card--arrastando");
+    evento.dataTransfer.effectAllowed = "move";
+    evento.dataTransfer.setData("text/plain", cardArrastando.id);
+  });
+
+  alca.addEventListener("dragend", () => {
+    if (cardArrastando) cardArrastando.classList.remove("card--arrastando");
+    listaCardsPerfil
+      .querySelectorAll(".card--alvo-de-drop")
+      .forEach((el) => el.classList.remove("card--alvo-de-drop"));
+    cardArrastando = null;
+  });
+});
+
+listaCardsPerfil.querySelectorAll(".card").forEach((card) => {
+  card.addEventListener("dragover", (evento) => {
+    if (!cardArrastando || cardArrastando === card) return;
+    evento.preventDefault();
+    evento.dataTransfer.dropEffect = "move";
+    card.classList.add("card--alvo-de-drop");
+  });
+
+  card.addEventListener("dragleave", () => {
+    card.classList.remove("card--alvo-de-drop");
+  });
+
+  card.addEventListener("drop", (evento) => {
+    evento.preventDefault();
+    card.classList.remove("card--alvo-de-drop");
+    if (!cardArrastando || cardArrastando === card) return;
+
+    const cards = Array.from(listaCardsPerfil.children).filter(
+      (el) => el.classList && el.classList.contains("card")
+    );
+    const indiceOrigem = cards.indexOf(cardArrastando);
+    const indiceDestino = cards.indexOf(card);
+    if (indiceOrigem < indiceDestino) {
+      card.after(cardArrastando);
+    } else {
+      card.before(cardArrastando);
+    }
+    salvarOrdemCards();
+  });
 });
