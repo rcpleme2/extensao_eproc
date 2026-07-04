@@ -767,6 +767,75 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
   }
 });
 
+// ---- Gestão da Unidade (alternativo) - experimental ----
+// Mesmo Relatório para Correição do cartão Corregedoria, mas sem
+// dropdown de unidade nenhum: reaproveita o filtro que a própria tela do
+// eproc já aplica sozinha para o perfil logado (MAGISTRADO/GESTÃO DA
+// UNIDADE), ja' restrito a' unidade habilitada na sessão - ver
+// "exportarRelatorioUnidadeAtual" em background.js.
+const areaRelatorioUnidadeAltInfo = document.getElementById("area-relatorio-unidade-alt-info");
+const chkRelAltProcessosAtivos = document.getElementById("chk-relalt-processos-ativos");
+const chkRelAltSuspensos = document.getElementById("chk-relalt-suspensos");
+const chkRelAltConclusosDecisao = document.getElementById("chk-relalt-conclusos-decisao");
+const chkRelAltConclusosSentenca = document.getElementById("chk-relalt-conclusos-sentenca");
+const chkRelAltSemMovimentacao = document.getElementById("chk-relalt-sem-movimentacao");
+const chkRelAltRemessasJuizesLeigos = document.getElementById("chk-relalt-remessas-juizes-leigos");
+const chkRelAltRegrasAutomacao = document.getElementById("chk-relalt-regras-automacao");
+const chkRelAltLocalizadores = document.getElementById("chk-relalt-localizadores");
+const btnExportarRelatorioUnidadeAlt = document.getElementById("btn-exportar-relatorio-unidade-alt");
+const areaProgressoRelatorioUnidadeAlt = document.getElementById("area-progresso-relatorio-unidade-alt");
+const textoProgressoRelatorioUnidadeAlt = document.getElementById("texto-progresso-relatorio-unidade-alt");
+const areaErrosUnidadeAlt = document.getElementById("area-erros-unidade-alt");
+
+function setStatusUnidadeAlt(texto, tipo) {
+  aplicarStatus(areaRelatorioUnidadeAltInfo, texto, tipo);
+}
+
+function lerOpcoesRelatorioUnidadeAlt() {
+  return {
+    processosAtivos: chkRelAltProcessosAtivos.checked,
+    suspensos: chkRelAltSuspensos.checked,
+    conclusosDecisao: chkRelAltConclusosDecisao.checked,
+    conclusosSentenca: chkRelAltConclusosSentenca.checked,
+    semMovimentacao: chkRelAltSemMovimentacao.checked,
+    remessasJuizesLeigos: chkRelAltRemessasJuizesLeigos.checked,
+    regrasAutomacao: chkRelAltRegrasAutomacao.checked,
+    localizadores: chkRelAltLocalizadores.checked,
+  };
+}
+
+btnExportarRelatorioUnidadeAlt.addEventListener("click", async () => {
+  areaErrosUnidadeAlt.hidden = true;
+
+  const opcoes = lerOpcoesRelatorioUnidadeAlt();
+  if (!Object.values(opcoes).some(Boolean)) {
+    areaErrosUnidadeAlt.hidden = false;
+    areaErrosUnidadeAlt.textContent = "Marque ao menos um item do relatório antes de exportar.";
+    return;
+  }
+
+  btnExportarRelatorioUnidadeAlt.disabled = true;
+  areaProgressoRelatorioUnidadeAlt.hidden = false;
+  textoProgressoRelatorioUnidadeAlt.textContent = "Iniciando...";
+  setStatusUnidadeAlt("Gerando o Relatório da Unidade em segundo plano (sua aba atual será navegada)...");
+
+  // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
+  // comecou; o resultado final chega pela mensagem
+  // RELATORIO_UNIDADE_ATUAL_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_RELATORIO_UNIDADE_ATUAL", opcoes });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
+    }
+  } catch (e) {
+    setStatusUnidadeAlt("Erro ao gerar o relatório da unidade.", "erro");
+    areaErrosUnidadeAlt.hidden = false;
+    areaErrosUnidadeAlt.textContent = e && e.message ? e.message : String(e);
+    areaProgressoRelatorioUnidadeAlt.hidden = true;
+    btnExportarRelatorioUnidadeAlt.disabled = false;
+  }
+});
+
 // Relatório Geral da Corregedoria (panorama de TODAS as unidades) -
 // desativado por enquanto (precisa de melhorias antes de voltar). Handler
 // inteiro comentado junto com o botão em popup.html.
@@ -969,6 +1038,28 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosCorregedoria.hidden = false;
       areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao gerar o relatório gerencial.";
+    }
+  }
+
+  if (mensagem.tipo === "PROGRESSO_RELATORIO_UNIDADE_ATUAL") {
+    textoProgressoRelatorioUnidadeAlt.textContent = mensagem.texto || "Processando...";
+    setStatusUnidadeAlt(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "RELATORIO_UNIDADE_ATUAL_FINALIZADO") {
+    areaProgressoRelatorioUnidadeAlt.hidden = true;
+    btnExportarRelatorioUnidadeAlt.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      setStatusUnidadeAlt(
+        `Concluído! Relatório da unidade salvo em Downloads/eproc/ (${resultado.totalLocalizadores || 0} localizador(es)).`,
+        "ok"
+      );
+    } else {
+      setStatusUnidadeAlt("Erro ao gerar o relatório da unidade.", "erro");
+      areaErrosUnidadeAlt.hidden = false;
+      areaErrosUnidadeAlt.textContent = mensagem.erro || "Falha desconhecida ao gerar o relatório da unidade.";
     }
   }
 

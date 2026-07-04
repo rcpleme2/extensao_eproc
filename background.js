@@ -2064,14 +2064,24 @@ async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJui
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
-      args: [valorOrgaoJuizo],
-    });
+    // "valorOrgaoJuizo" nulo (perfil MAGISTRADO/GESTÃO DA UNIDADE, já
+    // restrito à própria unidade - ver "exportarRelatorioUnidadeAtual")
+    // pula essa seleção: a tela já mostra os localizadores da unidade
+    // habilitada sozinha, e tentar selecionar "null" no filtro não bate
+    // com nenhuma <option> (todo value é sempre string).
+    if (valorOrgaoJuizo) {
+      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+        args: [valorOrgaoJuizo],
+      });
 
-    if (!resultadoSelecao || !resultadoSelecao.ok) {
-      return { opcoes: [], erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo." };
+      if (!resultadoSelecao || !resultadoSelecao.ok) {
+        return {
+          opcoes: [],
+          erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo.",
+        };
+      }
     }
 
     // Da' um tempo para o campo "Localizador" (Tagify) atualizar sua
@@ -2155,15 +2165,23 @@ async function abrirAbaEListarSituacoesDoGrupo(urlBase, valorOrgaoJuizo, grupo) 
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
-      args: [valorOrgaoJuizo],
-    });
-    if (!resultadoSelecao || !resultadoSelecao.ok) {
-      return { opcoes: [], erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo." };
+    // Mesma regra das demais consultas: "valorOrgaoJuizo" nulo (perfil já
+    // restrito à própria unidade - ver "exportarRelatorioUnidadeAtual")
+    // pula a seleção em vez de tentar bater "null" com alguma <option>.
+    if (valorOrgaoJuizo) {
+      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+        args: [valorOrgaoJuizo],
+      });
+      if (!resultadoSelecao || !resultadoSelecao.ok) {
+        return {
+          opcoes: [],
+          erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo.",
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
-    await new Promise((resolve) => setTimeout(resolve, 300));
 
     const [{ result } = {}] = await chrome.scripting.executeScript({
       target: { tabId: aba.id },
@@ -2362,15 +2380,22 @@ async function abrirAbaEConsultarSituacoesEspecificas(urlBase, valorOrgaoJuizo, 
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
-      args: [valorOrgaoJuizo],
-    });
-    if (!resultadoSelecao || !resultadoSelecao.ok) {
-      return { itens: [], erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo." };
+    // Mesma regra das demais consultas: "valorOrgaoJuizo" nulo pula a
+    // seleção em vez de tentar bater "null" com alguma <option>.
+    if (valorOrgaoJuizo) {
+      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+        args: [valorOrgaoJuizo],
+      });
+      if (!resultadoSelecao || !resultadoSelecao.ok) {
+        return {
+          itens: [],
+          erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo.",
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
 
     const [{ result } = {}] = await comTimeout(
       chrome.scripting.executeScript({
@@ -3288,15 +3313,27 @@ async function consultarRemessasJuizesLeigosUmaVez(urlBase, valorUnidade) {
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 800));
 
-    const [{ result: selecaoOrgao } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: selecionarOrgaoRemessasJuizesLeigosNaPagina,
-      args: [valorUnidade],
-    });
-    if (!selecaoOrgao || !selecaoOrgao.ok) {
-      return { linhas: [], erro: (selecaoOrgao && selecaoOrgao.erro) || 'Falha ao selecionar o "Órgão Julgador".' };
+    // Se uma unidade especifica foi pedida (Relatório para Correição da
+    // Corregedoria, que enxerga TODAS as unidades), seleciona ela no
+    // filtro "Órgão Julgador" - sem isso a consulta traria remessas de
+    // TODAS as unidades misturadas. Quando "valorUnidade" e' nulo (perfil
+    // MAGISTRADO/GESTÃO DA UNIDADE já restrito à própria unidade - ver
+    // "exportarRelatorioUnidadeAtual"), pula essa selecao e deixa a
+    // propria tela aplicar sozinha o filtro do perfil logado - selecionar
+    // um valor null aqui nao bateria com nenhuma <option> (todo value e'
+    // sempre string) e faria essa secao falhar por engano, mesmo com
+    // remessas de verdade esperando na tela.
+    if (valorUnidade) {
+      const [{ result: selecaoOrgao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoRemessasJuizesLeigosNaPagina,
+        args: [valorUnidade],
+      });
+      if (!selecaoOrgao || !selecaoOrgao.ok) {
+        return { linhas: [], erro: (selecaoOrgao && selecaoOrgao.erro) || 'Falha ao selecionar o "Órgão Julgador".' };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
-    await new Promise((resolve) => setTimeout(resolve, 300));
 
     await chrome.scripting.executeScript({
       target: { tabId: aba.id },
@@ -4130,16 +4167,21 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   localizadores: true,
 };
 
+// "valorUnidade" pode ser nulo de proposito: quando vem do cartão
+// "Gestão da Unidade (alternativo)" (ver "exportarRelatorioUnidadeAtual"
+// abaixo), o perfil logado já está restrito à própria unidade no eproc,
+// então nenhuma das consultas internas precisa (nem deve) selecionar
+// nenhum Órgão/Juízo - cada uma delas já pula essa seleção sozinha
+// quando recebe um valor falso. Exigir uma unidade aqui é
+// responsabilidade de quem chama com a intenção de PERMITIR escolher
+// (o painel da Corregedoria já confere isso antes de enviar a mensagem,
+// via "exigirUnidadeSelecionada" em popup.js).
 async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opcoes, aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
   };
 
   const opcoesFinais = { ...OPCOES_RELATORIO_UNIDADE_PADRAO, ...(opcoes || {}) };
-
-  if (!valorUnidade) {
-    throw new Error("Selecione uma unidade antes de exportar o relatório.");
-  }
 
   if (!Object.values(opcoesFinais).some(Boolean)) {
     throw new Error("Selecione ao menos um item do relatório antes de exportar.");
@@ -4533,6 +4575,44 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     unidade: nomeUnidade,
     totalLocalizadores: localizadoresOrdenados.length,
   };
+}
+
+// Reaproveita INTEIRAMENTE "exportarRelatorioGerencialUnidade" (mesmas
+// consultas, mesmas seções, mesmo PDF final) para o cartão experimental
+// "Gestão da Unidade (alternativo)": em vez de escolher uma unidade num
+// dropdown (fluxo da Corregedoria, que enxerga TODAS as unidades e por
+// isso precisa perguntar qual), aqui o perfil logado (MAGISTRADO/GESTÃO
+// DA UNIDADE) já está restrito à sua própria unidade no eproc - passar
+// "valorUnidade" nulo faz "consultarUmaVezNaPagina" pular a seleção de
+// Órgão/Juízo (ver o "if (parametros.valorOrgaoJuizo)" logo no início
+// dela) e simplesmente usar o filtro que a própria tela do Relatório
+// Geral já aplica sozinha para esse perfil - mesmo comportamento que o
+// "relatório rápido" do cartão "Gestão da Unidade" já usa há tempos
+// (também nunca seleciona Órgão/Juízo nenhum).
+async function exportarRelatorioUnidadeAtual(opcoes, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.id || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  // So' para dar um nome ao PDF/capa - nunca usado para filtrar nenhuma
+  // consulta (essas seguem o que a própria tela do eproc já aplica
+  // sozinha para o perfil logado). Best-effort: se o content script não
+  // responder por qualquer motivo, cai num rótulo genérico em vez de
+  // travar o relatório inteiro por causa so' do nome.
+  let nomeUnidade = "Unidade atual";
+  try {
+    const perfilInfo = await chrome.tabs.sendMessage(abaAtual.id, { tipo: "LER_PERFIL_ATUAL" });
+    if (perfilInfo && perfilInfo.perfil) nomeUnidade = perfilInfo.perfil;
+  } catch (e) {
+    // Sem resposta do content script (ex.: aba fora do eproc) - segue com o rótulo genérico.
+  }
+
+  return exportarRelatorioGerencialUnidade(null, nomeUnidade, opcoes, notificar);
 }
 
 // Traduz os identificadores usados no painel para os parametros que
@@ -6674,6 +6754,29 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({
             tipo: "RELATORIO_GERENCIAL_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_UNIDADE_ATUAL") {
+    // Mesmo padrao das demais operacoes em segundo plano.
+    exportarRelatorioUnidadeAtual(mensagem.opcoes, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_UNIDADE_ATUAL", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "RELATORIO_UNIDADE_ATUAL_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_UNIDADE_ATUAL_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })

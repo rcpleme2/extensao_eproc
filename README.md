@@ -7,7 +7,10 @@ TJPR, restrita aos endereços `https://eproc1g.tjpr.jus.br/eproc/` e
 organizadas em cartões colapsáveis no painel lateral: **Gestão
 Gabinete** (Exportar Documentos + Busca específica de localizadores),
 **Gestão da Unidade** (Relatórios, Regras de Automação e Localizadores
-do Órgão) e **Corregedoria** (só para esse perfil). O painel abre enxuto
+do Órgão), **Gestão da Unidade (alternativo)** (experimental — replica o
+Relatório para Correição da Corregedoria sem exigir escolha de unidade,
+ver seção própria abaixo) e **Corregedoria** (só para esse perfil). O
+painel abre enxuto
 (**todos os cartões fechados**, nenhum aberto por padrão); cada cartão
 expande ao clicar no título, e reabre sozinho quando alguma operação
 dele progride, conclui ou falha. Sucessos aparecem em verde e erros em
@@ -790,6 +793,53 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
    própria unidade e usar a ferramenta **"Localizadores do Órgão"** do
    painel (que já mostra esse total, já que ali a extração é direto da
    tabela da tela, sem precisar de nenhuma consulta a mais).
+
+### Gestão da Unidade (alternativo) — experimental
+
+Cartão **experimental**, separado de propósito do cartão "Gestão da Unidade"
+normal (nada é misturado entre os dois) — reaproveita **inteiramente** o
+mesmo Relatório para Correição do cartão Corregedoria (mesmas seções, mesmas
+consultas, mesmo PDF final: `construirRelatorioGerencialUnidade`/
+`exportarRelatorioGerencialUnidade`), mas para quem já está logado
+**diretamente numa unidade** (perfil MAGISTRADO/GESTÃO DA UNIDADE) em vez do
+perfil CORREGEDORIA (que enxerga todas as unidades e por isso precisa de um
+dropdown de duas etapas para escolher uma).
+
+- **Não exige nenhuma unidade selecionada** — não há dropdown de
+  Comarca/Juízo neste cartão. Basta marcar os itens desejados (mesma lista
+  "Itens a incluir no PDF" do relatório da Corregedoria, com IDs próprios
+  para não interferir no outro cartão) e clicar em **"Exportar Relatório da
+  Unidade (PDF)"**.
+- Cada consulta interna (processos ativos, suspensos, conclusos, sem
+  movimentação, remessas aos juízes leigos, localizadores) recebe um valor
+  de unidade **nulo** em vez do valor escolhido num dropdown — isso faz a
+  extensão **pular** a etapa de selecionar um Órgão/Juízo (ou um Órgão
+  Julgador, no caso das remessas) em cada tela e simplesmente usar o filtro
+  que a própria tela do eproc **já aplica sozinha** para o perfil logado
+  (mesmo comportamento que o "relatório rápido" do cartão "Gestão da
+  Unidade" normal já usa há tempos, também sem selecionar nenhum
+  Órgão/Juízo). Regras de Automação nunca dependeu de unidade selecionada
+  (sempre reflete a unidade habilitada no momento), então não muda nada
+  nessa seção.
+- O nome usado na capa/título do PDF vem do próprio seletor de perfil do
+  eproc (`#selInfraUnidades`, cabeçalho superior) — não é o nome da vara em
+  si, só uma identificação best-effort; se não for possível lê-lo por
+  qualquer motivo, cai num rótulo genérico ("Unidade atual") em vez de
+  travar o relatório inteiro por causa só do nome.
+
+> Ao adicionar esse cartão, uma inspeção do código revelou que **3 outras
+> consultas** deste mesmo relatório (localizadores via Relatório Geral,
+> listagem de situações do grupo Suspensão e o detalhamento por situação
+> específica) e a consulta de **remessas aos juízes leigos** sempre
+> tentavam selecionar um Órgão/Juízo mesmo quando nenhum era informado —
+> um valor `null` nunca bate com nenhuma `<option>` (toda `value` é sempre
+> string), então essas seções falhariam silenciosamente se algum dia
+> fossem chamadas sem unidade. Isso foi corrigido nas 4 funções
+> (`abrirAbaEListarLocalizadoresRelatorioGeral`,
+> `abrirAbaEListarSituacoesDoGrupo`, `abrirAbaEConsultarSituacoesEspecificas`
+> e `consultarRemessasJuizesLeigosUmaVez`), que agora pulam a seleção
+> quando não recebem uma unidade — sem esse ajuste, o cartão "Gestão da
+> Unidade (alternativo)" não funcionaria corretamente.
 
 ## Regras de Automação
 

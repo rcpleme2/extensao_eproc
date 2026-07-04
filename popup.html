@@ -290,6 +290,69 @@
     </div>
   </details>
 
+  <details class="card" id="card-gestao-unidade-alt">
+    <summary class="card-titulo">
+      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
+      <span class="card-icone" aria-hidden="true">🧪</span>
+      <span class="card-rotulo">Gestão da Unidade (alternativo)</span>
+      <span class="selo">experimental</span>
+    </summary>
+    <div class="card-corpo">
+      <div id="area-relatorio-unidade-alt-info" class="status">
+        Gera o mesmo Relatório para Correição do cartão Corregedoria, mas
+        usando a unidade já habilitada nesta sessão - não é preciso
+        escolher uma unidade.
+      </div>
+
+      <div class="opcoes" id="area-personalizar-relatorio-alt">
+        <span class="legenda-opcoes">Itens a incluir no PDF:</span>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-processos-ativos" checked />
+          Relação de processos ativos
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-suspensos" checked />
+          Suspensos/sobrestados
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-conclusos-decisao" checked />
+          Conclusos para decisão
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-conclusos-sentenca" checked />
+          Conclusos para sentença
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-sem-movimentacao" checked />
+          Processos sem movimentação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-remessas-juizes-leigos" checked />
+          Remessas aos juízes leigos
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-regras-automacao" checked />
+          Regras de automação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-localizadores" checked />
+          Localizadores
+        </label>
+      </div>
+
+      <div class="botoes">
+        <button id="btn-exportar-relatorio-unidade-alt" class="btn">Exportar Relatório da Unidade (PDF)</button>
+      </div>
+
+      <div id="area-progresso-relatorio-unidade-alt" class="progresso-spinner" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="texto-progresso-relatorio-unidade-alt"></span>
+      </div>
+
+      <div id="area-erros-unidade-alt" class="erros" hidden></div>
+    </div>
+  </details>
+
   <details class="card card--privilegiado" id="card-documentos">
     <summary class="card-titulo">
       <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
