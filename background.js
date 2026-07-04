@@ -520,8 +520,51 @@ const MIMETYPES_IMAGEM = new Set(["jpg", "jpeg", "png", "gif", "bmp", "webp"]);
 // As fontes padrao do PDF (WinAnsi) nao cobrem todo o Unicode. Troca
 // aspas/travessoes tipograficos por equivalentes simples e qualquer outro
 // caractere fora do intervalo basico por "?", para nao falhar ao desenhar.
+const MAPA_CONTROLES_C1_MOJIBAKE = {
+  0x80: "EUR",
+  0x82: "'",
+  0x83: "f",
+  0x84: '"',
+  0x85: "...",
+  0x86: "+",
+  0x87: "++",
+  0x88: "^",
+  0x89: "%",
+  0x8a: "S",
+  0x8b: "<",
+  0x8c: "OE",
+  0x8e: "Z",
+  0x91: "'",
+  0x92: "'",
+  0x93: '"',
+  0x94: '"',
+  0x95: "*",
+  0x96: "-",
+  0x97: "-",
+  0x98: "~",
+  0x99: "(TM)",
+  0x9a: "s",
+  0x9b: ">",
+  0x9c: "oe",
+  0x9e: "z",
+  0x9f: "Y",
+};
+
+function removerControlesC1Mojibake(texto) {
+  let resultado = "";
+  for (const ch of texto) {
+    const codigo = ch.codePointAt(0);
+    if (codigo >= 0x80 && codigo <= 0x9f) {
+      resultado += MAPA_CONTROLES_C1_MOJIBAKE[codigo] || "";
+    } else {
+      resultado += ch;
+    }
+  }
+  return resultado;
+}
+
 function sanitizarTextoPdf(texto) {
-  return String(texto)
+  return removerControlesC1Mojibake(String(texto))
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/[–—]/g, "-")

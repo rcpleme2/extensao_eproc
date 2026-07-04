@@ -988,10 +988,20 @@ painel), em vez do ícone genérico de documento usado antes.
   aba, salvando um `.html` autocontido só com o conteúdo real da
   certidão/ato. Isso pode fazer o download desses documentos específicos
   demorar um pouco mais (a aba precisa carregar de verdade).
-- A extensão funciona em qualquer domínio que siga o padrão de URL do eproc
-  (`.../eproc/controlador.php`), não é restrita a um tribunal específico.
+- A extensão é restrita aos hosts `eproc1g.tjpr.jus.br` e
+  `eproc1g.tre.tjpr.jus.br` (ver `manifest.json`) — não roda em nenhum
+  outro domínio.
 - Se um download falhar (ex.: link expirado), o erro aparece no painel ao
   final do processo; os demais downloads continuam normalmente.
+- Textos extraídos de páginas do eproc às vezes trazem um caractere de
+  controle C1 (U+0080-U+009F) no lugar do caractere tipográfico que
+  realmente pretendiam representar (mojibake de Windows-1252 não
+  convertido direito para UTF-8) — ex.: um travessão vira o controle
+  invisível U+0096, que a fonte WinAnsi usada nos PDFs não sabe desenhar
+  e lançava o erro "WinAnsi cannot encode ... (0x96)", interrompendo a
+  geração do PDF inteiro. `sanitizarTextoPdf` (em `background.js`), usada
+  por todo texto desenhado em qualquer PDF da extensão, mapeia esses
+  controles para o equivalente ASCII mais próximo antes de desenhar.
 - Todas as funcionalidades desta extensão (exportar documentos, PDF
   único, MD único, relatórios, regras de automação) funcionam
   inteiramente offline/local, sem nenhuma chamada de rede além do próprio
