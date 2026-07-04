@@ -871,8 +871,8 @@ mesmas consultas, mesmo gerador de PDF: `exportarRelatorioGerencialUnidade`),
 mas para quem já está logado **diretamente numa unidade** (perfil
 MAGISTRADO/GESTÃO DA UNIDADE) em vez do perfil CORREGEDORIA (que enxerga
 todas as unidades e por isso precisa de um dropdown de duas etapas para
-escolher uma). Tem 3 diferenças de conteúdo em relação ao relatório da
-Corregedoria, cobertas abaixo.
+escolher uma). Tem algumas diferenças de conteúdo em relação ao relatório
+da Corregedoria, cobertas abaixo.
 
 - **Não exige nenhuma unidade selecionada** — não há dropdown de
   Comarca/Juízo neste cartão. Basta marcar os itens desejados (mesma lista
@@ -910,6 +910,23 @@ Corregedoria, cobertas abaixo.
   "Nome — N processo(s)" em vez de só o nome, e o subtítulo explicando a
   limitação de não ter o total (que aparece no relatório da Corregedoria)
   não é desenhado, já que a limitação não existe neste fluxo.
+- Item **exclusivo** deste cartão (não existe no relatório da
+  Corregedoria): **Mandados em aberto**, logo **após "Processos sem
+  movimentação"** na capa e nas tabelas anexas. Extraído da tela
+  **"Relatório de Mandados Distribuídos"** (menu lateral,
+  `acao=mandados/relatorio_secretaria/consultar`), marcando **todas** as
+  opções do filtro "Situação do mandado" (`#selStatusMandado`, um
+  bootstrap-select de múltipla seleção) **exceto "Devolvido"** — ou seja,
+  tudo que ainda não foi devolvido: "Aguardando cumprimento", "Aguardando
+  distribuição", "Aguardando redistribuição" e "Não Remetido". O resumo
+  na capa traz só a contagem ("Mandados não cumpridos"); a relação
+  discriminada sai em **página retrato**, com os campos **Número do
+  Processo, Tipo de Ato** (coluna real da tela: "Atos"), **Data da
+  Remessa** (coluna real: "Data Remessa" — casada por "remessa" no
+  cabeçalho, para não confundir com a coluna vizinha "Data Juntada") e
+  **Situação**. Não precisa de nenhuma seleção de unidade (a tela já
+  reflete a unidade habilitada, mesma lógica das demais seções deste
+  cartão).
 - O aviso "Regras de automação: lista as regras da unidade atualmente
   habilitada..." (ver seção "Regras de Automação" abaixo) **não aparece**
   neste relatório — esse aviso só faz sentido quando existe uma unidade

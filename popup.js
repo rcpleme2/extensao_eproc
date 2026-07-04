@@ -808,6 +808,7 @@ const chkRelAltSuspensos = document.getElementById("chk-relalt-suspensos");
 const chkRelAltConclusosDecisao = document.getElementById("chk-relalt-conclusos-decisao");
 const chkRelAltConclusosSentenca = document.getElementById("chk-relalt-conclusos-sentenca");
 const chkRelAltSemMovimentacao = document.getElementById("chk-relalt-sem-movimentacao");
+const chkRelAltMandados = document.getElementById("chk-relalt-mandados");
 const chkRelAltParalisados = document.getElementById("chk-relalt-paralisados");
 const chkRelAltRemessasJuizesLeigos = document.getElementById("chk-relalt-remessas-juizes-leigos");
 const chkRelAltRegrasAutomacao = document.getElementById("chk-relalt-regras-automacao");
@@ -828,6 +829,7 @@ function lerOpcoesRelatorioUnidadeAlt() {
     conclusosDecisao: chkRelAltConclusosDecisao.checked,
     conclusosSentenca: chkRelAltConclusosSentenca.checked,
     semMovimentacao: chkRelAltSemMovimentacao.checked,
+    mandados: chkRelAltMandados.checked,
     paralisados: chkRelAltParalisados.checked,
     remessasJuizesLeigos: chkRelAltRemessasJuizesLeigos.checked,
     regrasAutomacao: chkRelAltRegrasAutomacao.checked,

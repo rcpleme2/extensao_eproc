@@ -3362,6 +3362,213 @@ async function consultarRemessasJuizesLeigosUmaVez(urlBase, valorUnidade) {
   }
 }
 
+// ---- Mandados em aberto (só no "Gestão da Unidade (alternativo)") ----
+//
+// Tela "Relatório de Mandados Distribuídos" (menu lateral), acessada via
+// `acao=mandados/relatorio_secretaria/consultar`. O filtro "Situação do
+// mandado" (`#selStatusMandado`, um bootstrap-select multi-seleção sobre
+// um `<select multiple>` nativo) tem 5 opções: "Aguardando cumprimento",
+// "Aguardando distribuição", "Aguardando redistribuição", "Devolvido" e
+// "Não Remetido" - a extensão marca TODAS, EXCETO "Devolvido" (o pedido é
+// "mandados em aberto", ou seja, ainda não devolvidos). Mesma técnica de
+// marcar `option.selected` + disparar "change" já usada em
+// "selecionarGrupoSituacao"/"selecionarOrgaoRemessasJuizesLeigosNaPagina"
+// - o bootstrap-select por cima se atualiza sozinho a partir do
+// `<select>` nativo.
+function clicarLinkMandadosNaPagina() {
+  const link = document.querySelector('a[href*="acao=mandados/relatorio_secretaria/consultar&"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+function selecionarStatusMandadosEmAbertoNaPagina() {
+  const select = document.getElementById("selStatusMandado");
+  if (!select) {
+    return { ok: false, erro: 'Campo "Situação do mandado" (#selStatusMandado) não encontrado nesta página.' };
+  }
+
+  let alguma = false;
+  for (const opcao of select.options) {
+    const selecionada = (opcao.textContent || "").trim().toLowerCase() !== "devolvido";
+    opcao.selected = selecionada;
+    if (selecionada) alguma = true;
+  }
+  if (!alguma) {
+    return { ok: false, erro: 'Nenhuma opção (além de "Devolvido") encontrada no filtro "Situação do mandado".' };
+  }
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return { ok: true, erro: null };
+}
+
+// Clica no botão "Pesquisar" (`#btnPesquisar`) da barra de comandos
+// superior dessa tela.
+function clicarPesquisarMandadosNaPagina() {
+  const botao = document.getElementById("btnPesquisar");
+  if (!botao) return false;
+  botao.click();
+  return true;
+}
+
+// Le' a tabela "#tblMandadoSecretaria" (DataTables via AJAX, mesma
+// técnica de "extrairLinhasRemessasJuizesLeigosNaPagina": mostrar tudo
+// com "page.len(-1).draw(false)", esperar o evento "draw.dt" e ler as
+// células já renderizadas do DOM). Colunas pedidas: Número do Processo,
+// Tipo de Ato (coluna real da tela: "Atos"), Data da Remessa (coluna
+// real: "Data Remessa" - regex ancorada em "remessa" para não casar com
+// a coluna vizinha "Data Juntada") e Situação (ex.: "Aguardando
+// cumprimento", "Devolvido - Cumprido" quando já tem subtipo).
+// Best-effort, nunca lança exceção.
+async function extrairLinhasMandadosNaPagina() {
+  const LIMITE_LINHAS = 2000;
+
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  function textoLimpo(el) {
+    return (el && el.textContent ? el.textContent : "").replace(/\s+/g, " ").trim();
+  }
+
+  try {
+    if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
+      return { linhas: [], erro: "jQuery DataTables não disponível nesta página." };
+    }
+    const tabelaEl = jQuery("#tblMandadoSecretaria");
+    if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tblMandadoSecretaria")) {
+      return { linhas: [], erro: 'Tabela "#tblMandadoSecretaria" não encontrada ou ainda não inicializada.' };
+    }
+
+    const dt = tabelaEl.DataTable();
+    const aguardarRedesenho = () =>
+      Promise.race([
+        new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true))),
+        aguardar(8000).then(() => false),
+      ]);
+    const promessaMostrarTudo = aguardarRedesenho();
+    dt.page.len(-1).draw(false);
+    await promessaMostrarTudo;
+
+    const tabelaDom = document.getElementById("tblMandadoSecretaria");
+    const cabecalhos = Array.from(tabelaDom.querySelectorAll("thead th")).map(textoLimpo);
+    const idxProcesso = cabecalhos.findIndex((h) => /processo/i.test(h));
+    const idxAto = cabecalhos.findIndex((h) => /^atos?$/i.test(h));
+    const idxSituacao = cabecalhos.findIndex((h) => /situa/i.test(h));
+    const idxDataRemessa = cabecalhos.findIndex((h) => /remessa/i.test(h));
+
+    // Mesmo filtro de linha "vazia" do DataTables (ver comentário em
+    // "extrairLinhasRemessasJuizesLeigosNaPagina") - quando a consulta não
+    // acha nada, uma única linha com 1 <td> (colspan cobrindo tudo) e o
+    // texto "Nenhum registro encontrado" aparece no lugar de nenhum <tr>.
+    const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
+      (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
+    );
+
+    const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) => {
+      const celulas = Array.from(tr.querySelectorAll("td"));
+      const valor = (idx) => (idx >= 0 && celulas[idx] ? textoLimpo(celulas[idx]) : "");
+      return {
+        processo: valor(idxProcesso),
+        tipoAto: valor(idxAto),
+        dataRemessa: valor(idxDataRemessa),
+        situacao: valor(idxSituacao),
+      };
+    });
+
+    return { linhas, erro: null };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Orquestra a consulta de mandados em aberto: abre uma aba oculta, clica
+// no link de menu, marca o filtro "Situação do mandado" (tudo, exceto
+// "Devolvido"), clica em "Pesquisar" e extrai a tabela de resultado -
+// mesmo padrão das demais consultas do Relatório da Unidade. Sem seletor
+// de unidade nenhum (essa seção só roda no "Gestão da Unidade
+// (alternativo)", perfil já restrito à própria unidade). Nunca lança
+// exceção: sempre resolve com { linhas, erro }.
+async function consultarMandadosAbertosUmaVez(urlBase) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkMandadosNaPagina,
+    });
+    if (!linkEncontrado) {
+      return {
+        linhas: [],
+        erro:
+          'Link "Relatório de Mandados Distribuídos" não encontrado no menu lateral desta página. Abra uma página do eproc com o menu lateral e tente novamente.',
+      };
+    }
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const [{ result: resultadoStatus } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: selecionarStatusMandadosEmAbertoNaPagina,
+    });
+    if (!resultadoStatus || !resultadoStatus.ok) {
+      return {
+        linhas: [],
+        erro: (resultadoStatus && resultadoStatus.erro) || 'Falha ao selecionar o filtro "Situação do mandado".',
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarPesquisarMandadosNaPagina,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      world: "MAIN",
+      func: extrairLinhasMandadosNaPagina,
+    });
+    return result || { linhas: [], erro: "Sem resultado ao ler a tabela de mandados em aberto." };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Monta a página (A4 retrato) com a relação discriminada dos mandados em
+// aberto: Número do Processo, Tipo de Ato, Data da Remessa e Situação -
+// mesmo gerador de tabela curada das demais relações deste relatório.
+async function construirPdfMandadosAbertos(linhas, nomeUnidade) {
+  const itens = linhas.map((l) => ({
+    processo: l.processo,
+    tipoAto: l.tipoAto,
+    dataRemessa: l.dataRemessa,
+    situacao: l.situacao,
+  }));
+
+  const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+  const colunas = [
+    { titulo: "Número do Processo", largura: larguraUtil * 0.26, campo: "processo" },
+    { titulo: "Tipo de Ato", largura: larguraUtil * 0.24, campo: "tipoAto" },
+    { titulo: "Data da Remessa", largura: larguraUtil * 0.18, campo: "dataRemessa" },
+    { titulo: "Situação", largura: larguraUtil * 0.32, campo: "situacao" },
+  ];
+
+  return construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Mandados em aberto da unidade "${nomeUnidade}" — ${itens.length} mandado(s)`
+  );
+}
+
 const REMESSAS_TAMANHO_FONTE = 8.5;
 const REMESSAS_ALTURA_LINHA = REMESSAS_TAMANHO_FONTE * 1.35;
 
@@ -4223,6 +4430,10 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   conclusosDecisao: true,
   conclusosSentenca: true,
   semMovimentacao: true,
+  // Default "false" de propósito: mandados em aberto só existe no cartão
+  // "Gestão da Unidade (alternativo)" (popup.js nunca envia essa opção a
+  // partir do cartão Corregedoria, então ela sempre cai nesse padrão lá).
+  mandados: false,
   paralisados: true,
   remessasJuizesLeigos: true,
   regrasAutomacao: true,
@@ -4413,6 +4624,16 @@ async function exportarRelatorioGerencialUnidade(
     });
   }
 
+  // Mandados em aberto: só existe no cartão "Gestão da Unidade
+  // (alternativo)" (ver comentário em "OPCOES_RELATORIO_UNIDADE_PADRAO").
+  const mandados = { linhas: [], erros: [] };
+  if (opcoesFinais.mandados) {
+    notificar("Consultando mandados em aberto...");
+    const r = await consultarMandadosAbertosUmaVez(abaAtual.url);
+    mandados.linhas = r.linhas || [];
+    if (r.erro) mandados.erros.push(r.erro);
+  }
+
   // Relação de processos paralisados (a partir de 31 dias sem
   // movimentação, numa única tabela - sem separar por 30/90/120 dias como
   // o resumo acima, que e' só a contagem). "extrairTabela" pede pra' ler
@@ -4578,6 +4799,12 @@ async function exportarRelatorioGerencialUnidade(
       ],
     });
   }
+  if (opcoesFinais.mandados) {
+    secoesResumo.push({
+      titulo: "MANDADOS EM ABERTO",
+      linhas: [{ rotulo: "Mandados não cumpridos", valor: mandados.linhas.length }],
+    });
+  }
   if (opcoesFinais.paralisados) {
     secoesResumo.push({
       titulo: "PROCESSOS PARALISADOS",
@@ -4621,6 +4848,9 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.semMovimentacao && semMovimentacao.erros.length > 0) {
     avisos.push(`Processos sem movimentação: ${semMovimentacao.erros.join(" | ")}`);
   }
+  if (opcoesFinais.mandados && mandados.erros.length > 0) {
+    avisos.push(`Mandados em aberto: ${mandados.erros.join(" | ")}`);
+  }
   if (opcoesFinais.paralisados && processosParalisados.erros.length > 0) {
     avisos.push(`Processos paralisados: ${processosParalisados.erros.join(" | ")}`);
   }
@@ -4661,6 +4891,12 @@ async function exportarRelatorioGerencialUnidade(
     const bytesTabela = await construirPdfSuspensos(suspensos.tabela, nomeUnidade);
     const pdfTabela = await PDFDocument.load(bytesTabela);
     const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+  if (opcoesFinais.mandados && mandados.linhas.length > 0) {
+    const bytesMandados = await construirPdfMandadosAbertos(mandados.linhas, nomeUnidade);
+    const pdfMandados = await PDFDocument.load(bytesMandados);
+    const paginas = await pdfFinal.copyPages(pdfMandados, pdfMandados.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
   }
   if (
