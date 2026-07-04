@@ -210,6 +210,36 @@ body {
   font-size: 13px;
 }
 
+/* Variante colapsável da subseção (só usada no cartão "Gestão Gabinete",
+   perfil MAGISTRADO - as demais subseções continuam sempre visíveis, ver
+   comentário acima). O <div>/<h3> viram <details>/<summary>: mesmo visual
+   do título, só que clicável, com chevron e recolhida por padrão. */
+.subsecao--colapsavel > .subsecao-titulo {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.subsecao--colapsavel > .subsecao-titulo::-webkit-details-marker {
+  display: none;
+}
+
+.subsecao--colapsavel > .subsecao-titulo::after {
+  content: "";
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid var(--cor-texto-suave);
+  border-bottom: 2px solid var(--cor-texto-suave);
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+  flex: 0 0 auto;
+}
+
+.subsecao--colapsavel[open] > .subsecao-titulo::after {
+  transform: rotate(225deg);
+}
+
 .separador-subsecao {
   border: none;
   border-top: 1px solid var(--cor-borda-suave);

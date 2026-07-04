@@ -370,11 +370,11 @@
       <span class="selo">perfil MAGISTRADO</span>
     </summary>
     <div class="card-corpo">
-      <div class="subsecao">
-        <h3 class="subsecao-titulo">
+      <details class="subsecao subsecao--colapsavel">
+        <summary class="subsecao-titulo">
           <span class="subsecao-icone" aria-hidden="true">📄</span>
           Exportar Documentos
-        </h3>
+        </summary>
         <div id="area-status" class="status">
           Abra um processo no eproc e clique em "Detectar documentos".
         </div>
@@ -418,15 +418,15 @@
         <ul id="lista-documentos" class="lista-documentos" hidden></ul>
 
         <div id="area-erros" class="erros" hidden></div>
-      </div>
+      </details>
 
       <hr class="separador-subsecao" />
 
-      <div class="subsecao">
-        <h3 class="subsecao-titulo">
+      <details class="subsecao subsecao--colapsavel">
+        <summary class="subsecao-titulo">
           <span class="subsecao-icone" aria-hidden="true">🔎</span>
           Busca específica de localizadores
-        </h3>
+        </summary>
         <div id="area-nav-localizadores-info" class="status">
           Escolha um localizador para abrir ou exportar seus processos.
         </div>
@@ -473,7 +473,7 @@
         </div>
 
         <div id="area-erros-nav-localizadores" class="erros" hidden></div>
-      </div>
+      </details>
     </div>
   </details>
 
@@ -501,6 +501,10 @@
         <label class="opcao">
           <input type="checkbox" id="chk-config-separar-orgao-juizo" />
           Separar Comarca/Juízo no campo "Órgão/Juízo" do Relatório Geral
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-config-anexar-magistrado-conclusos" />
+          Acrescentar o Magistrado aos eventos "Conclusos *" na tela do processo
         </label>
       </div>
       <div class="modal-botoes">

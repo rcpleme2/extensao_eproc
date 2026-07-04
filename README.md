@@ -34,7 +34,11 @@ visíveis e utilizáveis por qualquer perfil:
 
 - **perfil MAGISTRADO**: cartão "Gestão Gabinete", com **Exportar
   Documentos** e **Busca específica de localizadores** em subseções
-  próprias (título + divisor) dentro do mesmo cartão.
+  próprias dentro do mesmo cartão — diferente das demais subseções do
+  painel (ver "Gestão da Unidade" logo abaixo), estas duas são
+  **colapsáveis** e começam **fechadas** por padrão, cada uma abrindo
+  só ao clicar no próprio título (e sozinha quando alguma operação dela
+  progride/conclui/falha, igual aos cartões).
 - **perfil GESTÃO DA UNIDADE**: Relatórios, Regras de Automação e
   Localizadores do Órgão - reunidos num único cartão "Gestão da
   Unidade", cada um em sua própria subseção, não em sub-menus
@@ -129,6 +133,35 @@ do painel (ver seção própria abaixo) — desligar não desfaz o que já foi
 trocado numa página já aberta (passa a valer a partir da próxima
 navegação/recarregamento daquela página).
 
+## Magistrado nos eventos "Conclusos \*"
+
+Na tabela de eventos do processo (`#tblEventos`), quando um evento é um
+"Conclusos" (ex.: "Conclusos para decisão/despacho", "Conclusos para
+sentença" — qualquer descrição que **comece** com "Conclusos"), o
+Magistrado responsável já existe na página, só que escondido atrás do
+tooltip nativo "Informações do Evento" (o ícone de lupa ao lado da
+descrição, que só aparece ao passar o mouse) — não vem na própria coluna
+Descrição. A extensão lê esse dado direto do atributo `aria-description`
+do `<span class="sr-only">` vizinho ao ícone (o mesmo texto usado pelos
+leitores de tela, sempre presente no HTML independente do hover) e
+acrescenta **só o nome do Magistrado**, entre parênteses, ao final do
+texto já existente na coluna — ex.: "Conclusos para decisão/despacho"
+vira **"Conclusos para decisão/despacho (ROSANGELA FAORO)"**. O cargo
+(ex.: "Juiz da Fase", vindo depois do nome como "NOME - Cargo" nesse
+mesmo atributo) fica de fora, só o nome entra.
+
+Esse atributo concatena "Data do Evento:", "Evento:", "Usuário:" e
+"Magistrado(s):" **sem nenhum separador visível** entre os valores (o
+eproc usa `<br>` só na versão visual do tooltip; a versão para leitor de
+tela perde essas quebras) — por isso a extensão isola cada campo
+ancorando no **rótulo do campo seguinte**, nunca em espaço ou pontuação,
+e conclusão só é procurada no campo "Magistrado(s):" (o último), lendo
+tudo que sobra depois desse rótulo.
+
+Assim como a troca de sigla por nome (acima), esse comportamento pode ser
+desligado na engrenagem de **Configurações** do painel — desligar não
+desfaz o que já foi acrescentado numa página já aberta.
+
 ## Configurações
 
 O ícone de engrenagem (⚙) no canto superior direito do painel — com um
@@ -154,6 +187,9 @@ os botões de ação — abre um pequeno modal com uma opção, salva em
   original — que fica oculto (não removido) enquanto a opção estiver
   ligada. Desligada por padrão porque altera a interface da própria
   página do eproc, não só lê dados dela.
+- **"Acrescentar o Magistrado aos eventos 'Conclusos \*' na tela do
+  processo"** (ligado por padrão): ver seção "Magistrado nos eventos
+  'Conclusos \*'" abaixo.
 
 Os menus suspensos preenchidos pela extensão (unidades do Relatório para
 Correição, localizadores da "Busca específica de localizadores") sempre
@@ -782,13 +818,20 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
 
    **Regras de Automação**: a mesma relação de regras ativas do cartão
    "Regras de Automação" (fluxograma + detalhamento, ver seção própria
-   abaixo), entra **antes** de Localizadores. Diferente do restante deste
-   relatório (que consulta a unidade escolhida no dropdown "Órgão/Juízo"),
-   essa seção vem da tela "Automatizar Localizadores do Órgão", que **não
-   tem** esse mesmo seletor — ela sempre lista as regras da unidade
-   atualmente **habilitada** no eproc. Por isso, se a unidade escolhida
-   para o relatório for diferente da que está habilitada no momento, um
-   aviso na capa avisa exatamente isso.
+   abaixo), entra **antes** de Localizadores. Essa seção vem da tela
+   "Automatizar Tramitação Processual", que tem um seletor **próprio**
+   (`#selOrgao`, diferente do "Órgão/Juízo" do Relatório Geral, inclusive
+   com um espaço de valores diferente entre as duas telas) — **só
+   aparece para o perfil CORREGEDORIA** (que enxerga todas as unidades);
+   para quem está logado direto numa unidade, esse filtro nem existe na
+   tela. Quando uma unidade foi escolhida no dropdown da Corregedoria, a
+   extensão seleciona a unidade correspondente nesse filtro (casando pelo
+   **texto** do nome, já que os `value` das duas telas não são
+   compatíveis) e clica em "Pesquisar" antes de ler a tabela — sem isso,
+   a tela simplesmente **não lista regra nenhuma**, mesmo havendo regras
+   cadastradas (esse filtro é obrigatório na tela, mas a extensão não o
+   preenchia antes; essa era a causa real de "regras de automação
+   retornando zero" para o perfil Corregedoria).
 
    A extração dos Localizadores **não** usa a tela "Localizadores do
    Órgão" (diferente do resto do painel) — o Relatório Geral tem seu
@@ -930,6 +973,20 @@ manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
    **nenhuma** com o interruptor "Ativa" ligado, a mensagem de erro
    distingue os dois casos (em vez de um "nenhuma regra ativa
    encontrada" genérico nas duas situações).
+
+   > **Perfil CORREGEDORIA**: essa tela tem um filtro obrigatório
+   > "ÓRGÃO" (`#selOrgao`) que só aparece para esse perfil — sem
+   > selecionar uma unidade nele e clicar em "Pesquisar", a tabela nunca
+   > lista regra nenhuma, mesmo havendo regras cadastradas. O botão
+   > avulso **"Exportar regras ativas"** deste cartão **não** sabe qual
+   > unidade escolher (não tem nenhum contexto de unidade), então esse
+   > filtro fica sem ser preenchido nesse fluxo — para o perfil
+   > Corregedoria, use o item "Regras de automação" dentro do
+   > **Relatório para Correição** (cartão Corregedoria), que já seleciona
+   > esse filtro automaticamente com a unidade escolhida no dropdown (ver
+   > seção "Corregedoria" acima). O cartão "Gestão da Unidade
+   > (alternativo)" não precisa desse filtro — ele é exclusivo do perfil
+   > CORREGEDORIA e não aparece para quem já está logado numa unidade.
 3. Ordena as regras: se **alguma** regra ativa tiver uma prioridade
    numérica definida (ex.: "Executar 1º"), o relatório segue essa ordem de
    execução; regras sem prioridade não entram nessa comparação. Quando

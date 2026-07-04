@@ -32,6 +32,7 @@ const ROTULO_FASE = {
 const CONFIG_PADRAO = {
   substituirSigla: true,
   separarOrgaoJuizoPorComarca: false,
+  anexarMagistradoConclusos: true,
 };
 
 function obterConfiguracoes() {
@@ -48,12 +49,14 @@ const btnAbrirConfiguracoes = document.getElementById("btn-abrir-configuracoes")
 const modalConfiguracoes = document.getElementById("modal-configuracoes");
 const chkConfigSubstituirSigla = document.getElementById("chk-config-substituir-sigla");
 const chkConfigSepararOrgaoJuizo = document.getElementById("chk-config-separar-orgao-juizo");
+const chkConfigAnexarMagistradoConclusos = document.getElementById("chk-config-anexar-magistrado-conclusos");
 const modalConfigFechar = document.getElementById("modal-config-fechar");
 
 btnAbrirConfiguracoes.addEventListener("click", async () => {
   const config = await obterConfiguracoes();
   chkConfigSubstituirSigla.checked = config.substituirSigla;
   chkConfigSepararOrgaoJuizo.checked = config.separarOrgaoJuizoPorComarca;
+  chkConfigAnexarMagistradoConclusos.checked = config.anexarMagistradoConclusos;
   modalConfiguracoes.hidden = false;
 });
 
@@ -63,6 +66,10 @@ chkConfigSubstituirSigla.addEventListener("change", () => {
 
 chkConfigSepararOrgaoJuizo.addEventListener("change", () => {
   salvarConfiguracao("separarOrgaoJuizoPorComarca", chkConfigSepararOrgaoJuizo.checked);
+});
+
+chkConfigAnexarMagistradoConclusos.addEventListener("change", () => {
+  salvarConfiguracao("anexarMagistradoConclusos", chkConfigAnexarMagistradoConclusos.checked);
 });
 
 modalConfigFechar.addEventListener("click", () => {
@@ -181,9 +188,16 @@ function aplicarStatus(el, texto, tipo) {
 // Garante que o cartao (details) que contem o elemento esteja aberto -
 // chamado ao iniciar operacoes/receber resultados, para o usuario nunca
 // perder um progresso ou erro escondido num cartao colapsado.
+// Sobe por TODOS os <details> ancestrais (nao so' o mais proximo) - o
+// cartão "Gestão Gabinete" tem subseções colapsáveis próprias (<details>
+// aninhado dentro do <details> do cartão), entao atividade lá dentro
+// precisa abrir tanto a subseção quanto o cartão em si.
 function abrirCartaoDe(el) {
-  const detalhes = el.closest("details");
-  if (detalhes) detalhes.open = true;
+  let atual = el.closest("details");
+  while (atual) {
+    atual.open = true;
+    atual = atual.parentElement ? atual.parentElement.closest("details") : null;
+  }
 }
 
 function setStatus(texto, tipo) {

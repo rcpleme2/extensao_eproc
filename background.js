@@ -4446,17 +4446,21 @@ async function exportarRelatorioGerencialUnidade(
     if (r.erro) remessasJuizesLeigos.erros.push(r.erro);
   }
 
-  // Regras de Automação: a tela "Automatizar Localizadores do Órgão" NAO
-  // tem um seletor de "Órgão/Juízo" como o Relatório Geral - ela sempre
-  // lista as regras da unidade atualmente HABILITADA no eproc (o perfil
-  // logado), independente da unidade escolhida acima para o restante
-  // deste relatório. Por isso essa seção pode nao corresponder a' unidade
-  // do relatório quando o usuario gera o PDF de uma unidade diferente da
-  // que tem habilitada no momento - um aviso avisa exatamente isso.
+  // Regras de Automação: a tela "Automatizar Tramitação Processual" NAO
+  // tem o mesmo seletor "Órgão/Juízo" do Relatório Geral - tem um filtro
+  // próprio "ÓRGÃO" (`#selOrgao`), só visível/obrigatório para o perfil
+  // CORREGEDORIA (que enxerga todas as unidades). Quando uma unidade foi
+  // escolhida (valorUnidade truthy), passamos o nome dela para
+  // "abrirAbaEListarRegrasAutomacao" selecionar esse filtro e clicar em
+  // "Pesquisar" antes de ler a tabela - sem isso a tela simplesmente não
+  // lista regra nenhuma (era essa a causa real do "retorna zero" para o
+  // perfil Corregedoria). Já para quem está logado direto numa unidade
+  // (perfil MAGISTRADO/GESTÃO DA UNIDADE, valorUnidade nulo), esse filtro
+  // não aparece na tela - a extensão nem tenta selecioná-lo.
   const regrasAutomacao = { regras: [], erros: [] };
   if (opcoesFinais.regrasAutomacao) {
     notificar("Consultando regras de automação ativas...");
-    const r = await abrirAbaEListarRegrasAutomacao(abaAtual.url);
+    const r = await abrirAbaEListarRegrasAutomacao(abaAtual.url, valorUnidade ? nomeUnidade : null);
     regrasAutomacao.regras = r.regras || [];
     if (r.erro) regrasAutomacao.erros.push(r.erro);
     if (!r.erro && regrasAutomacao.regras.length === 0 && r.totalRegrasNaPagina > 0) {
@@ -4625,18 +4629,6 @@ async function exportarRelatorioGerencialUnidade(
   }
   if (opcoesFinais.regrasAutomacao && regrasAutomacao.erros.length > 0) {
     avisos.push(`Regras de automação: ${regrasAutomacao.erros.join(" | ")}`);
-  }
-  // Esse aviso só faz sentido quando existe uma unidade ESCOLHIDA (dropdown
-  // da Corregedoria) que pode divergir da unidade atualmente habilitada no
-  // eproc - no relatório "Gestão da Unidade (alternativo)" (valorUnidade
-  // nulo) as duas são sempre a mesma coisa, então o aviso ficaria
-  // enganoso/sem propósito ali.
-  if (valorUnidade && opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
-    avisos.push(
-      "Regras de automação: lista as regras da unidade atualmente habilitada no eproc - a tela " +
-        '"Automatizar Localizadores do Órgão" não permite escolher outra unidade, então essa seção pode não ' +
-        "corresponder à unidade selecionada acima caso sejam diferentes."
-    );
   }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
 
@@ -6125,6 +6117,50 @@ function clicarLinkAutomatizarLocalizadoresNaPagina() {
   return true;
 }
 
+// So' para o perfil CORREGEDORIA: a tela "Automatizar Tramitação
+// Processual" traz um filtro obrigatório "ÓRGÃO" (`#selOrgao`) - sem
+// escolher uma unidade e clicar em "Pesquisar" (`#sbmPesquisar`), a
+// tabela nunca lista nenhuma regra, mesmo havendo regras cadastradas
+// (era essa a causa real do "retorna zero" para esse perfil - os demais
+// perfis (MAGISTRADO/GESTÃO DA UNIDADE) já ficam restritos a' própria
+// unidade sem esse filtro aparecer). O value de cada <option> desse
+// select (ex.: "100360|") NÃO é o mesmo value do "Órgão/Juízo" do
+// Relatório Geral (espaços de valores diferentes entre as duas telas) -
+// por isso a selecao aqui casa pelo TEXTO da unidade (prefixo do nome,
+// já que cada opção termina com "- CODIGO (contagem)"), não pelo value.
+// Autocontida, executada via chrome.scripting.executeScript.
+function selecionarOrgaoRegrasAutomacaoNaPagina(nomeUnidade) {
+  const select = document.getElementById("selOrgao");
+  // Perfis sem esse filtro (MAGISTRADO/GESTÃO DA UNIDADE) simplesmente
+  // não tem esse campo na tela - segue sem selecionar nada.
+  if (!select) return { ok: true, selecionado: false };
+
+  const alvo = (nomeUnidade || "").trim().toLowerCase();
+  if (!alvo) {
+    return { ok: false, erro: 'Nome da unidade não informado para selecionar o filtro "ÓRGÃO".' };
+  }
+
+  let encontrouOpcao = false;
+  for (const opcao of select.options) {
+    const texto = (opcao.textContent || "").trim().toLowerCase();
+    const selecionada = texto === alvo || texto.startsWith(`${alvo} - `);
+    opcao.selected = selecionada;
+    if (selecionada) encontrouOpcao = true;
+  }
+  if (!encontrouOpcao) {
+    return {
+      ok: false,
+      erro: `Unidade "${nomeUnidade}" não encontrada no filtro "ÓRGÃO" da tela de Regras de Automação.`,
+    };
+  }
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+
+  const botaoPesquisar = document.getElementById("sbmPesquisar");
+  if (botaoPesquisar) botaoPesquisar.click();
+
+  return { ok: true, selecionado: true };
+}
+
 // Abre uma aba oculta a partir da URL da aba atual, navega ate' a tela
 // "Automatizar Tramitação Processual" e pede ao content script (ja'
 // injetado automaticamente nela, por ser controlador.php) a lista de
@@ -6132,7 +6168,7 @@ function clicarLinkAutomatizarLocalizadoresNaPagina() {
 // logica de raspagem ja' usada quando o usuario estava manualmente
 // nessa tela, so' que agora rodando numa aba que a propria extensao
 // controla, sem exigir navegacao manual.
-async function abrirAbaEListarRegrasAutomacao(urlBase) {
+async function abrirAbaEListarRegrasAutomacao(urlBase, nomeUnidade) {
   let aba;
   try {
     await adquirirSlotDeAbaOculta();
@@ -6159,6 +6195,30 @@ async function abrirAbaEListarRegrasAutomacao(urlBase) {
     // selects de prioridade da tabela terminarem de inicializar apos o
     // carregamento (mesmo padrao usado no Relatório Geral).
     await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // So' quando um nome de unidade e' passado (perfil CORREGEDORIA, via
+    // "exportarRelatorioGerencialUnidade" com uma unidade escolhida) -
+    // ver "selecionarOrgaoRegrasAutomacaoNaPagina" para o motivo. Nao
+    // afeta o botao avulso "Exportar Regras de Automação" nem o cartao
+    // "Gestão da Unidade (alternativo)" (nenhum dos dois passa unidade
+    // aqui).
+    if (nomeUnidade) {
+      const [{ result: resultadoOrgao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoRegrasAutomacaoNaPagina,
+        args: [nomeUnidade],
+      });
+      if (resultadoOrgao && !resultadoOrgao.ok) {
+        return { regras: [], tituloPagina: "", totalRegrasNaPagina: 0, erro: resultadoOrgao.erro };
+      }
+      if (resultadoOrgao && resultadoOrgao.selecionado) {
+        // "Pesquisar" pode disparar uma navegacao de verdade (POST) ou so'
+        // redesenhar a tabela via AJAX - espera os dois casos antes de
+        // seguir para a leitura (que já tem seu próprio retry abaixo).
+        await aguardarCarregamentoAba(aba.id).catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
 
     // A tabela de regras pode terminar de montar (via AJAX/DataTable)
     // um pouco depois do "carregamento" da aba - sem repetir a leitura

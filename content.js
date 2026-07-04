@@ -318,6 +318,64 @@ function substituirSiglaPorNomeUsuario() {
   }
 }
 
+// ---- Anexar Magistrado(s) ao evento "Conclusos *" ----
+//
+// Quando um evento da tabela "#tblEventos" e' um "Conclusos para
+// decisão/despacho" (ou qualquer outro que comece com "Conclusos"), o
+// nome do magistrado responsável já existe na página, só que escondido
+// atrás do tooltip nativo "Informações do Evento" (ícone de lupa ao lado
+// da descrição) - não aparece na coluna Descrição em si. Lido do
+// atributo "aria-description" do "<span class='sr-only'>" vizinho
+// (texto puro gerado pelo próprio eproc para leitores de tela); esse
+// texto concatena "Data do Evento:", "Evento:", "Usuário:" e
+// "Magistrado(s):" SEM nenhum separador entre os valores (o eproc usa
+// "<br>" na versão visual/tooltip, mas eles somem na versão para leitor
+// de tela) - por isso cada campo só pode ser isolado ancorando no
+// RÓTULO do campo seguinte, nunca por espaço ou pontuação.
+function extrairMagistradoDoEvento(linha) {
+  const spanSr = linha.querySelector("span.sr-only[aria-description]");
+  if (!spanSr) return null;
+  const texto = spanSr.getAttribute("aria-description") || "";
+  const m = texto.match(/Magistrado\(s\):\s*(.+)$/);
+  if (!m) return null;
+  const bruto = m[1].trim();
+  if (!bruto) return null;
+  // O campo vem como "NOME - Cargo" (ex.: "ROSANGELA FAORO - Juiz da
+  // Fase") - só o nome entra no texto acrescentado.
+  return bruto.split(/\s+-\s+/)[0].trim() || null;
+}
+
+const CLASSE_CONCLUSOS_MAGISTRADO = "eproc-exportador-conclusos-magistrado";
+
+// Acrescenta " (NOME DO MAGISTRADO)" ao final do texto já existente na
+// coluna Descrição, so' para eventos "Conclusos *" - ex.: "Conclusos
+// para decisão/despacho" vira "Conclusos para decisão/despacho
+// (ROSANGELA FAORO)". Idempotente via "data-magistrado-verificado"
+// (mesmo padrão de "substituirSiglaPorNomeUsuario" acima): cada linha só
+// é examinada uma vez, mesmo chamada de novo a cada mutação do DOM.
+function anexarMagistradoEmConclusos() {
+  const linhas = document.querySelectorAll(
+    '#tblEventos tbody > tr[id^="trEvento"]:not([data-magistrado-verificado]), ' +
+      'table.infraTable tbody > tr[id^="trEvento"]:not([data-magistrado-verificado])'
+  );
+
+  for (const linha of linhas) {
+    linha.setAttribute("data-magistrado-verificado", "1");
+
+    const tdDescricao = linha.querySelector(":scope > td.infraEventoDescricao");
+    if (!tdDescricao) continue;
+    if (!/^\s*Conclusos\b/i.test(tdDescricao.textContent || "")) continue;
+
+    const nomeMagistrado = extrairMagistradoDoEvento(linha);
+    if (!nomeMagistrado) continue;
+
+    const spanMagistrado = document.createElement("span");
+    spanMagistrado.className = CLASSE_CONCLUSOS_MAGISTRADO;
+    spanMagistrado.textContent = ` (${nomeMagistrado})`;
+    tdDescricao.appendChild(spanMagistrado);
+  }
+}
+
 // Botao injetado ao lado da logo do Portal jus.br no cabecalho do eproc,
 // que abre o painel lateral da extensao com um clique - alternativa para
 // quem prefere nao depender do icone da extensao na barra de ferramentas
@@ -447,6 +505,33 @@ chrome.storage.onChanged.addListener((mudancas, area) => {
     // Desligar agora nao desfaz o que ja foi trocado nesta pagina (exigiria
     // guardar o texto original de cada label) - so' passa a nao trocar mais
     // nada dai pra frente, ate' a proxima navegacao/recarregamento.
+  }
+});
+
+// Configuracao do painel: liga/desliga o anexo do Magistrado aos eventos
+// "Conclusos *" (ver "anexarMagistradoEmConclusos" acima). Default
+// "true"; mesmo mecanismo de guarda contra corrida do "substituirSigla"
+// acima (o MutationObserver comeca a observar antes do
+// "chrome.storage.local.get" responder).
+let configAnexarMagistradoAtivo = true;
+let configuracaoMagistradoCarregada = false;
+
+function aplicarAnexoMagistradoSeAtivo() {
+  if (configuracaoMagistradoCarregada && configAnexarMagistradoAtivo) anexarMagistradoEmConclusos();
+}
+
+chrome.storage.local.get({ anexarMagistradoConclusos: true }, (itens) => {
+  configAnexarMagistradoAtivo = itens.anexarMagistradoConclusos;
+  configuracaoMagistradoCarregada = true;
+  aplicarAnexoMagistradoSeAtivo();
+});
+
+chrome.storage.onChanged.addListener((mudancas, area) => {
+  if (area === "local" && mudancas.anexarMagistradoConclusos) {
+    configAnexarMagistradoAtivo = mudancas.anexarMagistradoConclusos.newValue;
+    // Desligar não desfaz o que já foi anexado nesta página - mesma
+    // observação de "substituirSigla" acima.
+    aplicarAnexoMagistradoSeAtivo();
   }
 });
 
@@ -617,6 +702,7 @@ adicionarBotaoAbrirPainel();
 
 const observadorEventos = new MutationObserver(() => {
   aplicarSubstituicaoSiglaSeAtivo();
+  aplicarAnexoMagistradoSeAtivo();
   adicionarBotaoAbrirPainel();
   aplicarSepararOrgaoJuizoSeAtivo();
 });
