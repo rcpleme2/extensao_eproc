@@ -2041,8 +2041,7 @@ function buscarLocalizadoresViaFetchNaPagina() {
 // unidade pedida e le' as opcoes disponiveis no campo "Localizador" -
 // usado pelo Relatório Gerencial da Unidade antes de consultar o total
 // de processos de cada um (uma consulta por localizador, cada uma na
-// sua propria aba - ver comentario sobre estabilidade do Tagify acima de
-// "gerarRelatorioGeral"). Tenta primeiro o fetch direto do endpoint JSON
+// sua propria aba). Tenta primeiro o fetch direto do endpoint JSON
 // (mais rapido e confiavel); so' cai para a simulacao antiga via Tagify
 // ("Listar todos" + ler o dropdown) se o fetch nao encontrar nada.
 async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJuizo) {
@@ -2835,52 +2834,6 @@ async function exportarRelatorioPanoramico(aoProgredir) {
   };
 }
 
-// Roda ja' na tela do Relatório Geral, apos uma consulta ter sido feita:
-// abre o menu "Exportar" da tabela de resultados (botao dropdown do
-// DataTables Buttons) e clica na opcao "Excel", disparando o download da
-// planilha que o proprio eproc gera. Autocontida, executada via
-// chrome.scripting.executeScript. Nunca lanca excecao: sempre resolve com
-// { ok, erro }.
-function exportarExcelNaPagina() {
-  function aguardar(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  return (async () => {
-    try {
-      const botaoExportar = document.querySelector(
-        'a.btn-acoes-bloco.dropdown-toggle[aria-controls="tblProcessoLista"]'
-      );
-      if (!botaoExportar) {
-        throw new Error('Botão "Exportar" não encontrado nesta página.');
-      }
-      botaoExportar.click();
-
-      let botaoExcel = null;
-      for (let tentativa = 0; tentativa < 25; tentativa += 1) {
-        await aguardar(200);
-        botaoExcel =
-          document.querySelector(
-            'a.buttons-excel.buttons-html5[aria-controls="tblProcessoLista"]'
-          ) ||
-          Array.from(document.querySelectorAll("a.dt-button.dropdown-item")).find(
-            (el) => (el.textContent || "").trim() === "Excel"
-          );
-        if (botaoExcel) break;
-      }
-
-      if (!botaoExcel) {
-        throw new Error('Opção "Excel" não encontrada no menu de exportação.');
-      }
-
-      botaoExcel.click();
-      return { ok: true, erro: null };
-    } catch (e) {
-      return { ok: false, erro: e && e.message ? e.message : String(e) };
-    }
-  })();
-}
-
 // Abre uma aba oculta nova, navega ate' o Relatório Geral e roda UMA
 // consulta nela, depois fecha a aba. Ver comentario acima de
 // "consultarUmaVezNaPagina" sobre por que cada consulta usa sua propria
@@ -2929,98 +2882,6 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
   }
 }
 
-async function gerarRelatorioGeral(aoProgredir) {
-  const notificar = (texto) => {
-    if (aoProgredir) aoProgredir(texto);
-  };
-
-  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!abaAtual || !abaAtual.url) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
-  }
-
-  // Cada bloco (despacho/sentença) tem 3 sub-consultas independentes,
-  // rodando em paralelo entre si - e os proprios blocos, mais o
-  // demonstrativo de sem movimentação e os totais de ativos/suspensos,
-  // tambem rodam todos ao mesmo tempo (Promise.all), respeitando o
-  // semaforo global de abas ocultas (LIMITE_ABAS_SIMULTANEAS) - bem mais
-  // rapido que consultar uma coisa de cada vez.
-  async function consultarBloco(nomeSituacao, valorSituacao) {
-    const bloco = { total: null, urgentes: null, mais30Dias: null, erros: [] };
-
-    const [rTotal, rUrgentes, rAtraso] = await Promise.all([
-      abrirAbaEConsultarUmaVez(abaAtual.url, { valorSituacao, urgente: false, diasSituacao: null }),
-      abrirAbaEConsultarUmaVez(abaAtual.url, { valorSituacao, urgente: true, diasSituacao: null }),
-      abrirAbaEConsultarUmaVez(abaAtual.url, { valorSituacao, urgente: false, diasSituacao: DIAS_LIMITE_ATRASO }),
-    ]);
-
-    bloco.total = rTotal.contagem;
-    if (rTotal.erro) bloco.erros.push(`total: ${rTotal.erro}`);
-    bloco.urgentes = rUrgentes.contagem;
-    if (rUrgentes.erro) bloco.erros.push(`urgentes: ${rUrgentes.erro}`);
-    bloco.mais30Dias = rAtraso.contagem;
-    if (rAtraso.erro) bloco.erros.push(`+${DIAS_LIMITE_ATRASO} dias: ${rAtraso.erro}`);
-
-    return bloco;
-  }
-
-  notificar("Consultando conclusos, sem movimentação, ativos e suspensos...");
-  const [despacho, sentenca, resultadosSemMovimentacao, rAtivos, rSuspensos] = await Promise.all([
-    consultarBloco("MOVIMENTO-AGUARDA DESPACHO", VALOR_SITUACAO_AGUARDA_DESPACHO),
-    consultarBloco("MOVIMENTO-AGUARDA SENTENÇA", VALOR_SITUACAO_AGUARDA_SENTENCA),
-    Promise.all(
-      FAIXAS_DIAS_SEM_MOVIMENTACAO.map((dias) =>
-        abrirAbaEConsultarUmaVez(abaAtual.url, {
-          valorSituacao: null,
-          urgente: false,
-          diasSituacao: null,
-          diasSemMovimentacao: dias,
-        })
-      )
-    ),
-    // Relação de processos ativos e suspensos/sobrestados - so' o total
-    // (sem "relação de processos"), na unidade atual (sem filtro de
-    // Órgão/Juízo: esse relatório roda sempre na unidade ja' habilitada
-    // no perfil logado).
-    abrirAbaEConsultarUmaVez(abaAtual.url, { valorSituacao: null, urgente: false, diasSituacao: null }),
-    abrirAbaEConsultarUmaVez(abaAtual.url, { grupoSituacao: "S", urgente: false, diasSituacao: null }),
-  ]);
-
-  const semMovimentacao = { erros: [] };
-  FAIXAS_DIAS_SEM_MOVIMENTACAO.forEach((dias, indice) => {
-    const r = resultadosSemMovimentacao[indice];
-    semMovimentacao[`dias${dias}`] = r.contagem;
-    if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
-  });
-
-  const processosAtivos = { total: rAtivos.contagem, erros: rAtivos.erro ? [rAtivos.erro] : [] };
-  const suspensos = { total: rSuspensos.contagem, erros: rSuspensos.erro ? [rSuspensos.erro] : [] };
-
-  notificar("Finalizando...");
-  return { despacho, sentenca, semMovimentacao, processosAtivos, suspensos };
-}
-
-// Atalho: navega a aba ATUAL (visivel) direto para a tela do Relatório
-// Geral, sem consultar nada - so' um jeito rapido de chegar la'
-// manualmente.
-async function abrirTelaRelatorioGeral() {
-  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!aba || !aba.id) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
-  }
-
-  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: clicarLinkRelatorioGeralNaPagina,
-  });
-
-  if (!linkEncontrado) {
-    throw new Error(
-      'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
-    );
-  }
-}
-
 // Le', na tela do Relatório Geral, todas as opcoes do filtro
 // "Órgão/Juízo" (select#selIdOrgaoJuizo) - visualmente um dropdown do
 // bootstrap-select (o botao com texto "Selecione" e o menu que abre ao
@@ -3043,8 +2904,7 @@ function lerUnidadesRelatorioGeralNaPagina() {
   return { unidades, erro: null };
 }
 
-// Navega a aba ATUAL (visivel) ate' o Relatório Geral (mesmo mecanismo
-// de "abrirTelaRelatorioGeral") e le' as unidades disponiveis no filtro
+// Navega a aba ATUAL (visivel) ate' o Relatório Geral e le' as unidades disponiveis no filtro
 // "Órgão/Juízo" dessa tela - usado pelo botao "Relatório Gerencial da
 // Unidade" (so' aparece no painel quando o perfil ativo e'
 // "CORREGEDORIA"). Por enquanto so' lista as unidades num dropdown no
@@ -3463,14 +3323,38 @@ async function extrairLinhasMandadosNaPagina() {
       (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
     );
 
+    // Quando a situação é "Aguardando cumprimento" E já tem um oficial de
+    // justiça designado, o valor da célula vem como "Aguardando
+    // cumprimento - NOME DO OFICIAL" (confirmado no HTML real da tela) -
+    // o nome entra numa coluna própria "Responsável", em vez de ficar
+    // colado dentro do texto da Situação. Sem oficial designado ainda, a
+    // célula só tem o texto "Aguardando cumprimento" (sem o "-"). Outras
+    // situações que também usam "-" como separador (ex.: "Devolvido -
+    // Cumprido") NÃO são tocadas aqui - esse "-" ali separa um SUBTIPO da
+    // devolução, não um nome de responsável.
+    function separarResponsavelAguardandoCumprimento(situacaoBruta) {
+      const texto = (situacaoBruta || "").trim();
+      const prefixo = "Aguardando cumprimento";
+      if (texto.toLowerCase() === prefixo.toLowerCase()) {
+        return { situacao: texto, responsavel: "" };
+      }
+      const m = texto.match(/^Aguardando cumprimento\s*-\s*(.+)$/i);
+      if (m) {
+        return { situacao: prefixo, responsavel: m[1].trim() };
+      }
+      return { situacao: texto, responsavel: "" };
+    }
+
     const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) => {
       const celulas = Array.from(tr.querySelectorAll("td"));
       const valor = (idx) => (idx >= 0 && celulas[idx] ? textoLimpo(celulas[idx]) : "");
+      const { situacao, responsavel } = separarResponsavelAguardandoCumprimento(valor(idxSituacao));
       return {
         processo: valor(idxProcesso),
         tipoAto: valor(idxAto),
         dataRemessa: valor(idxDataRemessa),
-        situacao: valor(idxSituacao),
+        situacao,
+        responsavel,
       };
     });
 
@@ -3546,26 +3430,31 @@ async function consultarMandadosAbertosUmaVez(urlBase) {
 // Monta a página (A4 retrato) com a relação discriminada dos mandados em
 // aberto: Número do Processo, Tipo de Ato, Data da Remessa e Situação -
 // mesmo gerador de tabela curada das demais relações deste relatório.
+// "linhas" já vem ordenada (mais antiga para a mais nova - ver
+// "exportarRelatorioGerencialUnidade") - essa função só desenha, não
+// reordena.
 async function construirPdfMandadosAbertos(linhas, nomeUnidade) {
   const itens = linhas.map((l) => ({
     processo: l.processo,
     tipoAto: l.tipoAto,
     dataRemessa: l.dataRemessa,
     situacao: l.situacao,
+    responsavel: l.responsavel,
   }));
 
   const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
   const colunas = [
-    { titulo: "Número do Processo", largura: larguraUtil * 0.26, campo: "processo" },
-    { titulo: "Tipo de Ato", largura: larguraUtil * 0.24, campo: "tipoAto" },
-    { titulo: "Data da Remessa", largura: larguraUtil * 0.18, campo: "dataRemessa" },
-    { titulo: "Situação", largura: larguraUtil * 0.32, campo: "situacao" },
+    { titulo: "Número do Processo", largura: larguraUtil * 0.22, campo: "processo" },
+    { titulo: "Tipo de Ato", largura: larguraUtil * 0.16, campo: "tipoAto" },
+    { titulo: "Data da Remessa", largura: larguraUtil * 0.14, campo: "dataRemessa" },
+    { titulo: "Situação", largura: larguraUtil * 0.24, campo: "situacao" },
+    { titulo: "Responsável", largura: larguraUtil * 0.24, campo: "responsavel" },
   ];
 
   return construirPdfTabelaCuradaRetrato(
     itens,
     colunas,
-    `Mandados em aberto da unidade "${nomeUnidade}" — ${itens.length} mandado(s)`
+    `Mandados em aberto da unidade "${nomeUnidade}" — ${itens.length} mandado(s), do mais antigo ao mais novo`
   );
 }
 
@@ -4630,7 +4519,12 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.mandados) {
     notificar("Consultando mandados em aberto...");
     const r = await consultarMandadosAbertosUmaVez(abaAtual.url);
-    mandados.linhas = r.linhas || [];
+    // Do mandado parado ha' mais tempo (Data da Remessa mais antiga) para
+    // o mais recente - mesmo sentido de "mais antigo primeiro" usado nas
+    // demais relações deste relatório (processos ativos, paralisados).
+    mandados.linhas = (r.linhas || [])
+      .slice()
+      .sort((a, b) => paraDataOrdenavel(a.dataRemessa) - paraDataOrdenavel(b.dataRemessa));
     if (r.erro) mandados.erros.push(r.erro);
   }
 
@@ -4800,10 +4694,33 @@ async function exportarRelatorioGerencialUnidade(
     });
   }
   if (opcoesFinais.mandados) {
-    secoesResumo.push({
-      titulo: "MANDADOS EM ABERTO",
-      linhas: [{ rotulo: "Mandados não cumpridos", valor: mandados.linhas.length }],
-    });
+    // Resumo dos resultados: contagem por Situação (ex.: "Aguardando
+    // cumprimento", "Aguardando distribuição"...), da mais frequente para
+    // a menos frequente, com o Total sempre por último (mesmo padrão de
+    // Suspensos/Conclusos, acima). Um segundo bloco, só quando há pelo
+    // menos um mandado com oficial já designado (ver
+    // "separarResponsavelAguardandoCumprimento"), soma quantos mandados
+    // "Aguardando cumprimento" cada oficial tem.
+    const contagemPorSituacao = new Map();
+    const contagemPorOficial = new Map();
+    for (const m of mandados.linhas) {
+      contagemPorSituacao.set(m.situacao, (contagemPorSituacao.get(m.situacao) || 0) + 1);
+      if (m.responsavel) {
+        contagemPorOficial.set(m.responsavel, (contagemPorOficial.get(m.responsavel) || 0) + 1);
+      }
+    }
+    const linhasSituacao = Array.from(contagemPorSituacao.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([situacao, contagem]) => ({ rotulo: situacao || "(sem situação)", valor: contagem }));
+    linhasSituacao.push({ rotulo: "Total", valor: mandados.linhas.length });
+    secoesResumo.push({ titulo: "MANDADOS EM ABERTO", linhas: linhasSituacao });
+
+    if (contagemPorOficial.size > 0) {
+      const linhasOficial = Array.from(contagemPorOficial.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([nome, contagem]) => ({ rotulo: nome, valor: contagem }));
+      secoesResumo.push({ titulo: "MANDADOS POR OFICIAL", linhas: linhasOficial });
+    }
   }
   if (opcoesFinais.paralisados) {
     secoesResumo.push({
@@ -4988,137 +4905,6 @@ async function exportarRelatorioUnidadeAtual(opcoes, aoProgredir) {
   }
 
   return exportarRelatorioGerencialUnidade(null, nomeUnidade, opcoes, notificar, "Relatório da Unidade");
-}
-
-// Traduz os identificadores usados no painel para os parametros que
-// "consultarUmaVezNaPagina" entende. Duas categorias de relatorio:
-// - "situacao" (padrao): situacao "despacho"/"sentenca" + filtro
-//   "total"/"urgentes"/"mais30Dias".
-// - "semMovimentacao": demonstrativo de processos parados, sem situacao
-//   nenhuma selecionada; filtro e' a quantidade de dias ("30"/"90"/"120").
-function resolverParametrosConsulta(categoria, situacao, filtro) {
-  if (categoria === "semMovimentacao") {
-    return {
-      valorSituacao: null,
-      urgente: false,
-      diasSituacao: null,
-      diasSemMovimentacao: Number(filtro),
-    };
-  }
-
-  const valorSituacao =
-    situacao === "sentenca" ? VALOR_SITUACAO_AGUARDA_SENTENCA : VALOR_SITUACAO_AGUARDA_DESPACHO;
-
-  if (filtro === "urgentes") {
-    return { valorSituacao, urgente: true, diasSituacao: null };
-  }
-  if (filtro === "mais30Dias") {
-    return { valorSituacao, urgente: false, diasSituacao: DIAS_LIMITE_ATRASO };
-  }
-  return { valorSituacao, urgente: false, diasSituacao: null };
-}
-
-// Nome amigavel do arquivo Excel exportado, baseado na categoria/situacao/
-// filtro escolhidos, para o download sair identificado (em vez do nome
-// generico que o DataTables Buttons usa por padrao).
-function nomeArquivoRelatorio(categoria, situacao, filtro) {
-  if (categoria === "semMovimentacao") {
-    return `relatorio_sem_movimentacao_${filtro}dias`;
-  }
-  const nomeSituacao = situacao === "sentenca" ? "sentenca" : "despacho";
-  const nomeFiltro =
-    filtro === "urgentes" ? "urgentes" : filtro === "mais30Dias" ? "mais30dias" : "total";
-  return `relatorio_${nomeSituacao}_${nomeFiltro}`;
-}
-
-// Renomeia o PROXIMO download que comecar (dentro de um prazo curto) para
-// "eproc/<nomeArquivo><extensao original>", preservando a extensao que o
-// eproc gerou (normalmente .xlsx). Usado logo antes de disparar a
-// exportacao Excel, ja que o nome que o DataTables Buttons da ao arquivo
-// nao identifica qual relatorio/filtro gerou aquela planilha.
-function aguardarERenomearProximoDownload(nomeArquivo) {
-  return new Promise((resolve) => {
-    let finalizado = false;
-    const finalizar = (sucesso) => {
-      if (finalizado) return;
-      finalizado = true;
-      chrome.downloads.onDeterminingFilename.removeListener(listener);
-      resolve(sucesso);
-    };
-    const timeoutId = setTimeout(() => finalizar(false), 15000);
-    function listener(downloadItem, suggest) {
-      clearTimeout(timeoutId);
-      const extensaoOriginal = (downloadItem.filename.match(/\.[^.]+$/) || [".xlsx"])[0];
-      suggest({ filename: `eproc/${nomeArquivo}${extensaoOriginal}` });
-      finalizar(true);
-    }
-    chrome.downloads.onDeterminingFilename.addListener(listener);
-  });
-}
-
-// Clicando num numero do relatorio (ex.: "Conclusos para despacho: 11"):
-// abre uma aba NOVA (em primeiro plano, para o usuario poder acompanhar),
-// navega ate' o Relatório Geral e deixa ele ja' consultado com o mesmo
-// filtro daquele numero, para o usuario conferir a lista de processos por
-// tras dele - opcionalmente exportando a planilha Excel tambem. A aba
-// ATUAL/principal (de onde o clique partiu) nunca e' navegada nem
-// alterada: so' serve para saber a URL base do eproc a reabrir na aba
-// nova. Essa aba nova permanece aberta ao final (nao e' fechada), ja que
-// o objetivo e' mostrar o resultado (ou o download) para o usuario.
-async function abrirRelatorioPreenchido(categoria, situacao, filtro, exportarExcel) {
-  const parametros = resolverParametrosConsulta(categoria, situacao, filtro);
-
-  const [abaOrigem] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!abaOrigem || !abaOrigem.url) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
-  }
-
-  const aba = await chrome.tabs.create({ url: abaOrigem.url, active: true });
-  await aguardarCarregamentoAba(aba.id);
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
-  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: clicarLinkRelatorioGeralNaPagina,
-  });
-
-  if (!linkEncontrado) {
-    throw new Error(
-      'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
-    );
-  }
-
-  await aguardarCarregamentoAba(aba.id);
-  // Pequena espera extra para os scripts da pagina (bootstrap-select,
-  // tagify etc.) terminarem de inicializar apos o carregamento.
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
-  const [{ result } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    world: "MAIN",
-    func: consultarUmaVezNaPagina,
-    args: [parametros],
-  });
-
-  if (result && result.erro) {
-    throw new Error(result.erro);
-  }
-
-  if (exportarExcel) {
-    const nomeArquivo = nomeArquivoRelatorio(categoria, situacao, filtro);
-    const promessaRenomeio = aguardarERenomearProximoDownload(nomeArquivo);
-
-    const [{ result: resultadoExcel } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: exportarExcelNaPagina,
-    });
-
-    if (resultadoExcel && resultadoExcel.erro) {
-      throw new Error(resultadoExcel.erro);
-    }
-
-    await promessaRenomeio;
-  }
 }
 
 // ---- Localizadores do Órgão (exportar em PDF/Excel) ----
@@ -5711,31 +5497,6 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
   return pdf.save();
 }
 
-// Na pratica, a maioria dos localizadores de uma unidade NAO tem
-// descricao preenchida (e' um campo opcional) - com a coluna "Descrição"
-// sempre presente e ocupando 58% da largura da pagina, o resultado
-// tipico era uma tabela com uma faixa enorme em branco no meio,
-// desequilibrada e esquisita de olhar. Quando NENHUM item tem descricao,
-// a coluna e' omitida por completo (so' Localizador + Total de
-// processos, com o espaco redistribuido); ela so' aparece quando pelo
-// menos um localizador realmente tem algo preenchido ali.
-function construirPdfLocalizadores(itens, tituloDocumento) {
-  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
-  const temAlgumaDescricao = itens.some((item) => (item.descricao || "").trim() !== "");
-
-  const colunas = temAlgumaDescricao
-    ? [
-        { titulo: "Localizador", largura: larguraUtil * 0.26, campo: "nome" },
-        { titulo: "Descrição", largura: larguraUtil * 0.58, campo: "descricao" },
-        { titulo: "Total de processos", largura: larguraUtil * 0.16, campo: "totalProcessos" },
-      ]
-    : [
-        { titulo: "Localizador", largura: larguraUtil * 0.8, campo: "nome" },
-        { titulo: "Total de processos", largura: larguraUtil * 0.2, campo: "totalProcessos" },
-      ];
-  return construirPdfTabela(itens, colunas, tituloDocumento);
-}
-
 function construirPdfProcessosLocalizador(itens, tituloDocumento) {
   const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
   const colunas = [
@@ -6066,15 +5827,6 @@ ${linhasDados}
 `;
 }
 
-function construirExcelLocalizadores(itens) {
-  const colunas = [
-    { titulo: "Localizador", largura: 220, campo: "nome" },
-    { titulo: "Descrição", largura: 420, campo: "descricao" },
-    { titulo: "Total de processos", largura: 110, campo: "totalProcessos", tipo: "Number" },
-  ];
-  return construirExcelTabela("Localizadores", colunas, itens);
-}
-
 function construirExcelProcessosLocalizador(itens) {
   const colunas = [
     { titulo: "Número Processo", largura: 160, campo: "numeroProcesso" },
@@ -6082,50 +5834,6 @@ function construirExcelProcessosLocalizador(itens) {
     { titulo: "Inclusão no localizador", largura: 160, campo: "inclusao" },
   ];
   return construirExcelTabela("Processos", colunas, itens);
-}
-
-// Orquestra tudo: abre a aba oculta, coleta os localizadores de todas as
-// paginas e gera os formatos marcados (pdf/excel), baixando cada um.
-// Reporta progresso pelo mesmo callback usado no resto da extensao.
-async function exportarLocalizadores(formatos, aoProgredir) {
-  const notificar = (texto) => {
-    if (aoProgredir) aoProgredir(texto);
-  };
-
-  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!abaAtual || !abaAtual.url) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
-  }
-
-  notificar("Abrindo a tela de Localizadores do Órgão...");
-  const { itens, erro } = await abrirAbaEColetarLocalizadores(abaAtual.url);
-
-  if (itens.length === 0) {
-    throw new Error(erro || "Nenhum localizador encontrado.");
-  }
-
-  // Classificado por total de processos (do maior para o menor), para
-  // destacar de imediato os localizadores mais usados - vale tanto para
-  // o PDF quanto para a planilha.
-  const itensOrdenados = [...itens].sort((a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0));
-
-  const tituloDocumento = `Localizadores do Órgão — ${itensOrdenados.length} registro(s) — gerado em ${new Date().toLocaleString("pt-BR")}`;
-  const nomeBase = `eproc/localizadores_orgao_${new Date().toISOString().slice(0, 10)}`;
-
-  if (formatos.pdf) {
-    notificar("Gerando PDF...");
-    const bytes = await construirPdfLocalizadores(itensOrdenados, tituloDocumento);
-    await baixarUm(`${nomeBase}.pdf`, construirDataUrlBinario("application/pdf", bytes));
-  }
-
-  if (formatos.excel) {
-    notificar("Gerando planilha Excel...");
-    const xml = construirExcelLocalizadores(itensOrdenados);
-    await baixarUm(`${nomeBase}.xls`, construirDataUrl("application/vnd.ms-excel", xml));
-  }
-
-  notificar("Finalizando...");
-  return { total: itensOrdenados.length, erroColeta: erro };
 }
 
 // Reaproveita a mesma coleta multi-pagina de "Localizadores do Órgão"
@@ -6923,93 +6631,11 @@ async function construirPdfRegras(regras, tituloPagina) {
   return pdf.save();
 }
 
-// Orquestra tudo: abre a aba oculta, coleta as regras ativas uma unica vez
-// e entrega o resultado nos formatos marcados - "html" (aba nova, como
-// antes) e/ou "pdf" (baixa um arquivo, mesmo padrao dos demais PDFs da
-// extensao). Reporta progresso pelo mesmo callback usado no resto da
-// extensao.
-async function exportarRegrasAutomacao(aoProgredir) {
-  const notificar = (texto) => {
-    if (aoProgredir) aoProgredir(texto);
-  };
-
-  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!abaAtual || !abaAtual.url) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
-  }
-
-  notificar("Abrindo a tela de Automatizar Tramitação Processual...");
-  const { regras, tituloPagina, totalRegrasNaPagina, erro } = await abrirAbaEListarRegrasAutomacao(abaAtual.url);
-
-  if (erro) throw new Error(erro);
-  if (regras.length === 0 && totalRegrasNaPagina === 0) {
-    throw new Error(
-      "Nenhuma regra encontrada na tela (a tabela pode não ter terminado de carregar, ou a unidade " +
-        "atualmente habilitada no eproc não tem regras cadastradas). Tente novamente."
-    );
-  }
-  if (regras.length === 0) {
-    throw new Error(
-      `${totalRegrasNaPagina} regra(s) encontrada(s) na tela, mas nenhuma está com o switch "Ativa" ligado.`
-    );
-  }
-
-  notificar("Gerando documento...");
-  // Exportação em HTML desativada por enquanto - o PDF passou a ser o
-  // único formato oferecido no painel (mais fácil de arquivar/anexar do
-  // que uma aba aberta no navegador). O código abaixo continua no lugar,
-  // só comentado, para poder reativar rapidamente se for necessário.
-  // const html = construirDocumentoRegras(regras, tituloPagina);
-  // await chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(html) });
-
-  const bytes = await construirPdfRegras(regras, tituloPagina);
-  const dataAtual = new Date().toISOString().slice(0, 10);
-  await baixarUm(`eproc/regras_automacao_${dataAtual}.pdf`, construirDataUrlBinario("application/pdf", bytes));
-
-  notificar("Finalizando...");
-  return { total: regras.length };
-}
-
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "BAIXAR_DOCUMENTOS") {
     const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false, mdUnico: false };
     processarFila(mensagem.numeroProcesso, mensagem.documentos, opcoes, mensagem.movimentacao);
     sendResponse({ ok: true });
-    return true;
-  }
-
-  if (mensagem && mensagem.tipo === "GERAR_RELATORIO") {
-    // Mesmo padrao de BAIXAR_DOCUMENTOS: confirma o recebimento na hora e
-    // avisa o resultado final por uma mensagem separada
-    // (RELATORIO_FINALIZADO), em vez de manter a chamada original
-    // pendurada esperando uma unica resposta. Esse fluxo demora vários
-    // segundos (varias trocas de aba/pagina); manter só um canal de
-    // resposta pendente por tanto tempo é frágil - se o service worker
-    // for suspenso e reativado no meio do caminho, a promessa original
-    // nunca resolve e a UI fica "pendurada".
-    gerarRelatorioGeral((texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO", texto }).catch(() => {});
-    })
-      .then((resultado) => {
-        chrome.runtime.sendMessage({ tipo: "RELATORIO_FINALIZADO", ok: true, resultado }).catch(() => {});
-      })
-      .catch((e) => {
-        chrome.runtime
-          .sendMessage({
-            tipo: "RELATORIO_FINALIZADO",
-            ok: false,
-            erro: e && e.message ? e.message : String(e),
-          })
-          .catch(() => {});
-      });
-    sendResponse({ ok: true });
-    return true;
-  }
-
-  if (mensagem && mensagem.tipo === "ABRIR_TELA_RELATORIO") {
-    abrirTelaRelatorioGeral()
-      .then(() => sendResponse({ ok: true }))
-      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
     return true;
   }
 
@@ -7039,30 +6665,6 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     return true;
   }
 
-  if (mensagem && mensagem.tipo === "ABRIR_RELATORIO_PREENCHIDO") {
-    // Mesmo padrao de GERAR_RELATORIO: essa operacao tambem navega a aba e
-    // espera o carregamento/consulta terminar (alguns segundos), entao usa
-    // confirmacao imediata + mensagem separada de conclusao em vez de um
-    // unico sendResponse pendurado.
-    abrirRelatorioPreenchido(mensagem.categoria, mensagem.situacao, mensagem.filtro, mensagem.exportarExcel)
-      .then(() => {
-        chrome.runtime
-          .sendMessage({ tipo: "RELATORIO_PREENCHIDO_FINALIZADO", ok: true })
-          .catch(() => {});
-      })
-      .catch((e) => {
-        chrome.runtime
-          .sendMessage({
-            tipo: "RELATORIO_PREENCHIDO_FINALIZADO",
-            ok: false,
-            erro: e && e.message ? e.message : String(e),
-          })
-          .catch(() => {});
-      });
-    sendResponse({ ok: true });
-    return true;
-  }
-
   if (mensagem && mensagem.tipo === "ABRIR_PAINEL_LATERAL") {
     // Enviada pelo botao que o content script injeta ao lado da logo do
     // Portal jus.br. sidePanel.open() so' funciona chamado em resposta
@@ -7082,35 +6684,9 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     return true;
   }
 
-  if (mensagem && mensagem.tipo === "EXPORTAR_LOCALIZADORES") {
-    // Mesmo padrao de GERAR_RELATORIO: a operacao percorre varias paginas
-    // e demora, entao confirma o recebimento na hora e avisa o resultado
-    // final por uma mensagem separada.
-    exportarLocalizadores(mensagem.formatos, (texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_LOCALIZADORES", texto }).catch(() => {});
-    })
-      .then((resultado) => {
-        chrome.runtime
-          .sendMessage({ tipo: "LOCALIZADORES_FINALIZADO", ok: true, resultado })
-          .catch(() => {});
-      })
-      .catch((e) => {
-        chrome.runtime
-          .sendMessage({
-            tipo: "LOCALIZADORES_FINALIZADO",
-            ok: false,
-            erro: e && e.message ? e.message : String(e),
-          })
-          .catch(() => {});
-      });
-    sendResponse({ ok: true });
-    return true;
-  }
-
   if (mensagem && mensagem.tipo === "LISTAR_LOCALIZADORES_COM_PROCESSOS") {
-    // Mesmo padrao de EXPORTAR_LOCALIZADORES: percorre varias paginas e
-    // demora, entao confirma o recebimento na hora e avisa o resultado
-    // final por uma mensagem separada.
+    // Percorre varias paginas e demora, entao confirma o recebimento na
+    // hora e avisa o resultado final por uma mensagem separada.
     listarLocalizadoresComProcessos((texto) => {
       chrome.runtime.sendMessage({ tipo: "PROGRESSO_LISTAR_LOCALIZADORES", texto }).catch(() => {});
     })
@@ -7172,29 +6748,6 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({
             tipo: "DOCUMENTOS_LOCALIZADOR_FINALIZADO",
-            ok: false,
-            erro: e && e.message ? e.message : String(e),
-          })
-          .catch(() => {});
-      });
-    sendResponse({ ok: true });
-    return true;
-  }
-
-  if (mensagem && mensagem.tipo === "EXPORTAR_REGRAS_AUTOMACAO") {
-    // Mesmo padrao de EXPORTAR_LOCALIZADORES/GERAR_RELATORIO: navega uma
-    // aba oculta e demora alguns segundos, entao confirma o recebimento
-    // na hora e avisa o resultado final por uma mensagem separada.
-    exportarRegrasAutomacao((texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_REGRAS", texto }).catch(() => {});
-    })
-      .then((resultado) => {
-        chrome.runtime.sendMessage({ tipo: "REGRAS_FINALIZADO", ok: true, resultado }).catch(() => {});
-      })
-      .catch((e) => {
-        chrome.runtime
-          .sendMessage({
-            tipo: "REGRAS_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })

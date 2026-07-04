@@ -124,189 +124,17 @@
     </div>
   </details>
 
-  <details class="card card--privilegiado" id="card-gestao-unidade">
-    <summary class="card-titulo">
-      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
-      <span class="card-icone" aria-hidden="true">🏢</span>
-      <span class="card-rotulo">Gestão da Unidade</span>
-      <span class="selo">perfil GESTÃO DA UNIDADE</span>
-    </summary>
-    <div class="card-corpo">
-      <div class="subsecao">
-        <h3 class="subsecao-titulo">
-          <span class="subsecao-icone" aria-hidden="true">📊</span>
-          Relatórios
-        </h3>
-        <div id="area-relatorio-info" class="status">
-          Gera o painel de conclusos e processos sem movimentação.
-        </div>
-
-        <div class="botoes">
-          <button id="btn-relatorios" class="btn">Gerar relatório</button>
-          <button
-            id="btn-abrir-tela-relatorio"
-            class="btn-secundario btn-icone"
-            title="Abrir a tela do Relatório Geral nesta aba"
-            aria-label="Abrir a tela do Relatório Geral nesta aba"
-          >↗</button>
-        </div>
-
-        <div id="area-progresso-relatorio" class="progresso-spinner" hidden>
-          <span class="spinner" aria-hidden="true"></span>
-          <span id="texto-progresso-relatorio"></span>
-        </div>
-
-        <div id="area-relatorio" class="relatorio" hidden>
-          <table class="tabela-relatorio">
-            <thead>
-              <tr>
-                <th scope="col">Situação</th>
-                <th scope="col">Total</th>
-                <th scope="col">Urgentes</th>
-                <th scope="col">+30 dias</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">Despacho</th>
-                <td><button type="button" class="valor-link" id="valor-despacho" data-tipo="situacao" data-situacao="despacho" data-filtro="total" disabled></button></td>
-                <td><button type="button" class="valor-link" id="valor-despacho-urgentes" data-tipo="situacao" data-situacao="despacho" data-filtro="urgentes" disabled></button></td>
-                <td><button type="button" class="valor-link" id="valor-despacho-mais30dias" data-tipo="situacao" data-situacao="despacho" data-filtro="mais30Dias" disabled></button></td>
-              </tr>
-              <tr>
-                <th scope="row">Sentença</th>
-                <td><button type="button" class="valor-link" id="valor-sentenca" data-tipo="situacao" data-situacao="sentenca" data-filtro="total" disabled></button></td>
-                <td><button type="button" class="valor-link" id="valor-sentenca-urgentes" data-tipo="situacao" data-situacao="sentenca" data-filtro="urgentes" disabled></button></td>
-                <td><button type="button" class="valor-link" id="valor-sentenca-mais30dias" data-tipo="situacao" data-situacao="sentenca" data-filtro="mais30Dias" disabled></button></td>
-              </tr>
-            </tbody>
-          </table>
-
-          <table class="tabela-relatorio tabela-relatorio-sem-mov">
-            <thead>
-              <tr>
-                <th scope="col">Sem movimentação</th>
-                <th scope="col">30 dias</th>
-                <th scope="col">90 dias</th>
-                <th scope="col">120 dias</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">Processos</th>
-                <td><button type="button" class="valor-link" id="valor-sem-mov-30" data-tipo="semMovimentacao" data-filtro="30" disabled></button></td>
-                <td><button type="button" class="valor-link" id="valor-sem-mov-90" data-tipo="semMovimentacao" data-filtro="90" disabled></button></td>
-                <td><button type="button" class="valor-link" id="valor-sem-mov-120" data-tipo="semMovimentacao" data-filtro="120" disabled></button></td>
-              </tr>
-            </tbody>
-          </table>
-
-          <table class="tabela-relatorio tabela-relatorio-ativos-suspensos">
-            <thead>
-              <tr>
-                <th scope="col">Processos</th>
-                <th scope="col">Ativos</th>
-                <th scope="col">Suspensos/sobrestados</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">Total</th>
-                <td id="valor-ativos"></td>
-                <td id="valor-suspensos-geral"></td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div id="aviso-urgencia" class="aviso" hidden></div>
-        </div>
-
-        <div id="area-erros-relatorio" class="erros" hidden></div>
-      </div>
-
-      <hr class="separador-subsecao" />
-
-      <div class="subsecao">
-        <h3 class="subsecao-titulo">
-          <span class="subsecao-icone" aria-hidden="true">⚙️</span>
-          Regras de Automação
-        </h3>
-        <div id="area-regras-info" class="status">
-          Exporta as regras ativas de tramitação automática (PDF).
-        </div>
-
-        <!-- Escolha de formato (HTML/PDF) desativada por enquanto - o PDF
-             passou a ser o único formato oferecido. O código continua no
-             lugar, só comentado/oculto, para poder reativar rapidamente.
-        <div class="opcoes">
-          <div class="linha-formatos">
-            <label class="opcao">
-              <input type="checkbox" id="chk-regras-html" checked />
-              HTML
-            </label>
-            <label class="opcao">
-              <input type="checkbox" id="chk-regras-pdf" />
-              PDF
-            </label>
-          </div>
-        </div>
-        -->
-
-        <div class="botoes">
-          <button id="btn-exportar-regras" class="btn">Exportar regras ativas</button>
-        </div>
-
-        <div id="area-erros-regras" class="erros" hidden></div>
-      </div>
-
-      <hr class="separador-subsecao" />
-
-      <div class="subsecao">
-        <h3 class="subsecao-titulo">
-          <span class="subsecao-icone" aria-hidden="true">🗂️</span>
-          Localizadores do Órgão
-        </h3>
-        <div id="area-localizadores-info" class="status">
-          Exporta a lista completa de localizadores e seus totais.
-        </div>
-
-        <div class="opcoes">
-          <div class="linha-formatos">
-            <label class="opcao">
-              <input type="checkbox" id="chk-localizadores-pdf" checked />
-              PDF
-            </label>
-            <label class="opcao">
-              <input type="checkbox" id="chk-localizadores-excel" />
-              Excel
-            </label>
-          </div>
-          <button id="btn-exportar-localizadores" class="btn">Exportar</button>
-        </div>
-
-        <div id="area-progresso-localizadores" class="progresso-spinner" hidden>
-          <span class="spinner" aria-hidden="true"></span>
-          <span id="texto-progresso-localizadores"></span>
-        </div>
-
-        <div id="area-erros-localizadores" class="erros" hidden></div>
-      </div>
-    </div>
-  </details>
 
   <details class="card" id="card-gestao-unidade-alt">
     <summary class="card-titulo">
       <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
-      <span class="card-icone" aria-hidden="true">🧪</span>
-      <span class="card-rotulo">Gestão da Unidade (alternativo)</span>
-      <span class="selo">experimental</span>
+      <span class="card-icone" aria-hidden="true">🏢</span>
+      <span class="card-rotulo">Gestão da Unidade</span>
     </summary>
     <div class="card-corpo">
       <div id="area-relatorio-unidade-alt-info" class="status">
-        Gera o mesmo conteúdo do Relatório para Correição do cartão
-        Corregedoria (com o título "Relatório da Unidade" no PDF), mas
-        usando a unidade já habilitada nesta sessão - não é preciso
-        escolher uma unidade.
+        Gera o Relatório da Unidade usando a unidade já habilitada nesta
+        sessão - não é preciso escolher uma unidade.
       </div>
 
       <div class="opcoes" id="area-personalizar-relatorio-alt">
@@ -371,7 +199,6 @@
       <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
       <span class="card-icone" aria-hidden="true">🗄️</span>
       <span class="card-rotulo">Gestão Gabinete</span>
-      <span class="selo">perfil MAGISTRADO</span>
     </summary>
     <div class="card-corpo">
       <details class="subsecao subsecao--colapsavel">
@@ -481,17 +308,6 @@
     </div>
   </details>
 
-  </div>
-
-  <div id="modal-escolha-relatorio" class="modal-overlay" hidden>
-    <div class="modal-caixa">
-      <p class="modal-texto">O que você deseja fazer com esse valor?</p>
-      <div class="modal-botoes">
-        <button id="modal-btn-abrir" type="button" class="btn">Abrir relatório</button>
-        <button id="modal-btn-excel" type="button" class="btn-secundario">Exportar planilha (Excel)</button>
-        <button id="modal-btn-cancelar" type="button" class="btn-ghost">Cancelar</button>
-      </div>
-    </div>
   </div>
 
   <div id="modal-configuracoes" class="modal-overlay" hidden>

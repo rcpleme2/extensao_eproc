@@ -314,207 +314,7 @@ btnBaixar.addEventListener("click", async () => {
   });
 });
 
-const areaRelatorioInfo = document.getElementById("area-relatorio-info");
-const btnRelatorios = document.getElementById("btn-relatorios");
-const btnAbrirTelaRelatorio = document.getElementById("btn-abrir-tela-relatorio");
-const areaRelatorio = document.getElementById("area-relatorio");
-const valorDespachoEl = document.getElementById("valor-despacho");
-const valorSentencaEl = document.getElementById("valor-sentenca");
-const valorDespachoUrgentesEl = document.getElementById("valor-despacho-urgentes");
-const valorSentencaUrgentesEl = document.getElementById("valor-sentenca-urgentes");
-const valorDespachoMais30DiasEl = document.getElementById("valor-despacho-mais30dias");
-const valorSentencaMais30DiasEl = document.getElementById("valor-sentenca-mais30dias");
-const valorSemMov30El = document.getElementById("valor-sem-mov-30");
-const valorSemMov90El = document.getElementById("valor-sem-mov-90");
-const valorSemMov120El = document.getElementById("valor-sem-mov-120");
-const valorAtivosEl = document.getElementById("valor-ativos");
-const valorSuspensosGeralEl = document.getElementById("valor-suspensos-geral");
-const avisoUrgenciaEl = document.getElementById("aviso-urgencia");
-const areaProgressoRelatorio = document.getElementById("area-progresso-relatorio");
-const textoProgressoRelatorio = document.getElementById("texto-progresso-relatorio");
-const areaErrosRelatorio = document.getElementById("area-erros-relatorio");
-
-// Cada cartao (Exportar Documentos / Relatórios) tem sua propria area de
-// status e de erros - mante-los separados evita que uma acao numa secao
-// sobrescreva a mensagem que o usuario estava vendo na outra.
-function setStatusRelatorio(texto, tipo) {
-  aplicarStatus(areaRelatorioInfo, texto, tipo);
-}
-
-function formatarContagem(valor) {
-  return valor === null || valor === undefined ? "?" : String(valor);
-}
-
-const botoesValorRelatorio = [
-  valorDespachoEl,
-  valorSentencaEl,
-  valorDespachoUrgentesEl,
-  valorSentencaUrgentesEl,
-  valorDespachoMais30DiasEl,
-  valorSentencaMais30DiasEl,
-  valorSemMov30El,
-  valorSemMov90El,
-  valorSemMov120El,
-];
-
-function definirBotoesValorHabilitados(habilitado) {
-  for (const botao of botoesValorRelatorio) {
-    botao.disabled = !habilitado || !botao.textContent || botao.textContent === "?";
-  }
-}
-
-const modalEscolhaRelatorio = document.getElementById("modal-escolha-relatorio");
-const modalBtnAbrir = document.getElementById("modal-btn-abrir");
-const modalBtnExcel = document.getElementById("modal-btn-excel");
-const modalBtnCancelar = document.getElementById("modal-btn-cancelar");
-
-let pedidoRelatorioPendente = null;
-
-function abrirModalEscolhaRelatorio(pedido) {
-  pedidoRelatorioPendente = pedido;
-  modalEscolhaRelatorio.hidden = false;
-}
-
-function fecharModalEscolhaRelatorio() {
-  modalEscolhaRelatorio.hidden = true;
-  pedidoRelatorioPendente = null;
-}
-
-// Clicar num numero do relatorio (ex.: "+30 dias" da Sentença, ou "90
-// dias" do demonstrativo de processos sem movimentação) abre um modal
-// perguntando se o usuario quer so' abrir o relatório já consultado ou
-// tambem exportar a planilha Excel que o proprio eproc gera para aquele
-// resultado. So' depois da escolha e' que a aba atual/visivel navega e
-// consulta de fato.
-for (const botao of botoesValorRelatorio) {
-  botao.addEventListener("click", () => {
-    abrirModalEscolhaRelatorio({
-      categoria: botao.dataset.tipo || "situacao",
-      situacao: botao.dataset.situacao,
-      filtro: botao.dataset.filtro,
-    });
-  });
-}
-
-async function executarAberturaRelatorio(pedido, exportarExcel) {
-  definirBotoesValorHabilitados(false);
-  btnRelatorios.disabled = true;
-  btnAbrirTelaRelatorio.disabled = true;
-  areaErrosRelatorio.hidden = true;
-  setStatusRelatorio(
-    exportarExcel
-      ? "Abrindo o relatório e exportando a planilha em uma nova aba (sua aba atual não é alterada)..."
-      : "Abrindo o relatório detalhado em uma nova aba (sua aba atual não é alterada)..."
-  );
-
-  try {
-    const resposta = await chrome.runtime.sendMessage({
-      tipo: "ABRIR_RELATORIO_PREENCHIDO",
-      categoria: pedido.categoria,
-      situacao: pedido.situacao,
-      filtro: pedido.filtro,
-      exportarExcel,
-    });
-    if (!resposta || !resposta.ok) {
-      throw new Error((resposta && resposta.erro) || "Falha ao abrir o relatório detalhado.");
-    }
-  } catch (e) {
-    setStatusRelatorio("Erro ao abrir o relatório detalhado.", "erro");
-    areaErrosRelatorio.hidden = false;
-    areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
-    definirBotoesValorHabilitados(true);
-    btnRelatorios.disabled = false;
-    btnAbrirTelaRelatorio.disabled = false;
-  }
-  // Em caso de sucesso, os botoes sao reabilitados quando chegar a
-  // mensagem RELATORIO_PREENCHIDO_FINALIZADO (o fluxo demora alguns
-  // segundos, envolvendo navegacao de pagina).
-}
-
-modalBtnAbrir.addEventListener("click", () => {
-  const pedido = pedidoRelatorioPendente;
-  fecharModalEscolhaRelatorio();
-  if (pedido) executarAberturaRelatorio(pedido, false);
-});
-
-modalBtnExcel.addEventListener("click", () => {
-  const pedido = pedidoRelatorioPendente;
-  fecharModalEscolhaRelatorio();
-  if (pedido) executarAberturaRelatorio(pedido, true);
-});
-
-modalBtnCancelar.addEventListener("click", () => {
-  fecharModalEscolhaRelatorio();
-});
-
-btnRelatorios.addEventListener("click", async () => {
-  btnRelatorios.disabled = true;
-  btnAbrirTelaRelatorio.disabled = true;
-  areaErrosRelatorio.hidden = true;
-  areaRelatorio.hidden = true;
-  areaProgressoRelatorio.hidden = false;
-  textoProgressoRelatorio.textContent = "Iniciando...";
-  setStatusRelatorio("Gerando relatório em segundo plano (sua aba atual não é alterada)...");
-
-  // So' confirma que o processamento comecou (resposta imediata do
-  // background); o resultado final chega depois via a mensagem
-  // RELATORIO_FINALIZADO, tratada no listener mais abaixo. Nao dá para
-  // esperar uma unica resposta pelo fim de um fluxo que demora varios
-  // segundos e passa por navegacoes de pagina - isso e' o que deixava o
-  // progresso pendurado em "Finalizando" para sempre.
-  try {
-    const resposta = await chrome.runtime.sendMessage({ tipo: "GERAR_RELATORIO" });
-    if (!resposta || !resposta.ok) {
-      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar o relatório.");
-    }
-  } catch (e) {
-    setStatusRelatorio("Erro ao iniciar o relatório.", "erro");
-    areaErrosRelatorio.hidden = false;
-    areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
-    areaProgressoRelatorio.hidden = true;
-    btnRelatorios.disabled = false;
-    btnAbrirTelaRelatorio.disabled = false;
-  }
-});
-
-btnAbrirTelaRelatorio.addEventListener("click", async () => {
-  btnAbrirTelaRelatorio.disabled = true;
-  areaErrosRelatorio.hidden = true;
-  setStatusRelatorio("Abrindo a tela do Relatório Geral nesta aba...");
-
-  try {
-    const resposta = await chrome.runtime.sendMessage({ tipo: "ABRIR_TELA_RELATORIO" });
-    if (!resposta || !resposta.ok) {
-      throw new Error((resposta && resposta.erro) || "Falha ao abrir a tela do relatório.");
-    }
-    setStatusRelatorio("Tela do Relatório Geral aberta nesta aba.", "ok");
-  } catch (e) {
-    setStatusRelatorio("Erro ao abrir a tela do relatório.", "erro");
-    areaErrosRelatorio.hidden = false;
-    areaErrosRelatorio.textContent = e && e.message ? e.message : String(e);
-  } finally {
-    btnAbrirTelaRelatorio.disabled = false;
-  }
-});
-
 const cardCorregedoria = document.getElementById("card-corregedoria");
-const cardGestaoUnidade = document.getElementById("card-gestao-unidade");
-
-// Perfil CORREGEDORIA não usa "Gestão da Unidade" (ela é do perfil de
-// gestão da própria vara/juízo) - mas em vez de esconder o cartão como o
-// de Corregedoria (que só existe para quem tem esse perfil), ele
-// continua visível e desabilitado: sinaliza que a funcionalidade existe,
-// só não se aplica ao perfil atual.
-function definirGestaoUnidadeDesabilitada(desabilitada) {
-  cardGestaoUnidade.classList.toggle("card--desabilitado", desabilitada);
-  if (desabilitada) cardGestaoUnidade.open = false;
-}
-
-cardGestaoUnidade.querySelector(".card-titulo").addEventListener("click", (evento) => {
-  if (cardGestaoUnidade.classList.contains("card--desabilitado")) {
-    evento.preventDefault();
-  }
-});
 const areaCorregedoriaInfo = document.getElementById("area-corregedoria-info");
 const btnRelatorioGerencialUnidade = document.getElementById("btn-relatorio-gerencial-unidade");
 const areaProgressoUnidades = document.getElementById("area-progresso-unidades");
@@ -624,16 +424,13 @@ async function atualizarCardCorregedoria() {
     const aba = await getAbaAtiva();
     if (!aba || !aba.id) {
       cardCorregedoria.hidden = true;
-      definirGestaoUnidadeDesabilitada(false);
       return;
     }
     const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LER_PERFIL_ATUAL" }).catch(() => null);
     const ehCorregedoria = Boolean(resposta && resposta.perfil === "CORREGEDORIA");
     cardCorregedoria.hidden = !ehCorregedoria;
-    definirGestaoUnidadeDesabilitada(ehCorregedoria);
   } catch (e) {
     cardCorregedoria.hidden = true;
-    definirGestaoUnidadeDesabilitada(false);
   }
 }
 
@@ -929,79 +726,6 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     }
   }
 
-  if (mensagem.tipo === "PROGRESSO_RELATORIO") {
-    textoProgressoRelatorio.textContent = mensagem.texto || "Processando...";
-    setStatusRelatorio(mensagem.texto || "Processando...");
-  }
-
-  if (mensagem.tipo === "RELATORIO_FINALIZADO") {
-    areaProgressoRelatorio.hidden = true;
-    btnRelatorios.disabled = false;
-    btnAbrirTelaRelatorio.disabled = false;
-
-    if (mensagem.ok) {
-      const resultado = mensagem.resultado || {};
-      const despacho = resultado.despacho || {};
-      const sentenca = resultado.sentenca || {};
-
-      valorDespachoEl.textContent = formatarContagem(despacho.total);
-      valorDespachoUrgentesEl.textContent = formatarContagem(despacho.urgentes);
-      valorDespachoMais30DiasEl.textContent = formatarContagem(despacho.mais30Dias);
-
-      valorSentencaEl.textContent = formatarContagem(sentenca.total);
-      valorSentencaUrgentesEl.textContent = formatarContagem(sentenca.urgentes);
-      valorSentencaMais30DiasEl.textContent = formatarContagem(sentenca.mais30Dias);
-
-      const semMovimentacao = resultado.semMovimentacao || {};
-      valorSemMov30El.textContent = formatarContagem(semMovimentacao.dias30);
-      valorSemMov90El.textContent = formatarContagem(semMovimentacao.dias90);
-      valorSemMov120El.textContent = formatarContagem(semMovimentacao.dias120);
-
-      const processosAtivos = resultado.processosAtivos || {};
-      const suspensos = resultado.suspensos || {};
-      valorAtivosEl.textContent = formatarContagem(processosAtivos.total);
-      valorSuspensosGeralEl.textContent = formatarContagem(suspensos.total);
-
-      areaRelatorio.hidden = false;
-      definirBotoesValorHabilitados(true);
-
-      const avisos = [
-        ...(despacho.erros || []),
-        ...(sentenca.erros || []),
-        ...(semMovimentacao.erros || []),
-        ...(processosAtivos.erros || []),
-        ...(suspensos.erros || []),
-      ];
-      if (avisos.length > 0) {
-        avisoUrgenciaEl.hidden = false;
-        avisoUrgenciaEl.textContent = `Alguns valores não puderam ser determinados: ${avisos.join(" | ")}`;
-      } else {
-        avisoUrgenciaEl.hidden = true;
-      }
-
-      setStatusRelatorio("Relatório gerado com sucesso.", "ok");
-    } else {
-      setStatusRelatorio("Erro ao gerar o relatório.", "erro");
-      areaErrosRelatorio.hidden = false;
-      areaErrosRelatorio.textContent = mensagem.erro || "Falha desconhecida ao gerar o relatório.";
-    }
-  }
-
-  if (mensagem.tipo === "RELATORIO_PREENCHIDO_FINALIZADO") {
-    definirBotoesValorHabilitados(true);
-    btnRelatorios.disabled = false;
-    btnAbrirTelaRelatorio.disabled = false;
-
-    if (mensagem.ok) {
-      setStatusRelatorio("Relatório detalhado aberto em uma nova aba.", "ok");
-    } else {
-      setStatusRelatorio("Erro ao abrir o relatório detalhado.", "erro");
-      areaErrosRelatorio.hidden = false;
-      areaErrosRelatorio.textContent =
-        mensagem.erro || "Falha desconhecida ao abrir o relatório detalhado.";
-    }
-  }
-
   if (mensagem.tipo === "PROGRESSO_UNIDADES_RELATORIO") {
     textoProgressoUnidades.textContent = mensagem.texto || "Processando...";
     setStatusCorregedoria(mensagem.texto || "Processando...");
@@ -1051,8 +775,11 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   }
 
   if (mensagem.tipo === "PROGRESSO_RELATORIO_GERENCIAL") {
+    // So' a linha do spinner mostra o passo atual, em detalhe - o texto de
+    // status (acima do botao) fica parado na mensagem inicial (+ o
+    // cronometro, que segue contando por cima dela) para as duas areas
+    // nao mostrarem o mesmo texto duplicado uma embaixo da outra.
     textoProgressoRelatorioGerencial.textContent = mensagem.texto || "Processando...";
-    setStatusCorregedoria(mensagem.texto || "Processando...");
   }
 
   if (mensagem.tipo === "RELATORIO_GERENCIAL_FINALIZADO") {
@@ -1076,8 +803,10 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   }
 
   if (mensagem.tipo === "PROGRESSO_RELATORIO_UNIDADE_ATUAL") {
+    // Mesma razao do PROGRESSO_RELATORIO_GERENCIAL acima: so' a linha do
+    // spinner mostra o passo atual, para nao duplicar o mesmo texto no
+    // status (que fica so' com a mensagem inicial + cronometro).
     textoProgressoRelatorioUnidadeAlt.textContent = mensagem.texto || "Processando...";
-    setStatusUnidadeAlt(mensagem.texto || "Processando...");
   }
 
   if (mensagem.tipo === "RELATORIO_UNIDADE_ATUAL_FINALIZADO") {
@@ -1127,131 +856,8 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   // }
 });
 
-const areaRegrasInfo = document.getElementById("area-regras-info");
-const btnExportarRegras = document.getElementById("btn-exportar-regras");
-const areaErrosRegras = document.getElementById("area-erros-regras");
-// const chkRegrasHtml = document.getElementById("chk-regras-html");
-// const chkRegrasPdf = document.getElementById("chk-regras-pdf");
-
-function setStatusRegras(texto, tipo) {
-  aplicarStatus(areaRegrasInfo, texto, tipo);
-}
-
-// Igual ao padrao ja' usado em "Localizadores do Órgão"/"Relatório
-// Geral": roda tudo em segundo plano numa aba oculta que a propria
-// extensao abre e navega, sem exigir que o usuario esteja (ou navegue
-// manualmente) na tela "Automatizar Tramitação Processual". So' confirma
-// que comecou; o resultado final chega pela mensagem REGRAS_FINALIZADO.
-// Escolha de formato (HTML/PDF) desativada por enquanto - o PDF passou a
-// ser o único formato oferecido no painel (ver comentário equivalente em
-// popup.html/background.js).
-btnExportarRegras.addEventListener("click", async () => {
-  btnExportarRegras.disabled = true;
-  areaErrosRegras.hidden = true;
-  iniciarCronometroStatus(areaRegrasInfo);
-  setStatusRegras("Exportando regras em segundo plano (sua aba atual não é alterada)...");
-
-  try {
-    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_REGRAS_AUTOMACAO" });
-    if (!resposta || !resposta.ok) {
-      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
-    }
-  } catch (e) {
-    setStatusRegras("Erro ao iniciar a exportação.", "erro");
-    areaErrosRegras.hidden = false;
-    areaErrosRegras.textContent = e && e.message ? e.message : String(e);
-    btnExportarRegras.disabled = false;
-  }
-});
-
-const areaLocalizadoresInfo = document.getElementById("area-localizadores-info");
-const chkLocalizadoresPdf = document.getElementById("chk-localizadores-pdf");
-const chkLocalizadoresExcel = document.getElementById("chk-localizadores-excel");
-const btnExportarLocalizadores = document.getElementById("btn-exportar-localizadores");
-const areaProgressoLocalizadores = document.getElementById("area-progresso-localizadores");
-const textoProgressoLocalizadores = document.getElementById("texto-progresso-localizadores");
-const areaErrosLocalizadores = document.getElementById("area-erros-localizadores");
-
-function setStatusLocalizadores(texto, tipo) {
-  aplicarStatus(areaLocalizadoresInfo, texto, tipo);
-}
-
-btnExportarLocalizadores.addEventListener("click", async () => {
-  const formatos = { pdf: chkLocalizadoresPdf.checked, excel: chkLocalizadoresExcel.checked };
-  if (!formatos.pdf && !formatos.excel) {
-    areaErrosLocalizadores.hidden = false;
-    areaErrosLocalizadores.textContent = "Marque ao menos um formato (PDF ou Excel).";
-    return;
-  }
-
-  btnExportarLocalizadores.disabled = true;
-  areaErrosLocalizadores.hidden = true;
-  areaProgressoLocalizadores.hidden = false;
-  textoProgressoLocalizadores.textContent = "Iniciando...";
-  iniciarCronometroStatus(areaLocalizadoresInfo);
-  setStatusLocalizadores(
-    "Exportando localizadores em segundo plano (percorrendo todas as páginas da listagem)..."
-  );
-
-  // Mesmo padrao de GERAR_RELATORIO: so' confirma que comecou; o
-  // resultado final chega pela mensagem LOCALIZADORES_FINALIZADO.
-  try {
-    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_LOCALIZADORES", formatos });
-    if (!resposta || !resposta.ok) {
-      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
-    }
-  } catch (e) {
-    setStatusLocalizadores("Erro ao iniciar a exportação.", "erro");
-    areaErrosLocalizadores.hidden = false;
-    areaErrosLocalizadores.textContent = e && e.message ? e.message : String(e);
-    areaProgressoLocalizadores.hidden = true;
-    btnExportarLocalizadores.disabled = false;
-  }
-});
-
 chrome.runtime.onMessage.addListener((mensagem) => {
   if (!mensagem) return;
-
-  if (mensagem.tipo === "PROGRESSO_LOCALIZADORES") {
-    textoProgressoLocalizadores.textContent = mensagem.texto || "Processando...";
-    setStatusLocalizadores(mensagem.texto || "Processando...");
-  }
-
-  if (mensagem.tipo === "LOCALIZADORES_FINALIZADO") {
-    areaProgressoLocalizadores.hidden = true;
-    btnExportarLocalizadores.disabled = false;
-
-    if (mensagem.ok) {
-      const resultado = mensagem.resultado || {};
-      setStatusLocalizadores(
-        `Concluído! ${resultado.total || 0} localizador(es) exportado(s) para Downloads/eproc/.` +
-          (resultado.erroColeta ? ` Aviso: ${resultado.erroColeta}` : ""),
-        "ok"
-      );
-    } else {
-      setStatusLocalizadores("Erro ao exportar os localizadores.", "erro");
-      areaErrosLocalizadores.hidden = false;
-      areaErrosLocalizadores.textContent =
-        mensagem.erro || "Falha desconhecida ao exportar os localizadores.";
-    }
-  }
-
-  if (mensagem.tipo === "PROGRESSO_REGRAS") {
-    setStatusRegras(mensagem.texto || "Processando...");
-  }
-
-  if (mensagem.tipo === "REGRAS_FINALIZADO") {
-    btnExportarRegras.disabled = false;
-
-    if (mensagem.ok) {
-      const resultado = mensagem.resultado || {};
-      setStatusRegras(`${resultado.total || 0} regra(s) ativa(s) exportada(s) em um arquivo PDF baixado.`, "ok");
-    } else {
-      setStatusRegras("Erro ao exportar as regras.", "erro");
-      areaErrosRegras.hidden = false;
-      areaErrosRegras.textContent = mensagem.erro || "Falha desconhecida ao exportar as regras.";
-    }
-  }
 
   if (mensagem.tipo === "PROGRESSO_LISTAR_LOCALIZADORES") {
     textoProgressoNavLocalizadores.textContent = mensagem.texto || "Processando...";
@@ -1301,8 +907,9 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   }
 
   if (mensagem.tipo === "PROGRESSO_PROCESSOS_LOCALIZADOR") {
+    // So' a linha do spinner mostra o passo atual (ver comentário
+    // equivalente em PROGRESSO_RELATORIO_GERENCIAL, acima).
     textoProgressoProcessosLocalizador.textContent = mensagem.texto || "Processando...";
-    setStatusNavLocalizadores(mensagem.texto || "Processando...");
   }
 
   if (mensagem.tipo === "PROCESSOS_LOCALIZADOR_FINALIZADO") {
@@ -1325,8 +932,9 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   }
 
   if (mensagem.tipo === "PROGRESSO_DOCUMENTOS_LOCALIZADOR") {
+    // So' a linha do spinner mostra o passo atual (ver comentário
+    // equivalente em PROGRESSO_RELATORIO_GERENCIAL, acima).
     textoProgressoDocumentosLocalizador.textContent = mensagem.texto || "Processando...";
-    setStatusNavLocalizadores(mensagem.texto || "Processando...");
   }
 
   if (mensagem.tipo === "DOCUMENTOS_LOCALIZADOR_FINALIZADO") {
@@ -1398,8 +1006,8 @@ btnCarregarLocalizadores.addEventListener("click", async () => {
     "Carregando localizadores em segundo plano (percorrendo todas as páginas da listagem)..."
   );
 
-  // Mesmo padrao de EXPORTAR_LOCALIZADORES: so' confirma que comecou; o
-  // resultado final chega pela mensagem LISTAR_LOCALIZADORES_FINALIZADO.
+  // A mensagem so' confirma que comecou; o resultado final chega pela
+  // mensagem LISTAR_LOCALIZADORES_FINALIZADO.
   try {
     const resposta = await chrome.runtime.sendMessage({ tipo: "LISTAR_LOCALIZADORES_COM_PROCESSOS" });
     if (!resposta || !resposta.ok) {

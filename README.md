@@ -6,47 +6,31 @@ TJPR, restrita aos endereços `https://eproc1g.tjpr.jus.br/eproc/` e
 `manifest.json` — a extensão não roda em nenhum outro domínio),
 organizadas em cartões colapsáveis no painel lateral: **Gestão
 Gabinete** (Exportar Documentos + Busca específica de localizadores),
-**Gestão da Unidade** (Relatórios, Regras de Automação e Localizadores
-do Órgão), **Gestão da Unidade (alternativo)** (experimental — replica o
-conteúdo do Relatório para Correição da Corregedoria sem exigir escolha
-de unidade, ver seção própria abaixo) e **Corregedoria** (só para esse
-perfil). O painel abre enxuto
-(**todos os cartões fechados**, nenhum aberto por padrão); cada cartão
-expande ao clicar no título, e reabre sozinho quando alguma operação
-dele progride, conclui ou falha. Sucessos aparecem em verde e erros em
-vermelho na linha de status de cada cartão. Os botões que **geram um
-arquivo para baixar** (Exportar Documentos, Exportar Relatório,
-Exportar Regras, Exportar Localizadores, Exportar processos/documentos
-de um localizador) ganham um **cronômetro discreto** (ex.: "Gerando..."
-→ "(12s)" → "(1min 8s)"), medindo quanto tempo aquela exportação está
-levando desde o primeiro texto de andamento até o resultado final —
-assim dá pra saber se uma exportação demorada ainda está rodando ou
-travou, sem precisar cronometrar por fora. Operações que só **carregam
+**Gestão da Unidade** (Exportar Relatório da Unidade em PDF, sem exigir
+escolha de unidade — ver seção própria abaixo) e **Corregedoria**
+(exclusivo desse perfil, com o Relatório para Correição de uma unidade
+escolhida). O painel abre enxuto (**todos os cartões fechados**,
+nenhum aberto por padrão); cada cartão expande ao clicar no título, e
+reabre sozinho quando alguma operação dele progride, conclui ou falha.
+Sucessos aparecem em verde e erros em vermelho na linha de status de
+cada cartão. Os botões que **geram um arquivo para baixar** (Exportar
+Documentos, Exportar Relatório da Unidade, Exportar Relatório para
+Correição, Exportar processos/documentos de um localizador) ganham um
+**cronômetro discreto** (ex.: "Gerando... (12s)" → "Gerando... (1min
+8s)"), medindo quanto tempo aquela exportação está levando desde o
+primeiro texto de andamento até o resultado final — assim dá pra saber
+se uma exportação demorada ainda está rodando ou travou, sem precisar
+cronometrar por fora. Essa linha de status fica parada na mensagem
+inicial (só o cronômetro segue contando por cima dela); o passo atual
+em detalhe (qual seção/consulta está sendo processada no momento)
+aparece **só** na linha de progresso logo abaixo, para as duas áreas não
+mostrarem o mesmo texto duas vezes. Operações que só **carregam
 informação na tela** (Detectar documentos, Carregar unidades, Carregar
-localizadores, Gerar relatório-painel, Abrir tela/Navegar) não mostram
-esse cronômetro.
+localizadores) não mostram esse cronômetro.
 
-Além do cartão **Corregedoria** (único que é realmente condicional - só
-aparece quando esse é o perfil ativo, ver seção própria abaixo), os
-demais cartões trazem um selo indicando a qual perfil a funcionalidade
-se destina, **apenas como indicação organizacional** - continuam sempre
-visíveis e utilizáveis por qualquer perfil:
-
-- **perfil MAGISTRADO**: cartão "Gestão Gabinete", com **Exportar
-  Documentos** e **Busca específica de localizadores** em subseções
-  próprias dentro do mesmo cartão — diferente das demais subseções do
-  painel (ver "Gestão da Unidade" logo abaixo), estas duas são
-  **colapsáveis** e começam **fechadas** por padrão, cada uma abrindo
-  só ao clicar no próprio título (e sozinha quando alguma operação dela
-  progride/conclui/falha, igual aos cartões).
-- **perfil GESTÃO DA UNIDADE**: Relatórios, Regras de Automação e
-  Localizadores do Órgão - reunidos num único cartão "Gestão da
-  Unidade", cada um em sua própria subseção, não em sub-menus
-  aninhados: assim que o cartão é aberto, todos os botões de todas as
-  funcionalidades já ficam à vista, sem precisar abrir mais nada.
-  Quando o perfil ativo é CORREGEDORIA, esse cartão continua visível
-  (para indicar que a funcionalidade existe), mas fica desabilitado
-  (esmaecido, sem abrir), já que não se aplica a esse perfil.
+O cartão **Corregedoria** é o único realmente condicional - só aparece
+quando esse é o perfil ativo (ver seção própria abaixo); os demais
+ficam sempre visíveis e utilizáveis por qualquer perfil.
 
 A ordem padrão dos cartões é **Corregedoria > Gestão da Unidade >
 Gestão Gabinete**, mas cada um tem uma alça (⠿) ao lado do ícone
@@ -424,86 +408,6 @@ exportação).
    serem processados. A extração de texto de cada PDF (que envolve várias
    páginas, não só uma requisição) tem um limite maior, de 60s.
 
-## Relatório Geral (conclusos para despacho/sentença)
-
-O painel também tem um botão **"Relatórios"** que automatiza uma consulta
-que hoje precisa ser feita manualmente, **sem alterar a página que você
-está vendo**. Para cada situação (**"MOVIMENTO-AGUARDA DESPACHO"** e
-**"MOVIMENTO-AGUARDA SENTENÇA"**), ele levanta três números:
-
-- **Total**: quantos processos estão nessa situação.
-- **Urgentes**: quantos desses têm a marcação "Informação complementar" =
-  "Petição Urgente - Sim".
-- **+30 dias**: quantos desses estão na situação há mais de 30 dias
-  (preenchendo o campo "Dias na situação" com `30` antes de consultar).
-
-Além disso, o mesmo botão levanta um demonstrativo de **processos sem
-movimentação**, preenchendo numericamente o campo "Dias sem movimentação"
-(`#txtDiasSemMovimentacao`) com três faixas: **30, 90 e 120 dias**. Esse
-filtro não depende de nenhuma situação selecionada.
-
-Isso dá 9 consultas ao todo (6 de situação + 3 de sem movimentação). Cada
-uma delas roda em uma **aba oculta própria** (criada com `active: false`,
-sem roubar o foco nem alterar o que você está vendo), que abre a página,
-navega até o Relatório Geral, seleciona a situação (quando aplicável) e o
-filtro daquela consulta específica, clica em "Consultar", lê o resultado e
-fecha a aba — uma aba nova para cada consulta, nunca reaproveitando a
-mesma aba para mais de uma.
-Isso é proposital: reaproveitar a mesma aba para interagir duas vezes
-seguidas com o campo "Informação complementar" (um componente Tagify)
-se mostrou instável nos testes — a primeira consulta na aba sempre
-funcionava, a segunda às vezes não. Com uma aba nova por consulta, esse
-problema desaparece por completo, ao custo de o relatório completo levar
-mais tempo (a ordem de alguns segundos por consulta, já que cada uma
-recarrega a página do zero).
-
-O campo "Informação complementar" usa o dropdown de sugestões nativo do
-Tagify (confirmado inspecionando a página ao vivo: os itens aparecem como
-`div.tagify__dropdown__item`, com o valor exato no atributo `value`). A
-extensão simula a digitação de "Petição Urgente" no campo, espera a
-sugestão "Petição Urgente - Sim" aparecer no dropdown e clica nela — o
-mesmo que um clique real faria. Se alguma consulta falhar por qualquer
-motivo, as demais continuam normalmente; o painel mostra um aviso listando
-especificamente o que não pôde ser determinado, sem travar o resto do
-relatório.
-
-Enquanto processa, o painel mostra um indicador de progresso com o passo
-atual (qual situação/filtro está sendo consultado no momento), então dá
-para acompanhar sem achar que a extensão travou.
-
-Ao lado do botão "Relatórios" há um ícone **↗** que, diferente do botão
-principal, navega a **aba atual e visível** direto para a tela do
-Relatório Geral (sem consultar nada) — um atalho para quem prefere
-conferir manualmente.
-
-Todos os números das duas tabelas — os 6 de Total/Urgentes/+30 dias ×
-Despacho/Sentença e os 3 do demonstrativo de sem movimentação (30/90/120
-dias) — são clicáveis. Ao clicar, a extensão pergunta o que fazer:
-
-- **Abrir relatório**: abre uma **aba nova**, em primeiro plano, que
-  navega até o Relatório Geral já com a mesma situação (ou, no caso de
-  "sem movimentação", sem nenhuma situação) e o mesmo filtro daquele
-  número selecionados, e a consulta já executada, mostrando a lista de
-  processos por trás dele — útil para conferir exatamente quais processos
-  compõem aquela contagem.
-- **Exportar planilha (Excel)**: faz a mesma navegação/consulta acima
-  (também numa aba nova) e, em seguida, clica automaticamente no botão
-  "Exportar" da tabela de resultados e na opção "Excel", disparando o
-  download da planilha que o próprio eproc gera para aquele filtro exato.
-  O arquivo baixado é renomeado automaticamente para identificar o
-  relatório de origem, ex.: `relatorio_despacho_urgentes.xlsx`,
-  `relatorio_sentenca_mais30dias.xlsx`,
-  `relatorio_sem_movimentacao_90dias.xlsx`.
-
-A aba onde você estava trabalhando **nunca é navegada nem alterada** —
-essa aba nova é aberta à parte (usando a mesma URL base do eproc só para
-saber onde entrar) e permanece aberta ao final, para você ver o resultado
-ou conferir o download.
-
-O botão funciona a partir de qualquer página do eproc que tenha o menu
-lateral visível (não precisa estar na tela de um processo
-especificamente).
-
 ## Corregedoria
 
 Quando o perfil ativo (select de perfil no cabeçalho do eproc,
@@ -521,8 +425,8 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
 ### Relatório para Correição
 
 1. **"Carregar unidades (Relatório para Correição)"**: navega a aba atual até
-   o Relatório Geral (mesmo mecanismo do botão "↗" do cartão Relatórios)
-   e lê todas as opções do filtro "Órgão/Juízo" dessa tela — visualmente
+   o Relatório Geral e lê todas as opções do filtro "Órgão/Juízo" dessa
+   tela — visualmente
    um dropdown do bootstrap-select, mas a leitura é feita direto no
    `<select id="selIdOrgaoJuizo">` nativo por trás dele. O botão **some
    assim que clicado** — ele só serve para um carregamento inicial, e só
@@ -862,54 +766,44 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
    painel (que já mostra esse total, já que ali a extração é direto da
    tabela da tela, sem precisar de nenhuma consulta a mais).
 
-### Gestão da Unidade (alternativo) — experimental
+## Gestão da Unidade
 
-Cartão **experimental**, separado de propósito do cartão "Gestão da Unidade"
-normal (nada é misturado entre os dois) — reaproveita **quase inteiramente**
-o mesmo Relatório para Correição do cartão Corregedoria (mesmas seções,
-mesmas consultas, mesmo gerador de PDF: `exportarRelatorioGerencialUnidade`),
-mas para quem já está logado **diretamente numa unidade** (perfil
-MAGISTRADO/GESTÃO DA UNIDADE) em vez do perfil CORREGEDORIA (que enxerga
-todas as unidades e por isso precisa de um dropdown de duas etapas para
-escolher uma). Tem algumas diferenças de conteúdo em relação ao relatório
-da Corregedoria, cobertas abaixo.
+Cartão para quem já está logado **diretamente numa unidade** (em vez do
+perfil CORREGEDORIA, que enxerga todas as unidades e por isso precisa
+escolher uma no cartão "Corregedoria" — ver acima). Reaproveita **quase
+inteiramente** o mesmo Relatório para Correição do cartão Corregedoria
+(mesmas seções, mesmas consultas, mesmo gerador de PDF:
+`exportarRelatorioGerencialUnidade`), com algumas diferenças de conteúdo
+cobertas abaixo.
 
 - **Não exige nenhuma unidade selecionada** — não há dropdown de
-  Comarca/Juízo neste cartão. Basta marcar os itens desejados (mesma lista
-  "Itens a incluir no PDF" do relatório da Corregedoria, com IDs próprios
-  para não interferir no outro cartão) e clicar em **"Exportar Relatório da
-  Unidade (PDF)"**.
+  Comarca/Juízo neste cartão. Basta marcar os itens desejados em "Itens a
+  incluir no PDF" e clicar em **"Exportar Relatório da Unidade (PDF)"**.
 - Cada consulta interna (processos ativos, suspensos, conclusos, sem
   movimentação, processos paralisados, remessas aos juízes leigos) recebe um
   valor de unidade **nulo** em vez do valor escolhido num dropdown — isso faz
   a extensão **pular** a etapa de selecionar um Órgão/Juízo (ou um Órgão
   Julgador, no caso das remessas) em cada tela e simplesmente usar o filtro
-  que a própria tela do eproc **já aplica sozinha** para o perfil logado
-  (mesmo comportamento que o "relatório rápido" do cartão "Gestão da
-  Unidade" normal já usa há tempos, também sem selecionar nenhum
-  Órgão/Juízo). Regras de Automação nunca dependeu de unidade selecionada
-  (sempre reflete a unidade habilitada no momento), então não muda nada
-  nessa seção.
+  que a própria tela do eproc **já aplica sozinha** para o perfil logado.
+  Regras de Automação nunca dependeu de unidade selecionada (sempre reflete
+  a unidade habilitada no momento), então não muda nada nessa seção.
 - O **título da capa** é **"Relatório da Unidade"** (em vez de "Relatório
   para Correição") e sai **centralizado horizontalmente** na página — a
-  mesma capa (`construirCapaRelatorioGerencial`) agora aceita um título
+  mesma capa (`construirCapaRelatorioGerencial`) aceita um título
   customizável, sempre centralizado, com "Relatório para Correição" como
   padrão para não mudar nada no relatório da Corregedoria.
 - A seção de **Localizadores** também muda: em vez do campo "Localizador" do
   Relatório Geral (que só traz o nome, sem total de processos — ver a seção
-  equivalente do Relatório para Correição, abaixo), este cartão reaproveita
-  a mesma tela **"Localizadores do Órgão"** usada pelo cartão de mesmo nome
-  (só possível aqui porque, sem unidade escolhida, a unidade é sempre a
-  habilitada no momento — a mesma restrição que já existe para essa tela).
-  Isso traz o **total de processos de cada localizador**, algo que o
-  relatório da Corregedoria não consegue oferecer. A lista mostra **todos os
-  localizadores da unidade, inclusive os com 0 processos** (diferente da
-  "Busca específica de localizadores", que só lista os com pelo menos 1 —
-  ali o interesse é "para onde navegar"; aqui é o panorama completo),
-  ordenados do **maior para o menor total de processos**. Cada linha vira
-  "Nome — N processo(s)" em vez de só o nome, e o subtítulo explicando a
-  limitação de não ter o total (que aparece no relatório da Corregedoria)
-  não é desenhado, já que a limitação não existe neste fluxo.
+  equivalente do Relatório para Correição, acima), este cartão reaproveita a
+  mesma coleta multi-página da tela **"Localizadores do Órgão"** (só
+  possível aqui porque, sem unidade escolhida, a unidade é sempre a
+  habilitada no momento). Isso traz o **total de processos de cada
+  localizador**, algo que o relatório da Corregedoria não consegue oferecer.
+  A lista mostra **todos os localizadores da unidade, inclusive os com 0
+  processos** (diferente da "Busca específica de localizadores", que só
+  lista os com pelo menos 1 — ali o interesse é "para onde navegar"; aqui é
+  o panorama completo), ordenados do **maior para o menor total de
+  processos**. Cada linha vira "Nome — N processo(s)" em vez de só o nome.
 - Item **exclusivo** deste cartão (não existe no relatório da
   Corregedoria): **Mandados em aberto**, logo **após "Processos sem
   movimentação"** na capa e nas tabelas anexas. Extraído da tela
@@ -918,41 +812,31 @@ da Corregedoria, cobertas abaixo.
   opções do filtro "Situação do mandado" (`#selStatusMandado`, um
   bootstrap-select de múltipla seleção) **exceto "Devolvido"** — ou seja,
   tudo que ainda não foi devolvido: "Aguardando cumprimento", "Aguardando
-  distribuição", "Aguardando redistribuição" e "Não Remetido". O resumo
-  na capa traz só a contagem ("Mandados não cumpridos"); a relação
-  discriminada sai em **página retrato**, com os campos **Número do
-  Processo, Tipo de Ato** (coluna real da tela: "Atos"), **Data da
-  Remessa** (coluna real: "Data Remessa" — casada por "remessa" no
-  cabeçalho, para não confundir com a coluna vizinha "Data Juntada") e
-  **Situação**. Não precisa de nenhuma seleção de unidade (a tela já
-  reflete a unidade habilitada, mesma lógica das demais seções deste
-  cartão).
-- O aviso "Regras de automação: lista as regras da unidade atualmente
-  habilitada..." (ver seção "Regras de Automação" abaixo) **não aparece**
-  neste relatório — esse aviso só faz sentido quando existe uma unidade
-  **escolhida** que pode divergir da unidade habilitada (o caso da
-  Corregedoria); aqui as duas são sempre a mesma coisa, então o aviso seria
-  enganoso.
+  distribuição", "Aguardando redistribuição" e "Não Remetido". Quando a
+  situação vem como **"Aguardando cumprimento - `<NOME DO OFICIAL>`"**
+  (formato usado pelo eproc assim que um oficial de justiça é designado), a
+  extensão separa esse nome numa coluna própria **Responsável**, deixando a
+  Situação só com "Aguardando cumprimento" — mandados ainda sem oficial
+  designado mantêm a coluna Responsável em branco. A relação discriminada
+  sai em **página retrato**, com os campos **Número do Processo, Tipo de
+  Ato** (coluna real da tela: "Atos"), **Data da Remessa** (coluna real:
+  "Data Remessa" — casada por "remessa" no cabeçalho, para não confundir
+  com a coluna vizinha "Data Juntada"), **Situação** e **Responsável**,
+  ordenada pela Data da Remessa do mandado parado há **mais tempo para o
+  mais recente**. Na capa, o resumo traz duas seções: **"MANDADOS EM
+  ABERTO"**, com a contagem por Situação (da mais frequente para a menos
+  frequente, Total por último), e **"MANDADOS POR OFICIAL"**, com a
+  contagem de mandados aguardando cumprimento por Responsável (também da
+  mais frequente para a menos frequente; só aparece quando algum mandado
+  já tem oficial designado). Não precisa de nenhuma seleção de unidade (a
+  tela já reflete a unidade habilitada, mesma lógica das demais seções
+  deste cartão).
 - O nome usado na capa/título do PDF (o texto "Unidade: `<nome>`", diferente
   do título "Relatório da Unidade" acima) vem do próprio seletor de perfil
   do eproc (`#selInfraUnidades`, cabeçalho superior) — não é o nome da vara
   em si, só uma identificação best-effort; se não for possível lê-lo por
   qualquer motivo, cai num rótulo genérico ("Unidade atual") em vez de
   travar o relatório inteiro por causa só do nome.
-
-> Ao adicionar esse cartão, uma inspeção do código revelou que **3 outras
-> consultas** deste mesmo relatório (localizadores via Relatório Geral,
-> listagem de situações do grupo Suspensão e o detalhamento por situação
-> específica) e a consulta de **remessas aos juízes leigos** sempre
-> tentavam selecionar um Órgão/Juízo mesmo quando nenhum era informado —
-> um valor `null` nunca bate com nenhuma `<option>` (toda `value` é sempre
-> string), então essas seções falhariam silenciosamente se algum dia
-> fossem chamadas sem unidade. Isso foi corrigido nas 4 funções
-> (`abrirAbaEListarLocalizadoresRelatorioGeral`,
-> `abrirAbaEListarSituacoesDoGrupo`, `abrirAbaEConsultarSituacoesEspecificas`
-> e `consultarRemessasJuizesLeigosUmaVez`), que agora pulam a seleção
-> quando não recebem uma unidade — sem esse ajuste, o cartão "Gestão da
-> Unidade (alternativo)" não funcionaria corretamente.
 
 ## Regras de Automação
 
@@ -963,16 +847,11 @@ DESATIVADA **" ao lado de cada linha). Essa tabela é difícil de ler de
 relance: as colunas são estreitas e cada regra mistura critério, ação e
 outros filtros num texto corrido.
 
-O cartão **"Regras de Automação"** tem um botão **"Exportar regras
-ativas"**, sempre habilitado — não é preciso estar (nem navegar
-manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
-
-> A exportação em **HTML** (aba nova no navegador) fica desativada por
-> enquanto — o **PDF** passou a ser o único formato oferecido no painel
-> (mais fácil de arquivar/anexar). O código do HTML
-> (`construirDocumentoRegras` em `background.js`, checkboxes em
-> `popup.html`/`popup.js`) continua no lugar, só comentado/oculto, para
-> poder reativar rapidamente se for necessário.
+Marcando o item **"Regras de automação"** em "Itens a incluir no PDF" (no
+cartão "Corregedoria" ou "Gestão da Unidade"), a extensão inclui no
+Relatório para Correição/Relatório da Unidade um bloco com as regras
+ativas dessa tela, sem precisar estar (nem navegar manualmente) na tela
+"Automatizar Tramitação Processual":
 
 1. A extensão abre uma aba oculta a partir da URL da aba atual e clica no
    link "Automatizar Localizadores do Órgão" do menu lateral (menu
@@ -994,16 +873,11 @@ manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
    > **Perfil CORREGEDORIA**: essa tela tem um filtro obrigatório
    > "ÓRGÃO" (`#selOrgao`) que só aparece para esse perfil — sem
    > selecionar uma unidade nele e clicar em "Pesquisar", a tabela nunca
-   > lista regra nenhuma, mesmo havendo regras cadastradas. O botão
-   > avulso **"Exportar regras ativas"** deste cartão **não** sabe qual
-   > unidade escolher (não tem nenhum contexto de unidade), então esse
-   > filtro fica sem ser preenchido nesse fluxo — para o perfil
-   > Corregedoria, use o item "Regras de automação" dentro do
-   > **Relatório para Correição** (cartão Corregedoria), que já seleciona
-   > esse filtro automaticamente com a unidade escolhida no dropdown (ver
-   > seção "Corregedoria" acima). O cartão "Gestão da Unidade
-   > (alternativo)" não precisa desse filtro — ele é exclusivo do perfil
-   > CORREGEDORIA e não aparece para quem já está logado numa unidade.
+   > lista regra nenhuma, mesmo havendo regras cadastradas. No cartão
+   > "Corregedoria", esse filtro é preenchido automaticamente com a
+   > unidade escolhida no dropdown (ver seção "Corregedoria" acima). O
+   > cartão "Gestão da Unidade" não precisa desse filtro — ele é exclusivo
+   > de quem já está logado numa unidade, não do perfil CORREGEDORIA.
 3. Ordena as regras: se **alguma** regra ativa tiver uma prioridade
    numérica definida (ex.: "Executar 1º"), o relatório segue essa ordem de
    execução; regras sem prioridade não entram nessa comparação. Quando
@@ -1055,35 +929,30 @@ manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
    etc.) podiam sair cortados; e o resumo do fluxograma pegava só a linha
    "Evento: ..." e descartava o resto — agora leva tudo a partir do
    cabeçalho "AUTOMATIZADO"/"Ação Programada" em diante.
-5. Fecha a aba oculta e baixa um arquivo `regras_automacao_<data>.pdf` em
-   `Downloads/eproc/` com o fluxograma completo (caixas, setas, numeração
-   e a caixa vermelha do Localizador de Erro) e o mesmo detalhamento.
+5. Fecha a aba oculta e monta esse bloco (fluxograma completo — caixas,
+   setas, numeração e a caixa vermelha do Localizador de Erro — e o mesmo
+   detalhamento) dentro do PDF do Relatório para Correição/Relatório da
+   Unidade.
 
 Se o link "Automatizar Localizadores do Órgão" não for encontrado na aba
 oculta (ex.: o rótulo do menu mudou), a extensão avisa exatamente qual
 link procurou — nesse caso, pode ser preciso regravar o script de acesso
 para confirmar o caminho atual do menu.
 
-## Localizadores do Órgão (exportar em PDF/Excel)
+## Localizadores do Órgão (coleta reaproveitada)
 
-O cartão **"Localizadores do Órgão"** exporta a lista completa de
-Localizadores do Órgão (tela `acao=localizador_orgao_listar` do eproc) em
-PDF e/ou planilha Excel, com três colunas: **Localizador** (nome), a
-**Descrição do Localizador** e o **Total de processos**. Como a
-descrição é um campo opcional raramente preenchido, o PDF **omite
-essa coluna por completo** quando nenhum localizador da unidade tem
-descrição — mostrando só Localizador + Total de processos, com a
-largura redistribuída entre as duas colunas. Isso evita uma tabela com
-uma faixa enorme em branco no meio (o caso mais comum na prática); a
-coluna só aparece quando pelo menos um localizador realmente tem algo
-preenchido ali.
+A tela **"Localizadores do Órgão"** do eproc (`acao=localizador_orgao_listar`)
+lista, por página, cada Localizador com sua Descrição e o Total de
+processos. Em vez de um botão de exportação próprio, essa coleta é
+reaproveitada por duas funcionalidades do painel: o item **"Localizadores"**
+do Relatório da Unidade (ver seção "Gestão da Unidade" acima, que traz o
+total de processos de cada um) e a **"Busca específica de localizadores"**
+(cartão "Gestão Gabinete", ver abaixo). A coleta em si:
 
-Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
-
-1. A extensão abre uma aba oculta a partir da URL da aba atual e clica no
-   link "Localizadores do Órgão" do menu lateral (funciona mesmo com o
-   submenu colapsado, já que o link já existe no DOM independente do
-   estado visual do menu).
+1. Abre uma aba oculta a partir da URL da aba atual e clica no link
+   "Localizadores do Órgão" do menu lateral (funciona mesmo com o submenu
+   colapsado, já que o link já existe no DOM independente do estado visual
+   do menu).
 2. O eproc lembra a última página vista nessa listagem e reabre a tela
    nela (não sempre na página 1) — antes de coletar, a extensão confere
    se o botão "Primeira Página" está desabilitado (sinal de que já está
@@ -1098,15 +967,6 @@ Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
    contínuo dentro da própria página), para não quebrar com "Frame with
    ID 0 was removed" caso a paginação dispare uma navegação de verdade em
    vez de só atualizar a tabela via AJAX.
-4. Ordena os localizadores pelo **Total de processos** (do maior para o
-   menor) e gera os arquivos marcados em `Downloads/eproc/`:
-   - **PDF**: tabela paginada (A4 paisagem), com cabeçalho repetido em
-     cada página e as colunas de nome/descrição quebradas em várias
-     linhas quando o texto for longo, para nunca cortar conteúdo.
-   - **Excel**: arquivo `.xls` no formato nativo "Excel XML Spreadsheet"
-     (texto XML puro, sem precisar de nenhuma biblioteca de compressão
-     ZIP) — abre diretamente no Excel/LibreOffice como uma planilha
-     comum, sem aviso de formato incompatível.
 
 A aba oculta usada para navegar e coletar os dados é fechada
 automaticamente ao final, sem interferir na aba que você está usando.
@@ -1114,11 +974,10 @@ automaticamente ao final, sem interferir na aba que você está usando.
 ## Busca específica de localizadores
 
 A subseção **"Busca específica de localizadores"** (dentro do cartão
-**"Gestão Gabinete"**, perfil MAGISTRADO) carrega os
-Localizadores do Órgão com pelo menos um processo atribuído e permite ir
-direto até a lista de processos de um deles, ou exportar um relatório
-desses processos - sem precisar abrir a tela de Localizadores
-manualmente e procurar a linha certa.
+**"Gestão Gabinete"**) carrega os Localizadores do Órgão com pelo menos
+um processo atribuído e permite ir direto até a lista de processos de um
+deles, ou exportar um relatório desses processos - sem precisar abrir a
+tela de Localizadores manualmente e procurar a linha certa.
 
 Ao clicar em **"Carregar localizadores"** (o botão **some assim que
 clicado** — mesmo padrão do "Carregar unidades" do Relatório para Correição;
