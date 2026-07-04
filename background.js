@@ -1416,6 +1416,11 @@ const DIAS_LIMITE_ATRASO = 30;
 // (campo #txtDiasSemMovimentacao no Relatório Geral).
 const FAIXAS_DIAS_SEM_MOVIMENTACAO = [30, 90, 120];
 
+// Piso usado na relação de processos paralisados do Relatório da Unidade
+// (Corregedoria e Gestão da Unidade (alternativo)) - uma única tabela "a
+// partir de 31 dias", sem separar por faixa como o demonstrativo acima.
+const DIAS_MINIMO_PARALISADOS = 31;
+
 // Cada consulta (total / urgentes / +30 dias, para cada situacao) agora
 // abre sua PROPRIA aba oculta, usada uma unica vez e descartada. Duas
 // tentativas anteriores mostraram que reaproveitar a mesma aba para
@@ -4071,11 +4076,17 @@ async function construirPdfRankingPartes(itens, nomeUnidade) {
 // tudo colado numa linha só) e os valores exatamente "?" (ou vazios, que
 // sobram quando o icone abre a celula) são descartados por completo, em
 // vez de aparecerem como um "?" solto sem significado.
-function formatarLocalizadores(valorBruto) {
+// "comMarcador" (usado na relação de processos paralisados) prefixa cada
+// nome com "- " quando ha' mais de um - com so' um Localizador, o
+// marcador não acrescenta nada útil, entao fica de fora nesse caso.
+function formatarLocalizadores(valorBruto, comMarcador) {
   const nomes = (valorBruto || "")
     .split(/\||[^\x00-\xFF]+/)
     .map((nome) => nome.trim())
     .filter((nome) => nome && nome !== "?");
+  if (comMarcador && nomes.length > 1) {
+    return nomes.map((nome) => `- ${nome}`).join("\n");
+  }
   return nomes.join("\n");
 }
 
@@ -4108,6 +4119,56 @@ async function construirPdfSuspensos(tabela, nomeUnidade) {
     itens,
     colunas,
     `Suspensos/sobrestados da unidade "${nomeUnidade}" — ${itens.length} processo(s)`
+  );
+}
+
+// Relação de processos paralisados (a partir de "DIAS_MINIMO_PARALISADOS"
+// dias sem movimentação, numa única tabela - sem separar por faixa como o
+// demonstrativo de 30/90/120 dias): Nº do Processo, Situação, Classe,
+// Localizador(es) e Último Evento/Data - ordenados do processo mais
+// paralisado (Data/Hora do último evento mais ANTIGA) para o menos
+// paralisado.
+async function construirPdfProcessosParalisados(tabela, nomeUnidade) {
+  const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxClasse = indiceColunaPorCabecalho(tabela.cabecalhos, /classe/i);
+  const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
+  const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
+  const idxDataHora = indiceColunaPorCabecalho(tabela.cabecalhos, /data\s*\/?\s*hora/i);
+
+  const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
+  const itens = tabela.linhas
+    .map((linha) => {
+      const dataHora = valorDe(linha, idxDataHora);
+      return {
+        processo: valorDe(linha, idxProcesso),
+        situacao: valorDe(linha, idxSituacao),
+        classe: valorDe(linha, idxClasse),
+        localizador: formatarLocalizadores(valorDe(linha, idxLocalizador), true),
+        ultimoEvento: valorDe(linha, idxEvento),
+        dataHora,
+        dataHoraOrdenavel: paraDataOrdenavel(dataHora),
+      };
+    })
+    // Data/Hora mais antiga primeiro - quanto mais antigo o último
+    // evento, mais tempo o processo está parado (mais paralisado).
+    .sort((a, b) => a.dataHoraOrdenavel - b.dataHoraOrdenavel);
+
+  const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+  const colunas = [
+    { titulo: "Nº do Processo", largura: larguraUtil * 0.22, campo: "processo" },
+    { titulo: "Situação", largura: larguraUtil * 0.18, campo: "situacao" },
+    { titulo: "Classe", largura: larguraUtil * 0.18, campo: "classe" },
+    { titulo: "Localizador", largura: larguraUtil * 0.2, campo: "localizador" },
+    { titulo: "Último Evento", largura: larguraUtil * 0.12, campo: "ultimoEvento" },
+    { titulo: "Data/Hora", largura: larguraUtil * 0.1, campo: "dataHora" },
+  ];
+
+  return construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Processos paralisados da unidade "${nomeUnidade}" — a partir de ${DIAS_MINIMO_PARALISADOS} dias sem ` +
+      `movimentação — ${itens.length} processo(s)`
   );
 }
 
@@ -4162,6 +4223,7 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   conclusosDecisao: true,
   conclusosSentenca: true,
   semMovimentacao: true,
+  paralisados: true,
   remessasJuizesLeigos: true,
   regrasAutomacao: true,
   localizadores: true,
@@ -4176,7 +4238,13 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
 // responsabilidade de quem chama com a intenção de PERMITIR escolher
 // (o painel da Corregedoria já confere isso antes de enviar a mensagem,
 // via "exigirUnidadeSelecionada" em popup.js).
-async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opcoes, aoProgredir) {
+async function exportarRelatorioGerencialUnidade(
+  valorUnidade,
+  nomeUnidade,
+  opcoes,
+  aoProgredir,
+  tituloRelatorio = "Relatório para Correição"
+) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
   };
@@ -4345,6 +4413,28 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     });
   }
 
+  // Relação de processos paralisados (a partir de 31 dias sem
+  // movimentação, numa única tabela - sem separar por 30/90/120 dias como
+  // o resumo acima, que e' só a contagem). "extrairTabela" pede pra' ler
+  // as linhas reais do resultado (nao so' o total), igual a' relação de
+  // processos ativos.
+  const processosParalisados = { total: null, tabela: null, erros: [] };
+  if (opcoesFinais.paralisados) {
+    notificar("Consultando processos paralisados (a partir de 31 dias sem movimentação)...");
+    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      valorSituacao: null,
+      urgente: false,
+      diasSituacao: null,
+      diasSemMovimentacao: DIAS_MINIMO_PARALISADOS,
+      valorOrgaoJuizo: valorUnidade,
+      extrairTabela: true,
+    });
+    processosParalisados.total = r.contagem;
+    processosParalisados.tabela = r.tabela;
+    if (r.erro) processosParalisados.erros.push(r.erro);
+    if (r.tabela && r.tabela.erro) processosParalisados.erros.push(r.tabela.erro);
+  }
+
   // Remessas aos juízes leigos: tela própria (menu "Relatórios" >
   // "Relatório de remessas em aberto"), filtrada pelo mesmo órgão
   // julgador da unidade escolhida.
@@ -4379,16 +4469,39 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   let localizadoresOrdenados = [];
   let erroLocalizadores = null;
   if (opcoesFinais.localizadores) {
-    const resultado = await consultarLocalizadoresUnidadeViaRelatorioGeral(abaAtual.url, valorUnidade, notificar);
-    // Sem total de processos para ordenar por ele (ver comentario em
-    // "consultarLocalizadoresUnidadeViaRelatorioGeral") - so' resta a
-    // ordem alfabetica. Descarta valores exatamente "?" (localizador
-    // expirado/inconsistente do proprio eproc) - sem significado nenhum
-    // para quem le' o relatório.
-    localizadoresOrdenados = resultado.localizadores
-      .filter((l) => (l.nome || "").trim() !== "?")
-      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
-    erroLocalizadores = resultado.erro;
+    if (valorUnidade) {
+      // Corregedoria: a unidade e' ESCOLHIDA num dropdown (pode ser
+      // qualquer uma), e o Relatório Geral so' devolve o NOME de cada
+      // localizador (sem total de processos - ver comentario em
+      // "consultarLocalizadoresUnidadeViaRelatorioGeral") - so' resta a
+      // ordem alfabetica. Descarta valores exatamente "?" (localizador
+      // expirado/inconsistente do proprio eproc) - sem significado nenhum
+      // para quem le' o relatório.
+      const resultado = await consultarLocalizadoresUnidadeViaRelatorioGeral(abaAtual.url, valorUnidade, notificar);
+      localizadoresOrdenados = resultado.localizadores
+        .filter((l) => (l.nome || "").trim() !== "?")
+        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+      erroLocalizadores = resultado.erro;
+    } else {
+      // Gestão da Unidade (alternativo): sem unidade escolhida, a unidade
+      // e' sempre a habilitada no momento - a mesma restrição que já
+      // existe para "Localizadores do Órgão" (não permite escolher outra
+      // unidade), então dá para reaproveitar essa tela em vez do campo
+      // "Localizador" do Relatório Geral, e ela traz o TOTAL de processos
+      // de cada localizador (coisa que o Relatório Geral não oferece).
+      // Mostra TODOS os localizadores, mesmo os com 0 processos (ao
+      // contrário do fluxo de navegação "Busca específica", que só lista
+      // os com pelo menos 1) - aqui o interesse é o panorama completo da
+      // unidade, não "para onde navegar". Ordenados do maior para o
+      // menor total de processos.
+      notificar("Consultando localizadores da unidade (com total de processos)...");
+      const resultado = await abrirAbaEColetarLocalizadores(abaAtual.url);
+      localizadoresOrdenados = resultado.itens
+        .filter((l) => (l.nome || "").trim() !== "?")
+        .map((l) => ({ nome: l.nome, totalProcessos: l.totalProcessos }))
+        .sort((a, b) => b.totalProcessos - a.totalProcessos || a.nome.localeCompare(b.nome, "pt-BR"));
+      erroLocalizadores = resultado.erro;
+    }
   }
 
   notificar("Gerando PDF...");
@@ -4461,6 +4574,17 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
       ],
     });
   }
+  if (opcoesFinais.paralisados) {
+    secoesResumo.push({
+      titulo: "PROCESSOS PARALISADOS",
+      linhas: [
+        {
+          rotulo: `A partir de ${DIAS_MINIMO_PARALISADOS} dias`,
+          valor: processosParalisados.total == null ? "?" : processosParalisados.total,
+        },
+      ],
+    });
+  }
   if (opcoesFinais.remessasJuizesLeigos) {
     secoesResumo.push({
       titulo: "REMESSAS AOS JUÍZES LEIGOS",
@@ -4493,13 +4617,21 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   if (opcoesFinais.semMovimentacao && semMovimentacao.erros.length > 0) {
     avisos.push(`Processos sem movimentação: ${semMovimentacao.erros.join(" | ")}`);
   }
+  if (opcoesFinais.paralisados && processosParalisados.erros.length > 0) {
+    avisos.push(`Processos paralisados: ${processosParalisados.erros.join(" | ")}`);
+  }
   if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.erros.length > 0) {
     avisos.push(`Remessas aos juízes leigos: ${remessasJuizesLeigos.erros.join(" | ")}`);
   }
   if (opcoesFinais.regrasAutomacao && regrasAutomacao.erros.length > 0) {
     avisos.push(`Regras de automação: ${regrasAutomacao.erros.join(" | ")}`);
   }
-  if (opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
+  // Esse aviso só faz sentido quando existe uma unidade ESCOLHIDA (dropdown
+  // da Corregedoria) que pode divergir da unidade atualmente habilitada no
+  // eproc - no relatório "Gestão da Unidade (alternativo)" (valorUnidade
+  // nulo) as duas são sempre a mesma coisa, então o aviso ficaria
+  // enganoso/sem propósito ali.
+  if (valorUnidade && opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
     avisos.push(
       "Regras de automação: lista as regras da unidade atualmente habilitada no eproc - a tela " +
         '"Automatizar Localizadores do Órgão" não permite escolher outra unidade, então essa seção pode não ' +
@@ -4508,7 +4640,13 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
 
-  const bytesCapa = await construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoesResumo, avisos);
+  const bytesCapa = await construirCapaRelatorioGerencial(
+    nomeUnidade,
+    dataInformacao,
+    secoesResumo,
+    avisos,
+    tituloRelatorio
+  );
   const pdfCapa = await PDFDocument.load(bytesCapa);
   const pdfFinal = await PDFDocument.create();
   const paginasCapa = await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices());
@@ -4533,6 +4671,16 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
   }
+  if (
+    opcoesFinais.paralisados &&
+    processosParalisados.tabela &&
+    processosParalisados.tabela.linhas.length > 0
+  ) {
+    const bytesTabela = await construirPdfProcessosParalisados(processosParalisados.tabela, nomeUnidade);
+    const pdfTabela = await PDFDocument.load(bytesTabela);
+    const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
 
   if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0) {
     const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
@@ -4553,14 +4701,13 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
   }
 
-  // Localizadores: so' a lista de nomes (sem total de processos - ver
-  // aviso acima), em páginas próprias no final do PDF, depois de todas as
-  // demais seções (inclusive as tabelas de remessas aos juízes leigos).
+  // Localizadores: lista de nomes (Corregedoria, sem total de processos -
+  // ver aviso acima) ou nome + total de processos (Gestão da Unidade
+  // (alternativo), ordenados do maior para o menor total), em páginas
+  // próprias no final do PDF, depois de todas as demais seções (inclusive
+  // as tabelas de remessas aos juízes leigos).
   if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
-    const bytesLocalizadores = await construirPaginaListaLocalizadores(
-      nomeUnidade,
-      localizadoresOrdenados.map((l) => l.nome)
-    );
+    const bytesLocalizadores = await construirPaginaListaLocalizadores(nomeUnidade, localizadoresOrdenados);
     const pdfLocalizadores = await PDFDocument.load(bytesLocalizadores);
     const paginas = await pdfFinal.copyPages(pdfLocalizadores, pdfLocalizadores.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
@@ -4612,7 +4759,7 @@ async function exportarRelatorioUnidadeAtual(opcoes, aoProgredir) {
     // Sem resposta do content script (ex.: aba fora do eproc) - segue com o rótulo genérico.
   }
 
-  return exportarRelatorioGerencialUnidade(null, nomeUnidade, opcoes, notificar);
+  return exportarRelatorioGerencialUnidade(null, nomeUnidade, opcoes, notificar, "Relatório da Unidade");
 }
 
 // Traduz os identificadores usados no painel para os parametros que
@@ -5427,7 +5574,13 @@ function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, lar
 // parte (bytes), depois copiado para dentro do PDF final junto com as
 // tabelas de Localizadores/Remessas - mesmo padrao ja' usado para
 // combinar os PDFs de cada secao num unico arquivo.
-async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, secoes, avisos) {
+async function construirCapaRelatorioGerencial(
+  nomeUnidade,
+  dataInformacao,
+  secoes,
+  avisos,
+  titulo = "Relatório para Correição"
+) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
   const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -5445,8 +5598,9 @@ async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, seco
 
   let { pagina, y } = novaPagina();
 
-  pagina.drawText("Relatório para Correição", {
-    x: margem,
+  const larguraTitulo = fonteNegrito.widthOfTextAtSize(titulo, 18);
+  pagina.drawText(titulo, {
+    x: margem + Math.max(0, (larguraUtil - larguraTitulo) / 2),
     y,
     size: 18,
     font: fonteNegrito,
@@ -5501,11 +5655,17 @@ async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, seco
   return pdf.save();
 }
 
-// Paginas proprias (portrait) so' com a lista de nomes dos Localizadores -
-// extraida da capa (que hoje termina em "PROCESSOS SEM MOVIMENTAÇÃO"/
-// "REMESSAS AOS JUÍZES LEIGOS") para poder ficar sempre por ultimo no PDF,
-// depois de todas as demais seções e tabelas, conforme a ordem pedida para
-// o Relatório da Unidade. Mesmo layout "um nome por linha" de antes.
+// Paginas proprias (portrait) com a lista de Localizadores - extraida da
+// capa (que hoje termina em "PROCESSOS SEM MOVIMENTAÇÃO"/"REMESSAS AOS
+// JUÍZES LEIGOS") para poder ficar sempre por ultimo no PDF, depois de
+// todas as demais seções e tabelas, conforme a ordem pedida para o
+// Relatório da Unidade. Cada item de "localizadores" e' um objeto
+// "{ nome, totalProcessos? }" - quando "totalProcessos" existe (Gestão da
+// Unidade (alternativo), via "Localizadores do Órgão"), a linha mostra
+// "Nome — N processo(s))" e o subtítulo de limitação não é desenhado (a
+// limitação não existe mais); quando não existe (Corregedoria, via
+// Relatório Geral), mostra só o nome e mantém o subtítulo explicando que
+// o total não está disponível nesse fluxo.
 async function construirPaginaListaLocalizadores(nomeUnidade, localizadores) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
@@ -5541,44 +5701,57 @@ async function construirPaginaListaLocalizadores(nomeUnidade, localizadores) {
   }
   y -= 2;
 
-  // Subtitulo discreto (sem destaque, fonte pequena e cinza) explicando a
-  // limitação desta lista - antes ficava misturado na seção "Avisos" no
-  // início do relatório; agora fica junto da própria seção que ele
-  // explica, sem chamar mais atenção do que o necessário.
-  const subtituloLocalizadores = quebrarLinhas(
-    "A lista abaixo traz só os nomes - por enquanto, a única forma de obter o total de processos de cada " +
-      'localizador é se habilitar na própria unidade e usar a ferramenta "Localizadores do Órgão" do painel.',
-    fonteNormal,
-    8.5,
-    larguraUtil
-  );
-  for (const linhaSubtitulo of subtituloLocalizadores) {
-    if (y - 12 < PDF_ALTURA_RODAPE + margem) {
-      ({ pagina, y } = novaPagina());
+  // O total de processos so' esta' disponivel quando a lista vem da tela
+  // "Localizadores do Órgão" (Gestão da Unidade (alternativo)) - nesse
+  // caso a limitação abaixo não existe mais, então o subtítulo não é
+  // desenhado.
+  const temContagem = localizadores.length > 0 && localizadores[0].totalProcessos != null;
+
+  if (!temContagem) {
+    // Subtitulo discreto (sem destaque, fonte pequena e cinza) explicando a
+    // limitação desta lista - antes ficava misturado na seção "Avisos" no
+    // início do relatório; agora fica junto da própria seção que ele
+    // explica, sem chamar mais atenção do que o necessário.
+    const subtituloLocalizadores = quebrarLinhas(
+      "A lista abaixo traz só os nomes - por enquanto, a única forma de obter o total de processos de cada " +
+        'localizador é se habilitar na própria unidade e usar a ferramenta "Localizadores do Órgão" do painel.',
+      fonteNormal,
+      8.5,
+      larguraUtil
+    );
+    for (const linhaSubtitulo of subtituloLocalizadores) {
+      if (y - 12 < PDF_ALTURA_RODAPE + margem) {
+        ({ pagina, y } = novaPagina());
+      }
+      pagina.drawText(linhaSubtitulo, {
+        x: margem,
+        y,
+        size: 8.5,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
+      });
+      y -= 12;
     }
-    pagina.drawText(linhaSubtitulo, {
-      x: margem,
-      y,
-      size: 8.5,
-      font: fonteNormal,
-      color: COR_CINZA_TEXTO,
-    });
-    y -= 12;
+    y -= 6;
+  } else {
+    y -= 4;
   }
-  y -= 6;
 
   const alturaLinha = 12;
   // Um localizador por linha, com um marcador "-" e recuo pendurado
   // (linhas de continuacao de um nome muito longo alinham embaixo do
   // TEXTO, nao do marcador) - lista comprida em texto corrido virava
   // um paragrafo unico dificil de escanear; um nome por linha e' bem
-  // mais facil de ler, mesmo custando mais altura de pagina.
+  // mais facil de ler, mesmo custando mais altura de pagina. Ordem
+  // recebida do chamador (maior para menor total de processos, quando
+  // disponível, ou alfabética, quando não) - não reordena aqui.
   const marcador = "-  ";
   const larguraMarcador = fonteNormal.widthOfTextAtSize(marcador, 8.5);
   const larguraTextoLocalizador = larguraUtil - larguraMarcador;
 
-  for (const nome of localizadores) {
-    const linhasNome = quebrarLinhas(sanitizarTextoPdf(nome), fonteNormal, 8.5, larguraTextoLocalizador);
+  for (const item of localizadores) {
+    const texto = temContagem ? `${item.nome} — ${item.totalProcessos} processo(s)` : item.nome;
+    const linhasNome = quebrarLinhas(sanitizarTextoPdf(texto), fonteNormal, 8.5, larguraTextoLocalizador);
     linhasNome.forEach((linhaTexto, indice) => {
       if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
         ({ pagina, y } = novaPagina());

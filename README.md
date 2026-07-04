@@ -8,18 +8,23 @@ organizadas em cartões colapsáveis no painel lateral: **Gestão
 Gabinete** (Exportar Documentos + Busca específica de localizadores),
 **Gestão da Unidade** (Relatórios, Regras de Automação e Localizadores
 do Órgão), **Gestão da Unidade (alternativo)** (experimental — replica o
-Relatório para Correição da Corregedoria sem exigir escolha de unidade,
-ver seção própria abaixo) e **Corregedoria** (só para esse perfil). O
-painel abre enxuto
+conteúdo do Relatório para Correição da Corregedoria sem exigir escolha
+de unidade, ver seção própria abaixo) e **Corregedoria** (só para esse
+perfil). O painel abre enxuto
 (**todos os cartões fechados**, nenhum aberto por padrão); cada cartão
 expande ao clicar no título, e reabre sozinho quando alguma operação
 dele progride, conclui ou falha. Sucessos aparecem em verde e erros em
-vermelho na linha de status de cada cartão, sempre acompanhados de um
-**cronômetro discreto** (ex.: "Consultando..." → "(12s)" → "(1min 8s)")
-que mede quanto tempo a operação está levando desde o primeiro texto de
-andamento até o resultado final — assim dá pra saber se um relatório
-demorado ainda está rodando ou travou, sem precisar cronometrar por
-fora.
+vermelho na linha de status de cada cartão. Os botões que **geram um
+arquivo para baixar** (Exportar Documentos, Exportar Relatório,
+Exportar Regras, Exportar Localizadores, Exportar processos/documentos
+de um localizador) ganham um **cronômetro discreto** (ex.: "Gerando..."
+→ "(12s)" → "(1min 8s)"), medindo quanto tempo aquela exportação está
+levando desde o primeiro texto de andamento até o resultado final —
+assim dá pra saber se uma exportação demorada ainda está rodando ou
+travou, sem precisar cronometrar por fora. Operações que só **carregam
+informação na tela** (Detectar documentos, Carregar unidades, Carregar
+localizadores, Gerar relatório-painel, Abrir tela/Navegar) não mostram
+esse cronômetro.
 
 Além do cartão **Corregedoria** (único que é realmente condicional - só
 aparece quando esse é o perfil ativo, ver seção própria abaixo), os
@@ -645,6 +650,26 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      entre si, rodam **em paralelo**.
    - Processos sem movimentação há mais de 30, 90 e 120 dias — as 3
      faixas também consultadas **em paralelo**.
+   - **Processos paralisados**: relação **completa** dos processos parados
+     **a partir de 31 dias** sem movimentação (mesmo campo "Dias sem
+     movimentação" usado no demonstrativo acima, só que numa única
+     consulta com o piso em 31, em vez de repetir para 30/90/120) — ao
+     contrário do item anterior (só a contagem), aqui a extensão lê a
+     **relação de processos** de verdade, numa única tabela (sem separar
+     por faixa de dias), em **página retrato**, com os campos **Nº do
+     Processo, Situação, Classe, Localizador, Último Evento e Data/Hora**
+     (a tabela real do eproc traz mais colunas, como Sigilo e Data da
+     Autuação, que ficam de fora aqui) — casados pelo texto do cabeçalho,
+     igual às demais relações deste relatório. Localizadores seguem a
+     mesma técnica de quebra de linha das demais tabelas (um por linha,
+     "?" descartado), mas aqui, quando há **mais de um**, cada linha
+     também ganha um **marcador "- "** na frente (diferente da relação de
+     suspensos, que não usa marcador nenhum) — pedido específico desta
+     seção. Ordenados do processo **mais paralisado para o menos
+     paralisado**: como "paralisado" significa "sem nenhuma movimentação
+     há muito tempo", isso é o mesmo que ordenar pela **Data/Hora do
+     último evento, da mais antiga para a mais recente** (quanto mais
+     antiga essa data, mais tempo o processo está parado).
    - **Remessas aos juízes leigos**: extraída da tela própria do menu
      lateral "Relatórios → Relatório de remessas em aberto"
      (`acao=relatorio_remessas_em_aberto/listar`), preenchendo o filtro
@@ -797,13 +822,14 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
 ### Gestão da Unidade (alternativo) — experimental
 
 Cartão **experimental**, separado de propósito do cartão "Gestão da Unidade"
-normal (nada é misturado entre os dois) — reaproveita **inteiramente** o
-mesmo Relatório para Correição do cartão Corregedoria (mesmas seções, mesmas
-consultas, mesmo PDF final: `construirRelatorioGerencialUnidade`/
-`exportarRelatorioGerencialUnidade`), mas para quem já está logado
-**diretamente numa unidade** (perfil MAGISTRADO/GESTÃO DA UNIDADE) em vez do
-perfil CORREGEDORIA (que enxerga todas as unidades e por isso precisa de um
-dropdown de duas etapas para escolher uma).
+normal (nada é misturado entre os dois) — reaproveita **quase inteiramente**
+o mesmo Relatório para Correição do cartão Corregedoria (mesmas seções,
+mesmas consultas, mesmo gerador de PDF: `exportarRelatorioGerencialUnidade`),
+mas para quem já está logado **diretamente numa unidade** (perfil
+MAGISTRADO/GESTÃO DA UNIDADE) em vez do perfil CORREGEDORIA (que enxerga
+todas as unidades e por isso precisa de um dropdown de duas etapas para
+escolher uma). Tem 3 diferenças de conteúdo em relação ao relatório da
+Corregedoria, cobertas abaixo.
 
 - **Não exige nenhuma unidade selecionada** — não há dropdown de
   Comarca/Juízo neste cartão. Basta marcar os itens desejados (mesma lista
@@ -811,9 +837,9 @@ dropdown de duas etapas para escolher uma).
   para não interferir no outro cartão) e clicar em **"Exportar Relatório da
   Unidade (PDF)"**.
 - Cada consulta interna (processos ativos, suspensos, conclusos, sem
-  movimentação, remessas aos juízes leigos, localizadores) recebe um valor
-  de unidade **nulo** em vez do valor escolhido num dropdown — isso faz a
-  extensão **pular** a etapa de selecionar um Órgão/Juízo (ou um Órgão
+  movimentação, processos paralisados, remessas aos juízes leigos) recebe um
+  valor de unidade **nulo** em vez do valor escolhido num dropdown — isso faz
+  a extensão **pular** a etapa de selecionar um Órgão/Juízo (ou um Órgão
   Julgador, no caso das remessas) em cada tela e simplesmente usar o filtro
   que a própria tela do eproc **já aplica sozinha** para o perfil logado
   (mesmo comportamento que o "relatório rápido" do cartão "Gestão da
@@ -821,9 +847,36 @@ dropdown de duas etapas para escolher uma).
   Órgão/Juízo). Regras de Automação nunca dependeu de unidade selecionada
   (sempre reflete a unidade habilitada no momento), então não muda nada
   nessa seção.
-- O nome usado na capa/título do PDF vem do próprio seletor de perfil do
-  eproc (`#selInfraUnidades`, cabeçalho superior) — não é o nome da vara em
-  si, só uma identificação best-effort; se não for possível lê-lo por
+- O **título da capa** é **"Relatório da Unidade"** (em vez de "Relatório
+  para Correição") e sai **centralizado horizontalmente** na página — a
+  mesma capa (`construirCapaRelatorioGerencial`) agora aceita um título
+  customizável, sempre centralizado, com "Relatório para Correição" como
+  padrão para não mudar nada no relatório da Corregedoria.
+- A seção de **Localizadores** também muda: em vez do campo "Localizador" do
+  Relatório Geral (que só traz o nome, sem total de processos — ver a seção
+  equivalente do Relatório para Correição, abaixo), este cartão reaproveita
+  a mesma tela **"Localizadores do Órgão"** usada pelo cartão de mesmo nome
+  (só possível aqui porque, sem unidade escolhida, a unidade é sempre a
+  habilitada no momento — a mesma restrição que já existe para essa tela).
+  Isso traz o **total de processos de cada localizador**, algo que o
+  relatório da Corregedoria não consegue oferecer. A lista mostra **todos os
+  localizadores da unidade, inclusive os com 0 processos** (diferente da
+  "Busca específica de localizadores", que só lista os com pelo menos 1 —
+  ali o interesse é "para onde navegar"; aqui é o panorama completo),
+  ordenados do **maior para o menor total de processos**. Cada linha vira
+  "Nome — N processo(s)" em vez de só o nome, e o subtítulo explicando a
+  limitação de não ter o total (que aparece no relatório da Corregedoria)
+  não é desenhado, já que a limitação não existe neste fluxo.
+- O aviso "Regras de automação: lista as regras da unidade atualmente
+  habilitada..." (ver seção "Regras de Automação" abaixo) **não aparece**
+  neste relatório — esse aviso só faz sentido quando existe uma unidade
+  **escolhida** que pode divergir da unidade habilitada (o caso da
+  Corregedoria); aqui as duas são sempre a mesma coisa, então o aviso seria
+  enganoso.
+- O nome usado na capa/título do PDF (o texto "Unidade: `<nome>`", diferente
+  do título "Relatório da Unidade" acima) vem do próprio seletor de perfil
+  do eproc (`#selInfraUnidades`, cabeçalho superior) — não é o nome da vara
+  em si, só uma identificação best-effort; se não for possível lê-lo por
   qualquer motivo, cai num rótulo genérico ("Unidade atual") em vez de
   travar o relatório inteiro por causa só do nome.
 

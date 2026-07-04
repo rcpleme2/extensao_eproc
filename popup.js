@@ -103,12 +103,17 @@ radioIndividuais.addEventListener("change", atualizarAvisoMdUnico);
 radioPdfUnico.addEventListener("change", atualizarAvisoMdUnico);
 radioMdUnico.addEventListener("change", atualizarAvisoMdUnico);
 
-// Cronometro discreto: mede quanto tempo cada operacao (relatorio,
-// exportacao etc.) leva do primeiro texto "em andamento" ate' o "ok"/
-// "erro" final, mostrado ao lado do proprio texto de status (sem UI
-// separada). Uma entrada por elemento de status - cada area de progresso
-// do painel (relatorio, corregedoria, regras, localizadores etc.) tem a
-// sua propria contagem independente.
+// Cronometro discreto: mede quanto tempo uma operacao que gera ARQUIVO
+// EXTERNO (PDF/Excel/documentos baixados) esta' levando, mostrado ao
+// lado do proprio texto de status (sem UI separada). So' liga para quem
+// chama "iniciarCronometroStatus" explicitamente ANTES da primeira
+// mensagem de andamento - simples carregamento/leitura de informacao
+// (Carregar unidades, Carregar localizadores, Gerar relatório-painel,
+// Navegar/Abrir tela) nunca liga o cronometro, so' os botoes que de fato
+// baixam um arquivo no fim (Exportar Documentos, Exportar Relatório,
+// Exportar Regras, Exportar Localizadores, Exportar processos/documentos
+// do localizador). Uma entrada por elemento de status - cada area de
+// progresso do painel tem a sua propria contagem independente.
 const cronometros = new WeakMap();
 const LIMITE_CRONOMETRO_SEGUNDOS = 600; // trava o ticking apos 10min (operacao "orfa", sem ok/erro final)
 
@@ -130,31 +135,37 @@ function renderizarStatusComCronometro(el, cron) {
   }
 }
 
+// Liga o cronometro de uma area de status - chamado so' pelos handlers de
+// clique que de fato geram um arquivo para baixar, logo antes da
+// primeira mensagem "Iniciando..."/"Gerando..." daquele fluxo. Idempotente
+// (chamar de novo com um cronometro ja' rodando não reinicia a contagem).
+function iniciarCronometroStatus(el) {
+  if (cronometros.has(el)) return;
+  const cron = { inicio: Date.now() };
+  cron.intervalId = setInterval(() => {
+    if (Date.now() - cron.inicio > LIMITE_CRONOMETRO_SEGUNDOS * 1000) {
+      clearInterval(cron.intervalId);
+      return;
+    }
+    renderizarStatusComCronometro(el, cron);
+  }, 1000);
+  cronometros.set(el, cron);
+}
+
 // Aplica texto + estado visual a uma area de status. "tipo" opcional:
 // "ok" (verde, operacao concluida), "erro" (vermelho) ou ausente
 // (neutro, andamento/ajuda). Compartilhado por todos os setStatus* do
 // painel, para sucesso e erro terem cara de sucesso e erro em vez de
-// ficarem identicos ao texto de ajuda. Tambem liga/desliga o cronometro
-// discreto: comeca a contar no primeiro texto "em andamento" (tipo
-// ausente) e para, mostrando o total decorrido, assim que chega um "ok"
-// ou "erro" - assim o usuario ve' quanto tempo cada relatorio/exportacao
-// realmente levou, sem precisar cronometrar por fora.
+// ficarem identicos ao texto de ajuda. So' mexe no cronometro para
+// DESLIGAR (mostrando o total decorrido) quando chega um "ok"/"erro" e
+// havia um rodando - nunca liga um cronometro sozinho (ver
+// "iniciarCronometroStatus").
 function aplicarStatus(el, texto, tipo) {
-  const emAndamento = tipo !== "ok" && tipo !== "erro";
+  const finalizado = tipo === "ok" || tipo === "erro";
   el.dataset.statusTexto = texto;
 
-  let cron = cronometros.get(el);
-  if (emAndamento && !cron) {
-    cron = { inicio: Date.now() };
-    cron.intervalId = setInterval(() => {
-      if (Date.now() - cron.inicio > LIMITE_CRONOMETRO_SEGUNDOS * 1000) {
-        clearInterval(cron.intervalId);
-        return;
-      }
-      renderizarStatusComCronometro(el, cron);
-    }, 1000);
-    cronometros.set(el, cron);
-  } else if (!emAndamento && cron) {
+  const cron = cronometros.get(el);
+  if (finalizado && cron) {
     clearInterval(cron.intervalId);
     cronometros.delete(el);
   }
@@ -277,6 +288,7 @@ btnBaixar.addEventListener("click", async () => {
   barraProgresso.max = Math.max(estadoAtual.documentos.length, 1);
   textoProgresso.textContent = `0 / ${estadoAtual.documentos.length}`;
   areaErros.hidden = true;
+  iniciarCronometroStatus(areaStatus);
   setStatus("Baixando...");
 
   chrome.runtime.sendMessage({
@@ -504,6 +516,7 @@ const chkRelSuspensos = document.getElementById("chk-rel-suspensos");
 const chkRelConclusosDecisao = document.getElementById("chk-rel-conclusos-decisao");
 const chkRelConclusosSentenca = document.getElementById("chk-rel-conclusos-sentenca");
 const chkRelSemMovimentacao = document.getElementById("chk-rel-sem-movimentacao");
+const chkRelParalisados = document.getElementById("chk-rel-paralisados");
 const chkRelRemessasJuizesLeigos = document.getElementById("chk-rel-remessas-juizes-leigos");
 const chkRelRegrasAutomacao = document.getElementById("chk-rel-regras-automacao");
 const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
@@ -713,6 +726,7 @@ function lerOpcoesRelatorioUnidade() {
     conclusosDecisao: chkRelConclusosDecisao.checked,
     conclusosSentenca: chkRelConclusosSentenca.checked,
     semMovimentacao: chkRelSemMovimentacao.checked,
+    paralisados: chkRelParalisados.checked,
     remessasJuizesLeigos: chkRelRemessasJuizesLeigos.checked,
     regrasAutomacao: chkRelRegrasAutomacao.checked,
     localizadores: chkRelLocalizadores.checked,
@@ -741,6 +755,7 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
   btnExportarRelatorioGerencial.disabled = true;
   areaProgressoRelatorioGerencial.hidden = false;
   textoProgressoRelatorioGerencial.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaCorregedoriaInfo);
   setStatusCorregedoria(
     `Gerando o Relatório para Correição de "${unidade.nome}" em segundo plano (sua aba atual será navegada)...`
   );
@@ -779,6 +794,7 @@ const chkRelAltSuspensos = document.getElementById("chk-relalt-suspensos");
 const chkRelAltConclusosDecisao = document.getElementById("chk-relalt-conclusos-decisao");
 const chkRelAltConclusosSentenca = document.getElementById("chk-relalt-conclusos-sentenca");
 const chkRelAltSemMovimentacao = document.getElementById("chk-relalt-sem-movimentacao");
+const chkRelAltParalisados = document.getElementById("chk-relalt-paralisados");
 const chkRelAltRemessasJuizesLeigos = document.getElementById("chk-relalt-remessas-juizes-leigos");
 const chkRelAltRegrasAutomacao = document.getElementById("chk-relalt-regras-automacao");
 const chkRelAltLocalizadores = document.getElementById("chk-relalt-localizadores");
@@ -798,6 +814,7 @@ function lerOpcoesRelatorioUnidadeAlt() {
     conclusosDecisao: chkRelAltConclusosDecisao.checked,
     conclusosSentenca: chkRelAltConclusosSentenca.checked,
     semMovimentacao: chkRelAltSemMovimentacao.checked,
+    paralisados: chkRelAltParalisados.checked,
     remessasJuizesLeigos: chkRelAltRemessasJuizesLeigos.checked,
     regrasAutomacao: chkRelAltRegrasAutomacao.checked,
     localizadores: chkRelAltLocalizadores.checked,
@@ -817,6 +834,7 @@ btnExportarRelatorioUnidadeAlt.addEventListener("click", async () => {
   btnExportarRelatorioUnidadeAlt.disabled = true;
   areaProgressoRelatorioUnidadeAlt.hidden = false;
   textoProgressoRelatorioUnidadeAlt.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaRelatorioUnidadeAltInfo);
   setStatusUnidadeAlt("Gerando o Relatório da Unidade em segundo plano (sua aba atual será navegada)...");
 
   // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
@@ -1114,6 +1132,7 @@ function setStatusRegras(texto, tipo) {
 btnExportarRegras.addEventListener("click", async () => {
   btnExportarRegras.disabled = true;
   areaErrosRegras.hidden = true;
+  iniciarCronometroStatus(areaRegrasInfo);
   setStatusRegras("Exportando regras em segundo plano (sua aba atual não é alterada)...");
 
   try {
@@ -1153,6 +1172,7 @@ btnExportarLocalizadores.addEventListener("click", async () => {
   areaErrosLocalizadores.hidden = true;
   areaProgressoLocalizadores.hidden = false;
   textoProgressoLocalizadores.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaLocalizadoresInfo);
   setStatusLocalizadores(
     "Exportando localizadores em segundo plano (percorrendo todas as páginas da listagem)..."
   );
@@ -1429,6 +1449,7 @@ btnExportarProcessosLocalizador.addEventListener("click", async () => {
   areaErrosNavLocalizadores.hidden = true;
   areaProgressoProcessosLocalizador.hidden = false;
   textoProgressoProcessosLocalizador.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaNavLocalizadoresInfo);
   setStatusNavLocalizadores(
     `Exportando os processos de "${localizador.nome}" em segundo plano...`
   );
@@ -1468,6 +1489,7 @@ btnExportarDocumentosLocalizador.addEventListener("click", async () => {
   areaErrosNavLocalizadores.hidden = true;
   areaProgressoDocumentosLocalizador.hidden = false;
   textoProgressoDocumentosLocalizador.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaNavLocalizadoresInfo);
   setStatusNavLocalizadores(
     `Exportando os documentos de cada processo de "${localizador.nome}" em segundo plano (pode demorar)...`
   );

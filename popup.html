@@ -94,6 +94,10 @@
           Processos sem movimentação
         </label>
         <label class="opcao">
+          <input type="checkbox" id="chk-rel-paralisados" checked />
+          Processos paralisados (31+ dias)
+        </label>
+        <label class="opcao">
           <input type="checkbox" id="chk-rel-remessas-juizes-leigos" checked />
           Remessas aos juízes leigos
         </label>
@@ -299,7 +303,8 @@
     </summary>
     <div class="card-corpo">
       <div id="area-relatorio-unidade-alt-info" class="status">
-        Gera o mesmo Relatório para Correição do cartão Corregedoria, mas
+        Gera o mesmo conteúdo do Relatório para Correição do cartão
+        Corregedoria (com o título "Relatório da Unidade" no PDF), mas
         usando a unidade já habilitada nesta sessão - não é preciso
         escolher uma unidade.
       </div>
@@ -325,6 +330,10 @@
         <label class="opcao">
           <input type="checkbox" id="chk-relalt-sem-movimentacao" checked />
           Processos sem movimentação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-paralisados" checked />
+          Processos paralisados (31+ dias)
         </label>
         <label class="opcao">
           <input type="checkbox" id="chk-relalt-remessas-juizes-leigos" checked />
