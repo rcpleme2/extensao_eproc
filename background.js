@@ -1454,6 +1454,16 @@ function consultarUmaVezNaPagina(parametros) {
   // (o que conta TODO processo, inclusive suspensos e baixados, como se
   // fosse "ativo"), marca every macro grupo/subitem exceto os excluidos,
   // do mesmo jeito que "selecionarGrupoSituacao" marca um unico grupo.
+  //
+  // O select tem duas "camadas" de option: os cabecalhos de cada grupo
+  // (value = so' a letra do grupo, ex. "B", "S", "M" - sem ";", exibidos
+  // em negrito só para organizar visualmente a lista) e os itens de fato
+  // (value no formato "status;codigo;grupo", ex. "M;02;S"). So' os itens
+  // de fato entram na selecao (o mesmo padrao ja' usado por
+  // "selecionarGrupoSituacao", que casa pelo sufixo ";grupo" e por isso
+  // tambem nunca marca o cabecalho) - marcar o cabecalho junto seria
+  // redundante e o value dele nao segue o formato "status;codigo;grupo"
+  // que o restante do relatório espera.
   function selecionarTodosGruposExceto(gruposExcluir) {
     const select = document.getElementById("selStatusProcesso");
     if (!select) throw new Error('Campo "Situação" não encontrado nesta página.');
@@ -1462,8 +1472,9 @@ function consultarUmaVezNaPagina(parametros) {
     let alguma = false;
     for (const opcao of select.options) {
       const valor = opcao.value || "";
+      const ehItemDeGrupo = valor.includes(";");
       const excluida = sufixosExcluidos.some((sufixo) => valor.endsWith(sufixo));
-      const selecionada = valor !== "" && !excluida;
+      const selecionada = ehItemDeGrupo && !excluida;
       opcao.selected = selecionada;
       if (selecionada) alguma = true;
     }
@@ -3551,11 +3562,11 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
     .sort((a, b) => a.autuacaoOrdenavel - b.autuacaoOrdenavel);
 
   const colunas = [
-    { titulo: "Nº do Processo", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.19, campo: "processo" },
-    { titulo: "Data da Autuação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.13, campo: "autuacao" },
-    { titulo: "Situação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.18, campo: "situacao" },
-    { titulo: "Classe", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "classe" },
-    { titulo: "Último Evento", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.18, campo: "ultimoEvento" },
+    { titulo: "Nº do Processo", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.22, campo: "processo" },
+    { titulo: "Data da Autuação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.15, campo: "autuacao" },
+    { titulo: "Situação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "situacao" },
+    { titulo: "Classe", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.15, campo: "classe" },
+    { titulo: "Último Evento", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "ultimoEvento" },
     { titulo: "Data/Hora", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "dataHora" },
   ];
 
@@ -3685,16 +3696,17 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   // suspensos/sobrestados, conclusos (decisão/sentença), sem
   // movimentação, remessas aos juízes leigos e, por último, localizadores.
 
-  // Relação de processos ativos: o proprio Relatório Geral, filtrado so'
-  // pela unidade, sem nenhum outro campo preenchido (Situação, dias,
-  // etc.) - equivalente a rodar a tela "com os campos sem preencher",
-  // que lista todos os processos ativos daquela unidade. "extrairTabela"
-  // pede pra' ler as linhas reais do resultado (nao so' o total).
+  // Relação de processos ativos: todos os grupos macro do filtro
+  // "Situação" EXCETO BAIXADO e SUSPENSÃO (e os respectivos subitens) -
+  // em vez de deixar o campo em branco, o que contava TODO processo da
+  // unidade (inclusive suspensos/sobrestados e baixados) como se fosse
+  // "ativo". "extrairTabela" pede pra' ler as linhas reais do resultado
+  // (nao so' o total).
   const processosAtivos = { total: null, tabela: null, erros: [] };
   if (opcoesFinais.processosAtivos) {
     notificar("Consultando a relação de processos ativos...");
     const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      valorSituacao: null,
+      gruposSituacaoExcluir: ["B", "S"],
       urgente: false,
       diasSituacao: null,
       valorOrgaoJuizo: valorUnidade,
@@ -3950,9 +3962,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   }
 
   const bytesFinais = await pdfFinal.save();
-  const nomeArquivo = `eproc/relatorio_correicao_${sanitizarNomeArquivo(nomeUnidade)}_${new Date()
-    .toISOString()
-    .slice(0, 10)}.pdf`;
+  const nomeArquivo = `eproc/Relatório_${sanitizarNomeArquivo(nomeUnidade)}.pdf`;
   await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytesFinais));
 
   notificar("Finalizando...");
@@ -5819,7 +5829,7 @@ async function exportarRegrasAutomacao(aoProgredir) {
 
   const bytes = await construirPdfRegras(regras, tituloPagina);
   const dataAtual = new Date().toISOString().slice(0, 10);
-  await baixarUm(`regras_automacao_${dataAtual}.pdf`, construirDataUrlBinario("application/pdf", bytes));
+  await baixarUm(`eproc/regras_automacao_${dataAtual}.pdf`, construirDataUrlBinario("application/pdf", bytes));
 
   notificar("Finalizando...");
   return { total: regras.length };

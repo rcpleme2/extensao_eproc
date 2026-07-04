@@ -125,8 +125,8 @@ os botões de ação — abre um pequeno modal com uma opção, salva em
   (ligado por padrão): controla a troca descrita na seção "Nomes de
   usuário na movimentação" acima.
 
-Os menus suspensos preenchidos pela extensão (unidades do Relatório da
-Unidade, localizadores da "Busca específica de localizadores") sempre
+Os menus suspensos preenchidos pela extensão (unidades do Relatório para
+Correição, localizadores da "Busca específica de localizadores") sempre
 aparecem em ordem alfabética — não é uma opção configurável, é aplicado
 automaticamente.
 
@@ -444,7 +444,7 @@ Quando o perfil ativo (select de perfil no cabeçalho do eproc,
 `#selInfraUnidades`) é **"CORREGEDORIA"**, um cartão exclusivo
 **"Corregedoria"** aparece no painel (fica oculto para qualquer outro
 perfil), com selo e borda destacada indicando que é condicional. Por
-enquanto ele só mostra o **Relatório da Unidade** (ver abaixo).
+enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
 
 > **Relatório Geral (todas as unidades)** — desativado temporariamente.
 > O botão, a área de progresso e toda a lógica (`exportarRelatorioPanoramico`
@@ -452,9 +452,9 @@ enquanto ele só mostra o **Relatório da Unidade** (ver abaixo).
 > `popup.html`/`popup.js` — a ideia é melhorar esse relatório antes de
 > voltar a expô-lo no painel.
 
-### Relatório da Unidade
+### Relatório para Correição
 
-1. **"Carregar unidades (Relatório da Unidade)"**: navega a aba atual até
+1. **"Carregar unidades (Relatório para Correição)"**: navega a aba atual até
    o Relatório Geral (mesmo mecanismo do botão "↗" do cartão Relatórios)
    e lê todas as opções do filtro "Órgão/Juízo" dessa tela — visualmente
    um dropdown do bootstrap-select, mas a leitura é feita direto no
@@ -480,25 +480,27 @@ enquanto ele só mostra o **Relatório da Unidade** (ver abaixo).
    "Informações serão extraídas de: `<nome completo da unidade>`" e
    libera a lista **"Itens a incluir no PDF"** (checkboxes, um por seção
    do relatório — todos marcados por padrão) e o botão **"Exportar
-   Relatório da Unidade (PDF)"**. Esse relatório sempre confere se uma
+   Relatório para Correição (PDF)"**. Esse relatório sempre confere se uma
    unidade foi escolhida antes de rodar — sem isso, mostra o erro
    "Selecione uma unidade na lista antes de gerar este relatório." em vez
    de seguir sem saber de onde extrair os dados; e confere se pelo menos
    1 item está marcado — sem isso, mostra "Marque ao menos um item do
    relatório antes de exportar.".
-4. **"Exportar Relatório da Unidade (PDF)"** gera, filtrado pela unidade
+4. **"Exportar Relatório para Correição (PDF)"** gera, filtrado pela unidade
    escolhida e pelos itens marcados, um único PDF com as seções abaixo
    **nesta ordem** (mesma ordem dos checkboxes "Itens a incluir no PDF"):
    - Nome da unidade e data/hora da extração.
    - **Relação de processos ativos**: o próprio Relatório Geral filtrado
-     só pela unidade, sem nenhum outro campo preenchido (Situação, dias,
-     etc.) — equivalente a rodar a consulta "com os campos em branco". Sai
-     em **página retrato** própria, com só os campos **Nº do Processo,
-     Data da Autuação, Situação, Classe e Último Evento** (a tabela real
-     do eproc traz mais colunas, como Sigilo e Localizador, que ficam de
-     fora aqui) — casados pelo texto do cabeçalho, não pela posição, para
-     não depender da ordem exata das colunas na tela. Ordenada pela **Data
-     de Autuação, do processo mais antigo para o mais novo**.
+     pela unidade e por **todos os macro grupos do filtro "Situação"
+     EXCETO BAIXADO e SUSPENSÃO** (e os respectivos subitens) — em vez de
+     deixar o campo em branco, o que contava também suspensos/sobrestados
+     e baixados como "ativos". Sai em **página retrato** própria, com só
+     os campos **Nº do Processo, Data da Autuação, Situação, Classe,
+     Último Evento e Data/Hora** (a tabela real do eproc traz mais
+     colunas, como Sigilo e Localizador, que ficam de fora aqui) — casados
+     pelo texto do cabeçalho, não pela posição, para não depender da ordem
+     exata das colunas na tela. Ordenada pela **Data de Autuação, do
+     processo mais antigo para o mais novo**.
    - **Suspensos/sobrestados**: há mais de 90 dias (grupo inteiro do
      filtro "Situação" — os values de `#selStatusProcesso` seguem o
      formato `status;codigo;grupo`; o grupo SUSPENSÃO é o sufixo `;S`) e
@@ -510,9 +512,9 @@ enquanto ele só mostra o **Relatório da Unidade** (ver abaixo).
      depois de todos os processos individuais listados acima. Além do
      total, o relatório também traz a **relação de processos**, em
      **página retrato**, com só os campos **Nº do Processo, Data da
-     Autuação, Situação e Localizador** (a tabela real do eproc traz mais
-     colunas, como Sigilo e Classe, que ficam de fora aqui) — casados
-     pelo texto do cabeçalho, igual à relação de processos ativos. Esse
+     Autuação, Situação, Localizador e Data/Hora** (a tabela real do eproc
+     traz mais colunas, como Sigilo e Classe, que ficam de fora aqui) —
+     casados pelo texto do cabeçalho, igual à relação de processos ativos. Esse
      detalhamento por situação é a parte mais demorada do relatório (uma
      consulta por situação), então roda **em paralelo**: a lista de ~40
      situações do grupo é dividida em **9 blocos** (o máximo de abas
@@ -564,7 +566,7 @@ enquanto ele só mostra o **Relatório da Unidade** (ver abaixo).
      seção que ela explica (não mais misturada com os "Avisos" gerais no
      início do relatório).
 
-   **Limite de abas ocultas simultâneas**: todo o Relatório da Unidade
+   **Limite de abas ocultas simultâneas**: todo o Relatório para Correição
    (e as demais rotinas desta extensão que abrem abas ocultas - Localizadores
    do Órgão, Busca específica de localizadores, Regras de Automação etc.)
    compartilha um **semáforo global** que nunca deixa mais de **9 abas
@@ -611,8 +613,8 @@ enquanto ele só mostra o **Relatório da Unidade** (ver abaixo).
    Tudo isso reaproveita as funções já existentes no painel: as mesmas
    consultas do Relatório Geral (agora com um filtro extra de
    Órgão/Juízo) e o mesmo gerador de tabela em PDF — combinados num
-   único arquivo `relatorio_gerencial_<unidade>_<data>.pdf` em
-   `Downloads/eproc/`, em vez de arquivos separados.
+   único arquivo `Relatório_<unidade>.pdf` em `Downloads/eproc/`, em vez
+   de arquivos separados.
 
    O PDF segue uma identidade visual sóbria e institucional, com o
    cabeçalho **"TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ · Sistema eProc"**
@@ -676,11 +678,16 @@ DESATIVADA **" ao lado de cada linha). Essa tabela é difícil de ler de
 relance: as colunas são estreitas e cada regra mistura critério, ação e
 outros filtros num texto corrido.
 
-O cartão **"Regras de Automação"** tem duas caixas de seleção de formato
-(**HTML** e **PDF**, HTML marcada por padrão — pode marcar as duas) e um
-botão **"Exportar regras ativas"**, sempre habilitado — não é preciso
-estar (nem navegar manualmente) na tela "Automatizar Tramitação
-Processual". Ao clicar:
+O cartão **"Regras de Automação"** tem um botão **"Exportar regras
+ativas"**, sempre habilitado — não é preciso estar (nem navegar
+manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
+
+> A exportação em **HTML** (aba nova no navegador) fica desativada por
+> enquanto — o **PDF** passou a ser o único formato oferecido no painel
+> (mais fácil de arquivar/anexar). O código do HTML
+> (`construirDocumentoRegras` em `background.js`, checkboxes em
+> `popup.html`/`popup.js`) continua no lugar, só comentado/oculto, para
+> poder reativar rapidamente se for necessário.
 
 1. A extensão abre uma aba oculta a partir da URL da aba atual e clica no
    link "Automatizar Localizadores do Órgão" do menu lateral (menu
@@ -695,18 +702,22 @@ Processual". Ao clicar:
    número da regra. Regras sem prioridade aparecem como
    "[Sem prioridade definida]" em vez do rótulo "[ Prioridade ]" da
    própria página, que é mais confuso fora de contexto.
-4. Gera o(s) documento(s) no(s) formato(s) marcado(s), com um "cartão" por
-   regra ativa. Cada cartão traz, no topo, um **fluxograma numerado em
-   sequência vertical** (1 Origem → 2 Critério → 3 Destino → 4 Ação
-   automatizada, quando houver) para entender de relance o que aquela
-   regra faz — cada passo numa caixa colorida própria, empilhada de cima
-   para baixo com uma seta entre elas, todas com o número bem visível
-   (branco sobre o fundo colorido do círculo). Esse layout vertical
-   substitui a versão anterior (caixas numa linha horizontal com quebra
-   automática): com textos de tamanhos bem diferentes entre as regras, a
-   quebra de linha da versão horizontal ficava imprevisível e as setas
-   pareciam soltas; empilhado e numerado, a ordem de execução fica clara
-   não importa o tamanho de cada texto.
+4. Gera o PDF, com um "cartão" por regra ativa. Cada cartão traz, no topo,
+   um **fluxograma numerado em sequência vertical** (1 Origem → 2
+   Critério → 3 Destino → 4 Ação automatizada, quando houver) para
+   entender de relance o que aquela regra faz — cada passo numa caixa
+   colorida própria, empilhada de cima para baixo com uma seta entre
+   elas, todas com o número bem visível (branco sobre o fundo colorido do
+   círculo). Esse layout vertical substitui a versão anterior (caixas
+   numa linha horizontal com quebra automática): com textos de tamanhos
+   bem diferentes entre as regras, a quebra de linha da versão horizontal
+   ficava imprevisível e as setas pareciam soltas; empilhado e numerado, a
+   ordem de execução fica clara não importa o tamanho de cada texto.
+
+   Quando a regra aceita **mais de um critério** (ligados por "OU" na
+   página original), a caixa "Critério" lista **todos eles**, um por
+   linha com um traço fino entre si — em vez de mostrar só o primeiro com
+   um badge "+N alternativa(s)" escondendo quais são os demais.
 
    Quando a regra tem um **Localizador de Erro** definido (para onde o
    processo vai se a ação automatizada falhar), ele ganha destaque
@@ -735,14 +746,9 @@ Processual". Ao clicar:
    etc.) podiam sair cortados; e o resumo do fluxograma pegava só a linha
    "Evento: ..." e descartava o resto — agora leva tudo a partir do
    cabeçalho "AUTOMATIZADO"/"Ação Programada" em diante.
-5. Se **HTML** estiver marcado, fecha a aba oculta e abre o documento em
-   uma **aba nova visível**, com um link de atalho em cada cartão para
-   editar aquela regra ou ver seu histórico diretamente no eproc. Se
-   **PDF** estiver marcado, baixa um arquivo `regras_automacao_<data>.pdf`
-   com o mesmo fluxograma (caixas, setas, numeração e a caixa vermelha do
-   Localizador de Erro redesenhados com as mesmas cores) e o mesmo
-   detalhamento — útil para arquivar ou anexar em outro lugar, já que o
-   HTML só existe como aba aberta no navegador.
+5. Fecha a aba oculta e baixa um arquivo `regras_automacao_<data>.pdf` em
+   `Downloads/eproc/` com o fluxograma completo (caixas, setas, numeração
+   e a caixa vermelha do Localizador de Erro) e o mesmo detalhamento.
 
 Se o link "Automatizar Localizadores do Órgão" não for encontrado na aba
 oculta (ex.: o rótulo do menu mudou), a extensão avisa exatamente qual
@@ -805,7 +811,7 @@ desses processos - sem precisar abrir a tela de Localizadores
 manualmente e procurar a linha certa.
 
 Ao clicar em **"Carregar localizadores"** (o botão **some assim que
-clicado** — mesmo padrão do "Carregar unidades" do Relatório da Unidade;
+clicado** — mesmo padrão do "Carregar unidades" do Relatório para Correição;
 só volta a aparecer se o carregamento falhar ou não encontrar nenhum
 localizador, para tentar de novo):
 
