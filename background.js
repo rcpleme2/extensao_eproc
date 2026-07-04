@@ -1447,6 +1447,32 @@ function consultarUmaVezNaPagina(parametros) {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  // Seleciona TODAS as opcoes de TODOS os grupos macro do filtro
+  // "Situação", EXCETO os grupos informados (ex.: ["B", "S"] para
+  // excluir BAIXADO e SUSPENSÃO) - usado pela "Relação de processos
+  // ativos" do Relatório da Unidade: em vez de deixar o campo em branco
+  // (o que conta TODO processo, inclusive suspensos e baixados, como se
+  // fosse "ativo"), marca every macro grupo/subitem exceto os excluidos,
+  // do mesmo jeito que "selecionarGrupoSituacao" marca um unico grupo.
+  function selecionarTodosGruposExceto(gruposExcluir) {
+    const select = document.getElementById("selStatusProcesso");
+    if (!select) throw new Error('Campo "Situação" não encontrado nesta página.');
+
+    const sufixosExcluidos = (gruposExcluir || []).map((g) => `;${g}`);
+    let alguma = false;
+    for (const opcao of select.options) {
+      const valor = opcao.value || "";
+      const excluida = sufixosExcluidos.some((sufixo) => valor.endsWith(sufixo));
+      const selecionada = valor !== "" && !excluida;
+      opcao.selected = selecionada;
+      if (selecionada) alguma = true;
+    }
+    if (!alguma) {
+      throw new Error("Nenhuma opção de situação restou selecionada após excluir os grupos informados.");
+    }
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   // Usado pelo Relatório Gerencial da Unidade (Corregedoria): filtra a
   // consulta por uma unidade especifica (Órgão/Juízo), em vez da unidade
   // padrao do perfil logado. Visualmente um dropdown do bootstrap-select,
@@ -1587,7 +1613,7 @@ function consultarUmaVezNaPagina(parametros) {
   // suspensos, alem do total. Nunca lanca excecao: sempre resolve com
   // { cabecalhos, linhas, erro }.
   async function extrairLinhasTblProcessoLista() {
-    const LIMITE_COLUNAS = 8;
+    const LIMITE_COLUNAS = 10;
     const LIMITE_LINHAS = 500;
     try {
       if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
@@ -1661,6 +1687,13 @@ function consultarUmaVezNaPagina(parametros) {
       // todos os MOVIMENTO) - mutuamente exclusivo com "valorSituacao".
       if (parametros.grupoSituacao) {
         selecionarGrupoSituacao(parametros.grupoSituacao);
+      }
+
+      // Todos os grupos macro EXCETO os informados (ex.: ["B", "S"] para
+      // excluir BAIXADO e SUSPENSÃO) - usado na "Relação de processos
+      // ativos", mutuamente exclusivo com "valorSituacao"/"grupoSituacao".
+      if (parametros.gruposSituacaoExcluir) {
+        selecionarTodosGruposExceto(parametros.gruposSituacaoExcluir);
       }
 
       if (parametros.diasSituacao != null) {
@@ -3499,6 +3532,7 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
   const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
   const idxClasse = indiceColunaPorCabecalho(tabela.cabecalhos, /classe/i);
   const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
+  const idxDataHora = indiceColunaPorCabecalho(tabela.cabecalhos, /data\s*\/?\s*hora/i);
 
   const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
   const itens = tabela.linhas
@@ -3510,17 +3544,19 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
         situacao: valorDe(linha, idxSituacao),
         classe: valorDe(linha, idxClasse),
         ultimoEvento: valorDe(linha, idxEvento),
+        dataHora: valorDe(linha, idxDataHora),
         autuacaoOrdenavel: paraDataOrdenavel(autuacao),
       };
     })
     .sort((a, b) => a.autuacaoOrdenavel - b.autuacaoOrdenavel);
 
   const colunas = [
-    { titulo: "Nº do Processo", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.23, campo: "processo" },
-    { titulo: "Data da Autuação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.15, campo: "autuacao" },
-    { titulo: "Situação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.22, campo: "situacao" },
-    { titulo: "Classe", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.2, campo: "classe" },
-    { titulo: "Último Evento", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.2, campo: "ultimoEvento" },
+    { titulo: "Nº do Processo", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.19, campo: "processo" },
+    { titulo: "Data da Autuação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.13, campo: "autuacao" },
+    { titulo: "Situação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.18, campo: "situacao" },
+    { titulo: "Classe", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "classe" },
+    { titulo: "Último Evento", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.18, campo: "ultimoEvento" },
+    { titulo: "Data/Hora", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "dataHora" },
   ];
 
   return construirPdfTabelaCuradaRetrato(
@@ -3540,6 +3576,7 @@ async function construirPdfSuspensos(tabela, nomeUnidade) {
   const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
   const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
   const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
+  const idxDataHora = indiceColunaPorCabecalho(tabela.cabecalhos, /data\s*\/?\s*hora/i);
 
   const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
   const itens = tabela.linhas.map((linha) => ({
@@ -3547,14 +3584,16 @@ async function construirPdfSuspensos(tabela, nomeUnidade) {
     autuacao: valorDe(linha, idxAutuacao),
     situacao: valorDe(linha, idxSituacao),
     localizador: valorDe(linha, idxLocalizador),
+    dataHora: valorDe(linha, idxDataHora),
   }));
 
   const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
   const colunas = [
-    { titulo: "Nº do Processo", largura: larguraUtil * 0.28, campo: "processo" },
-    { titulo: "Data da Autuação", largura: larguraUtil * 0.18, campo: "autuacao" },
-    { titulo: "Situação", largura: larguraUtil * 0.27, campo: "situacao" },
-    { titulo: "Localizador", largura: larguraUtil * 0.27, campo: "localizador" },
+    { titulo: "Nº do Processo", largura: larguraUtil * 0.24, campo: "processo" },
+    { titulo: "Data da Autuação", largura: larguraUtil * 0.15, campo: "autuacao" },
+    { titulo: "Situação", largura: larguraUtil * 0.22, campo: "situacao" },
+    { titulo: "Localizador", largura: larguraUtil * 0.22, campo: "localizador" },
+    { titulo: "Data/Hora", largura: larguraUtil * 0.17, campo: "dataHora" },
   ];
 
   return construirPdfTabelaCuradaRetrato(
@@ -3911,7 +3950,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   }
 
   const bytesFinais = await pdfFinal.save();
-  const nomeArquivo = `eproc/relatorio_gerencial_${sanitizarNomeArquivo(nomeUnidade)}_${new Date()
+  const nomeArquivo = `eproc/relatorio_correicao_${sanitizarNomeArquivo(nomeUnidade)}_${new Date()
     .toISOString()
     .slice(0, 10)}.pdf`;
   await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytesFinais));
@@ -4753,7 +4792,7 @@ async function construirCapaRelatorioGerencial(nomeUnidade, dataInformacao, seco
 
   let { pagina, y } = novaPagina();
 
-  pagina.drawText("Relatório Gerencial da Unidade", {
+  pagina.drawText("Relatório para Correição", {
     x: margem,
     y,
     size: 18,
@@ -5348,16 +5387,20 @@ function construirDocumentoRegras(regras, tituloPagina) {
       const linhasAcao = r.acaoLinhas && r.acaoLinhas.length > 0 ? r.acaoLinhas : r.acaoResumo ? [r.acaoResumo] : [];
       const acaoHtml = linhasAcao.map((linha) => `<div class="fluxo-acao-linha">${escaparHtml(linha)}</div>`).join("");
 
+      // Todos os critérios levados em consideração (quando a regra aceita
+      // mais de um, ligados por "OU"), um por linha com um divisor sutil
+      // entre eles - em vez de só o primeiro com um badge "+N
+      // alternativa(s)" escondendo quais são os demais.
+      const criteriosLista = r.criteriosLista && r.criteriosLista.length > 0 ? r.criteriosLista : [r.criterioResumo];
+      const criterioHtmlFluxo = criteriosLista.map((linha) => `<div class="fluxo-criterio-linha">${escaparHtml(linha)}</div>`).join("");
+
       const passos = [
         { classe: "fluxo-origem", titulo: "Origem", texto: r.localizadorOrigem, extra: "" },
         {
           classe: "fluxo-criterio",
           titulo: "Critério",
-          texto: r.criterioResumo,
-          extra:
-            (r.criterioAlternativas > 0
-              ? `<div class="fluxo-badge">+${r.criterioAlternativas} alternativa(s)</div>`
-              : "") + fluxoExtra,
+          texto: null,
+          extra: criterioHtmlFluxo + fluxoExtra,
         },
         { classe: "fluxo-destino", titulo: "Destino", texto: r.destinoResumo, extra: "" },
       ];
@@ -5458,6 +5501,9 @@ function construirDocumentoRegras(regras, tituloPagina) {
   .fluxo-acao-linha { padding-top:4px; margin-top:4px; }
   .fluxo-acao-linha:first-child { padding-top:0; margin-top:0; border-top:none; }
   .fluxo-acao-linha + .fluxo-acao-linha { border-top:1px dashed #c2caf5; }
+  .fluxo-criterio-linha { padding-top:4px; margin-top:4px; }
+  .fluxo-criterio-linha:first-child { padding-top:0; margin-top:0; border-top:none; }
+  .fluxo-criterio-linha + .fluxo-criterio-linha { border-top:1px dashed #f0d68a; }
   .fluxo-linha-com-erro { display:flex; align-items:stretch; gap:4px; }
   .fluxo-linha-com-erro .fluxo-caixa.fluxo-acao { flex:1 1 auto; min-width:0; }
   .fluxo-seta-lateral { flex:0 0 auto; display:flex; align-items:center; font-size:16px; color:#c0392b; padding:0 2px; }
@@ -5647,13 +5693,20 @@ async function construirPdfRegras(regras, tituloPagina) {
     y -= 14;
 
     const linhasAcao = r.acaoLinhas && r.acaoLinhas.length > 0 ? r.acaoLinhas : r.acaoResumo ? [r.acaoResumo] : [];
+    const criteriosLista = r.criteriosLista && r.criteriosLista.length > 0 ? r.criteriosLista : [r.criterioResumo];
     const temErro = Boolean(r.localizadorErro);
     const larguraAcao = temErro ? larguraUtil * 0.62 : larguraUtil;
     const larguraErro = larguraUtil * 0.3;
 
     const passos = [
       { titulo: "Origem", cores: PDF_REGRAS_CORES.origem, paragrafos: [r.localizadorOrigem], largura: larguraUtil },
-      { titulo: "Critério", cores: PDF_REGRAS_CORES.criterio, paragrafos: [r.criterioResumo], largura: larguraUtil },
+      {
+        titulo: "Critério",
+        cores: PDF_REGRAS_CORES.criterio,
+        paragrafos: criteriosLista,
+        largura: larguraUtil,
+        comDivisores: true,
+      },
       { titulo: "Destino", cores: PDF_REGRAS_CORES.destino, paragrafos: [r.destinoResumo], largura: larguraUtil },
     ];
     if (linhasAcao.length > 0) {
@@ -5740,11 +5793,10 @@ async function construirPdfRegras(regras, tituloPagina) {
 // antes) e/ou "pdf" (baixa um arquivo, mesmo padrao dos demais PDFs da
 // extensao). Reporta progresso pelo mesmo callback usado no resto da
 // extensao.
-async function exportarRegrasAutomacao(aoProgredir, formatos) {
+async function exportarRegrasAutomacao(aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
   };
-  const opcoes = formatos || { html: true, pdf: false };
 
   const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!abaAtual || !abaAtual.url) {
@@ -5758,15 +5810,16 @@ async function exportarRegrasAutomacao(aoProgredir, formatos) {
   if (regras.length === 0) throw new Error("Nenhuma regra ativa encontrada.");
 
   notificar("Gerando documento...");
-  if (opcoes.html) {
-    const html = construirDocumentoRegras(regras, tituloPagina);
-    await chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(html) });
-  }
-  if (opcoes.pdf) {
-    const bytes = await construirPdfRegras(regras, tituloPagina);
-    const dataAtual = new Date().toISOString().slice(0, 10);
-    await baixarUm(`regras_automacao_${dataAtual}.pdf`, construirDataUrlBinario("application/pdf", bytes));
-  }
+  // Exportação em HTML desativada por enquanto - o PDF passou a ser o
+  // único formato oferecido no painel (mais fácil de arquivar/anexar do
+  // que uma aba aberta no navegador). O código abaixo continua no lugar,
+  // só comentado, para poder reativar rapidamente se for necessário.
+  // const html = construirDocumentoRegras(regras, tituloPagina);
+  // await chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(html) });
+
+  const bytes = await construirPdfRegras(regras, tituloPagina);
+  const dataAtual = new Date().toISOString().slice(0, 10);
+  await baixarUm(`regras_automacao_${dataAtual}.pdf`, construirDataUrlBinario("application/pdf", bytes));
 
   notificar("Finalizando...");
   return { total: regras.length };
@@ -5989,7 +6042,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     // na hora e avisa o resultado final por uma mensagem separada.
     exportarRegrasAutomacao((texto) => {
       chrome.runtime.sendMessage({ tipo: "PROGRESSO_REGRAS", texto }).catch(() => {});
-    }, mensagem.formatos)
+    })
       .then((resultado) => {
         chrome.runtime.sendMessage({ tipo: "REGRAS_FINALIZADO", ok: true, resultado }).catch(() => {});
       })

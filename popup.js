@@ -664,7 +664,7 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
   areaProgressoRelatorioGerencial.hidden = false;
   textoProgressoRelatorioGerencial.textContent = "Iniciando...";
   setStatusCorregedoria(
-    `Gerando o Relatório Gerencial de "${unidade.nome}" em segundo plano (sua aba atual será navegada)...`
+    `Gerando o Relatório para Correição de "${unidade.nome}" em segundo plano (sua aba atual será navegada)...`
   );
 
   // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
@@ -881,7 +881,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
       setStatusCorregedoria(
-        `Concluído! Relatório Gerencial de "${resultado.unidade || ""}" salvo em Downloads/eproc/ (${
+        `Concluído! Relatório para Correição de "${resultado.unidade || ""}" salvo em Downloads/eproc/ (${
           resultado.totalLocalizadores || 0
         } localizador(es)).`,
         "ok"
@@ -927,8 +927,8 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 const areaRegrasInfo = document.getElementById("area-regras-info");
 const btnExportarRegras = document.getElementById("btn-exportar-regras");
 const areaErrosRegras = document.getElementById("area-erros-regras");
-const chkRegrasHtml = document.getElementById("chk-regras-html");
-const chkRegrasPdf = document.getElementById("chk-regras-pdf");
+// const chkRegrasHtml = document.getElementById("chk-regras-html");
+// const chkRegrasPdf = document.getElementById("chk-regras-pdf");
 
 function setStatusRegras(texto, tipo) {
   aplicarStatus(areaRegrasInfo, texto, tipo);
@@ -939,20 +939,16 @@ function setStatusRegras(texto, tipo) {
 // extensao abre e navega, sem exigir que o usuario esteja (ou navegue
 // manualmente) na tela "Automatizar Tramitação Processual". So' confirma
 // que comecou; o resultado final chega pela mensagem REGRAS_FINALIZADO.
+// Escolha de formato (HTML/PDF) desativada por enquanto - o PDF passou a
+// ser o único formato oferecido no painel (ver comentário equivalente em
+// popup.html/background.js).
 btnExportarRegras.addEventListener("click", async () => {
-  const formatos = { html: chkRegrasHtml.checked, pdf: chkRegrasPdf.checked };
-  if (!formatos.html && !formatos.pdf) {
-    areaErrosRegras.hidden = false;
-    areaErrosRegras.textContent = "Marque ao menos um formato (HTML ou PDF).";
-    return;
-  }
-
   btnExportarRegras.disabled = true;
   areaErrosRegras.hidden = true;
   setStatusRegras("Exportando regras em segundo plano (sua aba atual não é alterada)...");
 
   try {
-    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_REGRAS_AUTOMACAO", formatos });
+    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_REGRAS_AUTOMACAO" });
     if (!resposta || !resposta.ok) {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
     }
@@ -1044,10 +1040,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
-      const destinos = [];
-      if (chkRegrasHtml.checked) destinos.push("uma nova aba (HTML)");
-      if (chkRegrasPdf.checked) destinos.push("um arquivo PDF baixado");
-      setStatusRegras(`${resultado.total || 0} regra(s) ativa(s) exportada(s) em ${destinos.join(" e ")}.`, "ok");
+      setStatusRegras(`${resultado.total || 0} regra(s) ativa(s) exportada(s) em um arquivo PDF baixado.`, "ok");
     } else {
       setStatusRegras("Erro ao exportar as regras.", "erro");
       areaErrosRegras.hidden = false;

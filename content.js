@@ -555,8 +555,12 @@ function listarRegrasAutomacaoAtivas() {
       .split(/\s*OU\s*/)
       .map((s) => s.trim())
       .filter(Boolean);
-    const criterioResumo = linhasCriterio[0] || "Sem critério definido";
-    const criterioAlternativas = Math.max(0, linhasCriterio.length - 1);
+    // Todos os critérios levados em consideração (quando a regra tem mais
+    // de um, ligados por "OU" na página original) - o fluxograma lista
+    // todos eles, um por linha, em vez de só o primeiro com um badge
+    // "+N alternativa(s)" escondendo quais são os demais.
+    const criteriosLista = linhasCriterio.length > 0 ? linhasCriterio : ["Sem critério definido"];
+    const criterioResumo = criteriosLista[0];
 
     const linhasDestino = textoComQuebras(origemDestinoAcao)
       .split("\n")
@@ -615,7 +619,7 @@ function listarRegrasAutomacaoAtivas() {
       destinoAcaoHtml,
       outrosCriteriosHtml,
       criterioResumo,
-      criterioAlternativas,
+      criteriosLista,
       destinoResumo,
       acaoResumo,
       acaoLinhas,
