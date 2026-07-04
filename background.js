@@ -33,6 +33,29 @@ const COR_ALERTA_VERMELHO = rgb(0.75, 0.1, 0.1);
 // baixo.
 const FATOR_TOPO_ZEBRA_TABELA = 0.6;
 
+// Folga vertical extra (em relação à altura de uma linha de texto)
+// somada à altura "natural" de cada linha da tabela (maxLinhas *
+// ALTURA_LINHA), usada nas 3 tabelas com zebrado desta extensão -
+// existe pra dar um respiro entre uma linha e a próxima, em vez de
+// linhas coladas uma na outra.
+const FATOR_FOLGA_ALTURA_LINHA_TABELA = 0.4;
+
+// Quanto descer a linha de base da PRIMEIRA linha de texto (em relação
+// ao "y" de referência da linha da tabela - o mesmo "y" usado pelo
+// zebrado) para CENTRALIZAR verticalmente o texto dentro da altura total
+// da linha. Não é simplesmente metade da folga acima: as letras minúsculas
+// da fonte Helvetica sobem menos da linha de base (~0,53x ALTURA_LINHA,
+// métrica CapHeight da fonte) do que descem (~0,15x, métrica Descender) -
+// dividindo a folga ao meio, o "peso visual" do texto (que já é maior
+// para cima do que para baixo) ficava perto demais do topo da célula.
+// Valor calculado a partir dessas métricas (CapHeight/Descender da
+// Helvetica) e conferido visualmente no PDF renderizado.
+const FATOR_CENTRALIZACAO_TEXTO_TABELA = 0.29;
+
+function deslocamentoCentralizacaoTexto(alturaLinhaTexto) {
+  return alturaLinhaTexto * FATOR_CENTRALIZACAO_TEXTO_TABELA;
+}
+
 // Desenha, quando a linha for uma linha "ímpar" (contagem a partir de 0),
 // a faixa de fundo alternada (zebrado) por trás de uma linha de tabela -
 // helper único compartilhado por todas as tabelas com zebrado da
@@ -3637,7 +3660,7 @@ async function construirPdfRemessasJuizesLeigos(linhas, nomeUnidade) {
         quebrarLinhas(sanitizarTextoPdf(String(valoresLinha[coluna.campo] ?? "")), fonteNormal, REMESSAS_TAMANHO_FONTE, coluna.largura - 4)
       );
       const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
-      const alturaLinha = maxLinhas * REMESSAS_ALTURA_LINHA + REMESSAS_ALTURA_LINHA * 0.4;
+      const alturaLinha = maxLinhas * REMESSAS_ALTURA_LINHA + REMESSAS_ALTURA_LINHA * FATOR_FOLGA_ALTURA_LINHA_TABELA;
 
       if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
         novaPagina();
@@ -3654,10 +3677,11 @@ async function construirPdfRemessasJuizesLeigos(linhas, nomeUnidade) {
       });
       indiceLinhaZebra += 1;
 
+      const yTextoInicial = y - deslocamentoCentralizacaoTexto(REMESSAS_ALTURA_LINHA);
       let x = margem + 4;
       for (let i = 0; i < colunas.length; i += 1) {
         const corColuna = colunas[i].campo === "processo" && item.prioridade ? COR_ALERTA_VERMELHO : COR_CINZA_TEXTO;
-        let yColuna = y;
+        let yColuna = yTextoInicial;
         for (const linhaTexto of linhasPorColuna[i]) {
           try {
             pagina.drawText(linhaTexto, { x, y: yColuna, size: REMESSAS_TAMANHO_FONTE, font: fonteNormal, color: corColuna });
@@ -3776,7 +3800,7 @@ async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) 
       quebrarLinhas(sanitizarTextoPdf(String(item[coluna.campo] ?? "")), fonteNormal, TAMANHO_FONTE, coluna.largura - 4)
     );
     const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
-    const alturaLinha = maxLinhas * ALTURA_LINHA + ALTURA_LINHA * 0.4;
+    const alturaLinha = maxLinhas * ALTURA_LINHA + ALTURA_LINHA * FATOR_FOLGA_ALTURA_LINHA_TABELA;
 
     if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
       novaPagina();
@@ -3793,6 +3817,7 @@ async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) 
     });
     indiceLinhaZebra += 1;
 
+    const yTextoInicial = y - deslocamentoCentralizacaoTexto(ALTURA_LINHA);
     let x = margem + 4;
     for (let i = 0; i < colunas.length; i += 1) {
       // Coluna pode definir uma cor propria por VALOR (ex.: "Situação" no
@@ -3800,7 +3825,7 @@ async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) 
       // distinto) - cai para a cor cinza padrao quando a coluna nao
       // define nada.
       const corColuna = colunas[i].cor ? colunas[i].cor(item[colunas[i].campo]) : COR_CINZA_TEXTO;
-      let yColuna = y;
+      let yColuna = yTextoInicial;
       for (const linhaTexto of linhasPorColuna[i]) {
         try {
           pagina.drawText(linhaTexto, { x, y: yColuna, size: TAMANHO_FONTE, font: fonteNormal, color: corColuna });
@@ -5492,7 +5517,7 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
       quebrarLinhas(sanitizarTextoPdf(String(item[coluna.campo] ?? "")), fonteNormal, PDF_LOCALIZADORES_TAMANHO_FONTE, coluna.largura - 4)
     );
     const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
-    const alturaLinha = maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA + PDF_LOCALIZADORES_ALTURA_LINHA * 0.4;
+    const alturaLinha = maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA + PDF_LOCALIZADORES_ALTURA_LINHA * FATOR_FOLGA_ALTURA_LINHA_TABELA;
 
     if (y - alturaLinha < PDF_ALTURA_RODAPE + PDF_LOCALIZADORES_MARGEM) {
       novaPagina(false);
@@ -5508,9 +5533,10 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
     });
     indiceLinhaZebra += 1;
 
+    const yTextoInicial = y - deslocamentoCentralizacaoTexto(PDF_LOCALIZADORES_ALTURA_LINHA);
     let x = margem + 4;
     for (let i = 0; i < colunas.length; i += 1) {
-      let yColuna = y;
+      let yColuna = yTextoInicial;
       for (const linha of linhasPorColuna[i]) {
         try {
           pagina.drawText(linha, { x, y: yColuna, size: PDF_LOCALIZADORES_TAMANHO_FONTE, font: fonteNormal, color: COR_CINZA_TEXTO });
