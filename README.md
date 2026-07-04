@@ -1,8 +1,10 @@
 # Extensão Auxiliar eProc
 
-Extensão para Chrome/Edge com funcionalidades para o sistema **eproc**
-(usado por diversos tribunais brasileiros: TJPR, TJSC, TJAL, Justiça Federal,
-etc.), organizadas em cartões colapsáveis no painel lateral: **Exportar
+Extensão para Chrome/Edge com funcionalidades para o sistema **eproc** do
+TJPR, restrita aos endereços `https://eproc1g.tjpr.jus.br/eproc/` e
+`https://eproc1g.tre.tjpr.jus.br/eproc/` (únicos hosts com permissão no
+`manifest.json` — a extensão não roda em nenhum outro domínio),
+organizadas em cartões colapsáveis no painel lateral: **Exportar
 Documentos**, **Gestão da Unidade** (que reúne Relatórios, Regras de
 Automação, Localizadores do Órgão e Busca específica de localizadores) e
 **Corregedoria** (só para esse perfil). O painel abre enxuto (só o
