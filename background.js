@@ -3622,10 +3622,15 @@ async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) 
 
     let x = margem + 4;
     for (let i = 0; i < colunas.length; i += 1) {
+      // Coluna pode definir uma cor propria por VALOR (ex.: "Situação" no
+      // relatório de processos ativos, uma cor diferente por valor
+      // distinto) - cai para a cor cinza padrao quando a coluna nao
+      // define nada.
+      const corColuna = colunas[i].cor ? colunas[i].cor(item[colunas[i].campo]) : COR_CINZA_TEXTO;
       let yColuna = y;
       for (const linhaTexto of linhasPorColuna[i]) {
         try {
-          pagina.drawText(linhaTexto, { x, y: yColuna, size: TAMANHO_FONTE, font: fonteNormal, color: COR_CINZA_TEXTO });
+          pagina.drawText(linhaTexto, { x, y: yColuna, size: TAMANHO_FONTE, font: fonteNormal, color: corColuna });
         } catch (e) {
           // Ignora linha que a fonte padrao nao consiga desenhar.
         }
@@ -3658,6 +3663,39 @@ const ABREVIACOES_SITUACAO = {
 };
 function abreviarSituacao(situacao) {
   return ABREVIACOES_SITUACAO[situacao] || situacao;
+}
+
+// Paleta de cores usada para colorir cada valor DISTINTO da coluna
+// "Situação" na relação de processos ativos - facilita bater o olho e
+// identificar rapidamente processos na mesma situação, mesmo com a
+// tabela ordenada por Data de Autuação (então situações iguais nem
+// sempre ficam em linhas vizinhas). Cores escolhidas por contraste em
+// fundo branco/zebrado e por serem distintas das cores institucionais
+// já usadas em outros elementos do PDF (azul primário, vermelho de
+// alerta) - repete ciclicamente se houver mais valores distintos do que
+// cores.
+const PALETA_CORES_SITUACAO = [
+  rgb(0.15, 0.35, 0.75), // azul
+  rgb(0.6, 0.1, 0.5), // roxo
+  rgb(0.0, 0.45, 0.35), // verde-azulado
+  rgb(0.75, 0.45, 0.0), // laranja
+  rgb(0.55, 0.0, 0.15), // vinho
+  rgb(0.35, 0.35, 0.0), // oliva
+  rgb(0.0, 0.4, 0.6), // ciano escuro
+  rgb(0.45, 0.25, 0.65), // violeta
+];
+
+// Monta um mapa "valor -> cor", uma cor por valor DISTINTO encontrado,
+// na ordem em que aparecem pela primeira vez na lista (determinístico -
+// a mesma lista de valores sempre gera o mesmo mapa de cores).
+function mapaCoresPorValor(valores) {
+  const mapa = new Map();
+  for (const valor of valores) {
+    if (!mapa.has(valor)) {
+      mapa.set(valor, PALETA_CORES_SITUACAO[mapa.size % PALETA_CORES_SITUACAO.length]);
+    }
+  }
+  return mapa;
 }
 
 async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
@@ -3698,10 +3736,17 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
     })
     .sort((a, b) => a.autuacaoOrdenavel - b.autuacaoOrdenavel);
 
+  const coresPorSituacao = mapaCoresPorValor(itens.map((item) => item.situacao));
+
   const colunas = [
     { titulo: "Nº do Processo", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.22, campo: "processo" },
     { titulo: "Data da Autuação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.15, campo: "autuacao" },
-    { titulo: "Situação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "situacao" },
+    {
+      titulo: "Situação",
+      largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16,
+      campo: "situacao",
+      cor: (valor) => coresPorSituacao.get(valor) || COR_CINZA_TEXTO,
+    },
     { titulo: "Classe", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.15, campo: "classe" },
     { titulo: "Último Evento", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "ultimoEvento" },
     { titulo: "Data/Hora", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "dataHora" },
@@ -3782,9 +3827,13 @@ async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
 
   novaPagina(true);
 
+  // Uniformiza em MAIÚSCULAS antes de agrupar - sem isso, a mesma classe
+  // escrita com capitalização diferente entre processos (ex.:
+  // "Procedimento Comum Cível" vs "PROCEDIMENTO COMUM CÍVEL") virava duas
+  // fatias separadas no gráfico em vez de uma só.
   const contagemPorClasse = new Map();
   for (const item of itens) {
-    const chave = (item.classe || "").trim() || "(sem classe)";
+    const chave = (item.classe || "").trim().toLocaleUpperCase("pt-BR") || "(SEM CLASSE)";
     contagemPorClasse.set(chave, (contagemPorClasse.get(chave) || 0) + 1);
   }
   const ordenado = Array.from(contagemPorClasse.entries())
@@ -3794,7 +3843,7 @@ async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
   const top15 = ordenado.slice(0, 15);
   const totalOutros = ordenado.slice(15).reduce((soma, item) => soma + item.contagem, 0);
   const dados = [...top15];
-  if (totalOutros > 0) dados.push({ classe: "Outros", contagem: totalOutros });
+  if (totalOutros > 0) dados.push({ classe: "OUTROS", contagem: totalOutros });
 
   const total = itens.length || 1;
   const maiorContagem = Math.max(...dados.map((d) => d.contagem), 1);
@@ -3956,6 +4005,21 @@ async function construirPdfRankingPartes(itens, nomeUnidade) {
 // Localizador - a tabela real do "#tblProcessoLista" traz mais colunas,
 // como Sigilo e Classe, que ficam de fora aqui). Mesma tecnica de casar
 // pelo texto do cabecalho usada em "construirPdfProcessosAtivos".
+// Localizador pode ter mais de um valor no mesmo processo (mesma tecnica
+// de "textoCelula" em "extrairLinhasTblProcessoLista" - varios
+// "<span class='d-block'>" na mesma celula, juntados aqui com " | ").
+// Cada um vira uma LINHA própria na tabela (em vez de ficar tudo colado
+// numa linha só) e os valores exatamente "?" (localizador
+// expirado/inconsistente do proprio eproc) são descartados por
+// completo, em vez de aparecerem como um "?" solto sem significado.
+function formatarLocalizadores(valorBruto) {
+  const nomes = (valorBruto || "")
+    .split("|")
+    .map((nome) => nome.trim())
+    .filter((nome) => nome && nome !== "?");
+  return nomes.join("\n");
+}
+
 async function construirPdfSuspensos(tabela, nomeUnidade) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
@@ -3968,7 +4032,7 @@ async function construirPdfSuspensos(tabela, nomeUnidade) {
     processo: valorDe(linha, idxProcesso),
     autuacao: valorDe(linha, idxAutuacao),
     situacao: valorDe(linha, idxSituacao),
-    localizador: valorDe(linha, idxLocalizador),
+    localizador: formatarLocalizadores(valorDe(linha, idxLocalizador)),
     dataHora: valorDe(linha, idxDataHora),
   }));
 
@@ -4213,8 +4277,12 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     const resultado = await consultarLocalizadoresUnidadeViaRelatorioGeral(abaAtual.url, valorUnidade, notificar);
     // Sem total de processos para ordenar por ele (ver comentario em
     // "consultarLocalizadoresUnidadeViaRelatorioGeral") - so' resta a
-    // ordem alfabetica.
-    localizadoresOrdenados = [...resultado.localizadores].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    // ordem alfabetica. Descarta valores exatamente "?" (localizador
+    // expirado/inconsistente do proprio eproc) - sem significado nenhum
+    // para quem le' o relatório.
+    localizadoresOrdenados = resultado.localizadores
+      .filter((l) => (l.nome || "").trim() !== "?")
+      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
     erroLocalizadores = resultado.erro;
   }
 
@@ -4267,11 +4335,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
         ...(suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem })),
         {
           rotulo: "Total",
-          valor: totalComExcesso(
-            suspensos.total,
-            suspensos.mais90Dias,
-            `suspensos há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`
-          ),
+          valor: totalComExcesso(suspensos.total, suspensos.mais90Dias, `há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`),
         },
       ],
     });

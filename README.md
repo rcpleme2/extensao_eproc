@@ -4,14 +4,14 @@ Extensão para Chrome/Edge com funcionalidades para o sistema **eproc** do
 TJPR, restrita aos endereços `https://eproc1g.tjpr.jus.br/eproc/` e
 `https://eproc1g.tre.tjpr.jus.br/eproc/` (únicos hosts com permissão no
 `manifest.json` — a extensão não roda em nenhum outro domínio),
-organizadas em cartões colapsáveis no painel lateral: **Exportar
-Documentos**, **Gestão da Unidade** (que reúne Relatórios, Regras de
-Automação, Localizadores do Órgão e Busca específica de localizadores) e
-**Corregedoria** (só para esse perfil). O painel abre enxuto (só o
-primeiro cartão expandido); cada cartão expande ao clicar no título, e
-reabre sozinho quando alguma operação dele progride, conclui ou falha.
-Sucessos aparecem em verde e erros em vermelho na linha de status de
-cada cartão.
+organizadas em cartões colapsáveis no painel lateral: **Gestão
+Gabinete** (Exportar Documentos + Busca específica de localizadores),
+**Gestão da Unidade** (Relatórios, Regras de Automação e Localizadores
+do Órgão) e **Corregedoria** (só para esse perfil). O painel abre enxuto
+(só o primeiro cartão expandido); cada cartão expande ao clicar no
+título, e reabre sozinho quando alguma operação dele progride, conclui
+ou falha. Sucessos aparecem em verde e erros em vermelho na linha de
+status de cada cartão.
 
 Além do cartão **Corregedoria** (único que é realmente condicional - só
 aparece quando esse é o perfil ativo, ver seção própria abaixo), os
@@ -19,19 +19,20 @@ demais cartões trazem um selo indicando a qual perfil a funcionalidade
 se destina, **apenas como indicação organizacional** - continuam sempre
 visíveis e utilizáveis por qualquer perfil:
 
-- **perfil MAGISTRADO**: Exportar Documentos.
-- **perfil GESTÃO DA UNIDADE**: Relatórios, Regras de Automação,
-  Localizadores do Órgão e Busca específica de localizadores - reunidos
-  num único cartão "Gestão da Unidade", cada um em sua própria subseção
-  (título + divisor), não em sub-menus aninhados: assim que o cartão é
-  aberto, todos os botões de todas as quatro funcionalidades já ficam à
-  vista, sem precisar abrir mais nada. Quando o perfil ativo é
-  CORREGEDORIA, esse cartão continua visível (para indicar que a
-  funcionalidade existe), mas fica desabilitado (esmaecido, sem abrir),
-  já que não se aplica a esse perfil.
+- **perfil MAGISTRADO**: cartão "Gestão Gabinete", com **Exportar
+  Documentos** e **Busca específica de localizadores** em subseções
+  próprias (título + divisor) dentro do mesmo cartão.
+- **perfil GESTÃO DA UNIDADE**: Relatórios, Regras de Automação e
+  Localizadores do Órgão - reunidos num único cartão "Gestão da
+  Unidade", cada um em sua própria subseção, não em sub-menus
+  aninhados: assim que o cartão é aberto, todos os botões de todas as
+  funcionalidades já ficam à vista, sem precisar abrir mais nada.
+  Quando o perfil ativo é CORREGEDORIA, esse cartão continua visível
+  (para indicar que a funcionalidade existe), mas fica desabilitado
+  (esmaecido, sem abrir), já que não se aplica a esse perfil.
 
 A ordem padrão dos cartões é **Corregedoria > Gestão da Unidade >
-Exportar Documentos**, mas cada um tem uma alça (⠿) ao lado do ícone
+Gestão Gabinete**, mas cada um tem uma alça (⠿) ao lado do ícone
 que pode ser arrastada com o mouse para reordená-los como preferir; a
 ordem escolhida fica salva (`chrome.storage.local`) e é reaplicada da
 próxima vez que o painel for aberto.
@@ -524,7 +525,11 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      processo mais antigo para o mais novo**. Duas situações com nome
      longo saem abreviadas na coluna Situação: "MOVIMENTO-AGUARDA
      DESPACHO" vira **"Cls. Despacho"** e "MOVIMENTO-AGUARDA SENTENÇA"
-     vira **"Cls. Sentença"**.
+     vira **"Cls. Sentença"**. Cada valor distinto de Situação ganha sua
+     própria **cor de texto**, sempre a mesma para o mesmo valor ao longo
+     do PDF — como a tabela é ordenada por Data de Autuação (não por
+     Situação), a cor ajuda a identificar rapidamente processos na mesma
+     situação mesmo espalhados entre linhas não adjacentes.
 
      Ao final dessa relação (mesmo PDF, páginas extras), entram mais duas
      seções, montadas com os mesmos dados já extraídos (sem nenhuma
@@ -533,7 +538,11 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
        as **15 classes mais frequentes**, cada uma com a fração percentual
        sobre o total de processos ativos da unidade, e as demais
        agrupadas em **"Outros"** (quando houver mais de 15 classes
-       distintas).
+       distintas). O nome da classe é **uniformizado em maiúsculas** antes
+       de agrupar — sem isso, a mesma classe grafada de forma diferente
+       entre processos (ex.: "Procedimento Comum Cível" e "PROCEDIMENTO
+       COMUM CÍVEL") virava duas fatias separadas no gráfico em vez de uma
+       só.
      - Os **15 maiores demandantes** (polo ativo) e os **15 maiores
        demandados** (polo passivo), com o número de processos ativos em
        que cada parte aparece — lidos das colunas **Autor** e **Réu** da
@@ -551,13 +560,13 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      "SOBRESTADO CONVÊNIO: 3") — as dezenas de variantes zeradas ficam de
      fora, para não poluir o relatório. O **Total** vem por último,
      depois de todos os processos individuais listados acima, com a
-     contagem de **suspensos há mais de 90 dias entre parênteses** (ex.:
-     "Total 21 (5 suspensos há mais de 90 dias)") — em vez de uma linha
+     contagem de **processos há mais de 90 dias entre parênteses** (ex.:
+     "Total 21 (5 há mais de 90 dias)") — em vez de uma linha
      própria para esse recorte, já que é só um subconjunto do próprio
      Total, não um número independente. O parêntese só aparece quando o
      Total é maior que 0 (com Total 0 não há nada a detalhar) e mostra
      **"nenhum"** em vez de "0" quando não há nenhum processo com mais de
-     90 dias (ex.: "Total 10 (nenhum suspensos há mais de 90 dias)") —
+     90 dias (ex.: "Total 10 (nenhum há mais de 90 dias)") —
      mesma regra usada em Conclusos para decisão/sentença, abaixo. Além do
      total, o relatório também traz a **relação de processos**, em
      **página retrato**, com só os campos **Nº do Processo, Data da
@@ -566,7 +575,13 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      casados pelo texto do cabeçalho, igual à relação de processos ativos
      (mesmo filtro contra a linha "vazia" do DataTables quando não há
      nenhum processo — ver nota na seção de Remessas aos juízes leigos
-     abaixo, que teve o mesmo problema). Esse
+     abaixo, que teve o mesmo problema). Quando o processo tem **mais de
+     um Localizador**, cada um entra numa **linha própria** dentro da
+     célula (em vez de ficar tudo colado numa linha só) - mesma técnica
+     usada para separar Autor/Réu na relação de processos ativos, abaixo;
+     valores exatamente **"?"** (localizador expirado/inconsistente do
+     próprio eproc) são descartados por completo, em vez de aparecerem
+     como um "?" solto sem significado. Esse
      detalhamento por situação é a parte mais demorada do relatório (uma
      consulta por situação), então roda **em paralelo**: a lista de ~40
      situações do grupo é dividida em **9 blocos** (o máximo de abas
@@ -631,7 +646,10 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      registro encontrado" e "Total: 1 processo(s)".
    - O **nome de cada Localizador** da unidade, em ordem alfabética, em
      páginas próprias no **final do PDF**, depois de todas as demais
-     seções. Logo abaixo do título dessa seção, um **subtítulo discreto**
+     seções — valores exatamente **"?"** (localizador expirado/
+     inconsistente do próprio eproc) são descartados da lista, em vez de
+     aparecerem como um "?" solto sem significado. Logo abaixo do título
+     dessa seção, um **subtítulo discreto**
      (fonte pequena, sem destaque) avisa que a lista traz só os nomes —
      por enquanto, a única forma de obter o total de processos de cada
      localizador é se habilitar na própria unidade e usar a ferramenta
@@ -887,7 +905,8 @@ automaticamente ao final, sem interferir na aba que você está usando.
 
 ## Busca específica de localizadores
 
-O cartão **"Busca específica de localizadores"** carrega os
+A subseção **"Busca específica de localizadores"** (dentro do cartão
+**"Gestão Gabinete"**, perfil MAGISTRADO) carrega os
 Localizadores do Órgão com pelo menos um processo atribuído e permite ir
 direto até a lista de processos de um deles, ou exportar um relatório
 desses processos - sem precisar abrir a tela de Localizadores

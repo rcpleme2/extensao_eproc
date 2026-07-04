@@ -287,6 +287,66 @@
 
         <div id="area-erros-localizadores" class="erros" hidden></div>
       </div>
+    </div>
+  </details>
+
+  <details class="card card--privilegiado" id="card-documentos" open>
+    <summary class="card-titulo">
+      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
+      <span class="card-icone" aria-hidden="true">🗄️</span>
+      <span class="card-rotulo">Gestão Gabinete</span>
+      <span class="selo">perfil MAGISTRADO</span>
+    </summary>
+    <div class="card-corpo">
+      <div class="subsecao">
+        <h3 class="subsecao-titulo">
+          <span class="subsecao-icone" aria-hidden="true">📄</span>
+          Exportar Documentos
+        </h3>
+        <div id="area-status" class="status">
+          Abra um processo no eproc e clique em "Detectar documentos".
+        </div>
+
+        <div class="botoes">
+          <button id="btn-detectar" class="btn">Detectar documentos</button>
+        </div>
+
+        <div id="area-processo" class="processo" hidden>
+          Processo: <strong id="numero-processo"></strong>
+          (<span id="total-documentos"></span> documento(s))
+        </div>
+
+        <div id="area-opcoes" class="opcoes" hidden>
+          <label class="opcao">
+            <input type="radio" name="modo-exportacao" id="radio-individuais" checked />
+            Arquivos individuais
+          </label>
+          <label class="opcao">
+            <input type="radio" name="modo-exportacao" id="radio-pdf-unico" />
+            PDF único combinado
+          </label>
+          <label class="opcao">
+            <input type="radio" name="modo-exportacao" id="radio-md-unico" />
+            MD único (texto e anonimizado)
+          </label>
+          <div id="aviso-md-unico" class="aviso" hidden>
+            Extrai o texto dos documentos (sem OCR), inclui a movimentação e
+            remove CPF/CNPJ, telefone, e-mail e endereços, abreviando nomes.
+            <strong>Anonimização de melhor esforço — revise antes de
+            compartilhar.</strong>
+          </div>
+          <button id="btn-baixar" class="btn" disabled>Baixar</button>
+        </div>
+
+        <div id="area-progresso" class="progresso" hidden>
+          <progress id="barra-progresso" value="0" max="100"></progress>
+          <span id="texto-progresso"></span>
+        </div>
+
+        <ul id="lista-documentos" class="lista-documentos" hidden></ul>
+
+        <div id="area-erros" class="erros" hidden></div>
+      </div>
 
       <hr class="separador-subsecao" />
 
@@ -342,60 +402,6 @@
 
         <div id="area-erros-nav-localizadores" class="erros" hidden></div>
       </div>
-    </div>
-  </details>
-
-  <details class="card card--privilegiado" id="card-documentos" open>
-    <summary class="card-titulo">
-      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
-      <span class="card-icone" aria-hidden="true">📄</span>
-      <span class="card-rotulo">Exportar Documentos</span>
-      <span class="selo">perfil MAGISTRADO</span>
-    </summary>
-    <div class="card-corpo">
-      <div id="area-status" class="status">
-        Abra um processo no eproc e clique em "Detectar documentos".
-      </div>
-
-      <div class="botoes">
-        <button id="btn-detectar" class="btn">Detectar documentos</button>
-      </div>
-
-      <div id="area-processo" class="processo" hidden>
-        Processo: <strong id="numero-processo"></strong>
-        (<span id="total-documentos"></span> documento(s))
-      </div>
-
-      <div id="area-opcoes" class="opcoes" hidden>
-        <label class="opcao">
-          <input type="radio" name="modo-exportacao" id="radio-individuais" checked />
-          Arquivos individuais
-        </label>
-        <label class="opcao">
-          <input type="radio" name="modo-exportacao" id="radio-pdf-unico" />
-          PDF único combinado
-        </label>
-        <label class="opcao">
-          <input type="radio" name="modo-exportacao" id="radio-md-unico" />
-          MD único (texto e anonimizado)
-        </label>
-        <div id="aviso-md-unico" class="aviso" hidden>
-          Extrai o texto dos documentos (sem OCR), inclui a movimentação e
-          remove CPF/CNPJ, telefone, e-mail e endereços, abreviando nomes.
-          <strong>Anonimização de melhor esforço — revise antes de
-          compartilhar.</strong>
-        </div>
-        <button id="btn-baixar" class="btn" disabled>Baixar</button>
-      </div>
-
-      <div id="area-progresso" class="progresso" hidden>
-        <progress id="barra-progresso" value="0" max="100"></progress>
-        <span id="texto-progresso"></span>
-      </div>
-
-      <ul id="lista-documentos" class="lista-documentos" hidden></ul>
-
-      <div id="area-erros" class="erros" hidden></div>
     </div>
   </details>
 
