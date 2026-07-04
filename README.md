@@ -500,7 +500,27 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      colunas, como Sigilo e Localizador, que ficam de fora aqui) — casados
      pelo texto do cabeçalho, não pela posição, para não depender da ordem
      exata das colunas na tela. Ordenada pela **Data de Autuação, do
-     processo mais antigo para o mais novo**.
+     processo mais antigo para o mais novo**. Duas situações com nome
+     longo saem abreviadas na coluna Situação: "MOVIMENTO-AGUARDA
+     DESPACHO" vira **"Cls. Despacho"** e "MOVIMENTO-AGUARDA SENTENÇA"
+     vira **"Cls. Sentença"**.
+
+     Ao final dessa relação (mesmo PDF, páginas extras), entram mais duas
+     seções, montadas com os mesmos dados já extraídos (sem nenhuma
+     consulta a mais):
+     - Um **gráfico de barras** com a distribuição por classe processual:
+       as **15 classes mais frequentes**, cada uma com a fração percentual
+       sobre o total de processos ativos da unidade, e as demais
+       agrupadas em **"Outros"** (quando houver mais de 15 classes
+       distintas).
+     - Os **15 maiores demandantes** (polo ativo) e os **15 maiores
+       demandados** (polo passivo), com o número de processos ativos em
+       que cada parte aparece — lidos das colunas **Autor** e **Réu** da
+       mesma tabela do Relatório Geral. Quando um processo tem mais de uma
+       parte no mesmo polo (litisconsórcio), cada nome vem no seu próprio
+       `<span class="d-block">` dentro da célula (sem espaço nem
+       pontuação entre eles) — a extensão separa cada nome individualmente
+       antes de contar, em vez de somar tudo como se fosse um nome só.
    - **Suspensos/sobrestados**: há mais de 90 dias (grupo inteiro do
      filtro "Situação" — os values de `#selStatusProcesso` seguem o
      formato `status;codigo;grupo`; o grupo SUSPENSÃO é o sufixo `;S`) e
@@ -555,7 +575,13 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      desses processos) aparecem com o **número do processo em vermelho**
      e o motivo da prioridade **entre parênteses** logo depois (ex.:
      "0000001-11.2024.8.16.0001 (Idoso)"), com uma legenda no topo da
-     página explicando a cor sempre que houver ao menos um caso.
+     página explicando a cor sempre que houver ao menos um caso. Quando a
+     consulta não encontra nenhum processo em remessa, o DataTables da
+     tela desenha uma linha "vazia" (célula única com o texto "Nenhum
+     registro encontrado") em vez de simplesmente não ter linha nenhuma no
+     resultado — essa linha é descartada da extração (não é um processo de
+     verdade), evitando a contradição de mostrar ao mesmo tempo "Nenhum
+     registro encontrado" e "Total: 1 processo(s)".
    - O **nome de cada Localizador** da unidade, em ordem alfabética, em
      páginas próprias no **final do PDF**, depois de todas as demais
      seções. Logo abaixo do título dessa seção, um **subtítulo discreto**
@@ -639,6 +665,16 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
    PDFs de Localizadores/Processos por Localizador exportados fora do
    painel da Corregedoria, já que reaproveitam o mesmo gerador de
    tabela.
+
+   **Regras de Automação**: a mesma relação de regras ativas do cartão
+   "Regras de Automação" (fluxograma + detalhamento, ver seção própria
+   abaixo), entra **antes** de Localizadores. Diferente do restante deste
+   relatório (que consulta a unidade escolhida no dropdown "Órgão/Juízo"),
+   essa seção vem da tela "Automatizar Localizadores do Órgão", que **não
+   tem** esse mesmo seletor — ela sempre lista as regras da unidade
+   atualmente **habilitada** no eproc. Por isso, se a unidade escolhida
+   para o relatório for diferente da que está habilitada no momento, um
+   aviso na capa avisa exatamente isso.
 
    A extração dos Localizadores **não** usa a tela "Localizadores do
    Órgão" (diferente do resto do painel) — o Relatório Geral tem seu

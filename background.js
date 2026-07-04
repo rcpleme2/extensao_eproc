@@ -1624,7 +1624,10 @@ function consultarUmaVezNaPagina(parametros) {
   // suspensos, alem do total. Nunca lanca excecao: sempre resolve com
   // { cabecalhos, linhas, erro }.
   async function extrairLinhasTblProcessoLista() {
-    const LIMITE_COLUNAS = 10;
+    // 12 pra' caber todas as colunas conhecidas da tabela real (checkbox,
+    // Nº Processo, Autuação, Situação, Sigilo, Classe, Localizador, Último
+    // Evento, Data/Hora, Autor, Réu - 11 no total, com folga de 1).
+    const LIMITE_COLUNAS = 12;
     const LIMITE_LINHAS = 500;
     try {
       if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
@@ -1662,13 +1665,31 @@ function consultarUmaVezNaPagina(parametros) {
       // conteudo de "Sigilo" aparecendo embaixo de "Último Evento").
       // Ler o texto que a propria tabela renderizou evita esse problema
       // por completo.
+      // As colunas "Autor"/"Réu" podem ter MAIS de uma parte no mesmo
+      // polo (litisconsórcio): cada parte vem no seu proprio
+      // "<span class="d-block">Nome</span>" dentro da mesma celula, sem
+      // nenhum separador de texto entre eles - "td.textContent" colaria
+      // "NOME 1NOME 2NOME 3" sem espaco nenhum. Quando a celula tem esses
+      // spans, cada um vira um "nome" separado, juntados aqui com " | "
+      // (delimitador que nao aparece em nome de parte) para o codigo que
+      // monta o ranking de maiores demandantes/demandados poder separa-los
+      // de volta - as demais colunas continuam lidas por texto simples.
+      function textoCelula(td) {
+        const spansPartes = td.querySelectorAll("span.d-block");
+        if (spansPartes.length > 0) {
+          return Array.from(spansPartes)
+            .map((span) => (span.textContent || "").replace(/\s+/g, " ").trim())
+            .filter(Boolean)
+            .join(" | ");
+        }
+        return (td.textContent || "").replace(/\s+/g, " ").trim();
+      }
+
       const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
         (tr) => tr.querySelectorAll("td").length > 0
       );
       const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) =>
-        Array.from(tr.querySelectorAll("td"))
-          .slice(0, LIMITE_COLUNAS)
-          .map((td) => (td.textContent || "").replace(/\s+/g, " ").trim())
+        Array.from(tr.querySelectorAll("td")).slice(0, LIMITE_COLUNAS).map(textoCelula)
       );
 
       return { cabecalhos, linhas, erro: null };
@@ -3566,8 +3587,20 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
   const idxClasse = indiceColunaPorCabecalho(tabela.cabecalhos, /classe/i);
   const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
   const idxDataHora = indiceColunaPorCabecalho(tabela.cabecalhos, /data\s*\/?\s*hora/i);
+  const idxAutor = indiceColunaPorCabecalho(tabela.cabecalhos, /^autor$/i);
+  const idxReu = indiceColunaPorCabecalho(tabela.cabecalhos, /^r[eé]u$/i);
 
   const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
+  // Celulas com mais de uma parte no mesmo polo (litisconsorcio) chegam
+  // aqui juntadas com " | " (ver "textoCelula" em
+  // "extrairLinhasTblProcessoLista") - devolve cada nome separado, sem
+  // entradas vazias.
+  const nomesDe = (linha, idx) =>
+    valorDe(linha, idx)
+      .split("|")
+      .map((nome) => nome.trim())
+      .filter(Boolean);
+
   const itens = tabela.linhas
     .map((linha) => {
       const autuacao = valorDe(linha, idxAutuacao);
@@ -3578,6 +3611,8 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
         classe: valorDe(linha, idxClasse),
         ultimoEvento: valorDe(linha, idxEvento),
         dataHora: valorDe(linha, idxDataHora),
+        autores: nomesDe(linha, idxAutor),
+        reus: nomesDe(linha, idxReu),
         autuacaoOrdenavel: paraDataOrdenavel(autuacao),
       };
     })
@@ -3598,14 +3633,19 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
     `Processos ativos da unidade "${nomeUnidade}" — ${itens.length} processo(s), do mais antigo ao mais novo`
   );
 
-  // Grafico de distribuicao por classe processual, anexado como pagina(s)
-  // extra no FINAL da relacao de processos ativos - reaproveita os mesmos
-  // "itens" ja' extraidos (campo "classe"), sem nenhuma consulta a mais.
+  // Grafico de distribuicao por classe processual e ranking de maiores
+  // demandantes/demandados, anexados como pagina(s) extra no FINAL da
+  // relacao de processos ativos - reaproveitam os mesmos "itens" ja'
+  // extraidos (campos "classe"/"autores"/"reus"), sem nenhuma consulta a
+  // mais.
   const bytesGrafico = await construirPdfGraficoClassesAtivos(itens, nomeUnidade);
+  const bytesRanking = await construirPdfRankingPartes(itens, nomeUnidade);
   const pdfFinal = await PDFDocument.load(bytesTabela);
-  const pdfGrafico = await PDFDocument.load(bytesGrafico);
-  const paginasGrafico = await pdfFinal.copyPages(pdfGrafico, pdfGrafico.getPageIndices());
-  paginasGrafico.forEach((pagina) => pdfFinal.addPage(pagina));
+  for (const bytesExtra of [bytesGrafico, bytesRanking]) {
+    const pdfExtra = await PDFDocument.load(bytesExtra);
+    const paginasExtra = await pdfFinal.copyPages(pdfExtra, pdfExtra.getPageIndices());
+    paginasExtra.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
   return pdfFinal.save();
 }
 
@@ -3716,6 +3756,116 @@ async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
 
     y -= alturaLinha;
   }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+  return pdf.save();
+}
+
+// Conta em quantos processos DISTINTOS cada parte aparece no campo
+// informado ("autores" ou "reus") - usa um Set por processo pra' uma
+// mesma parte listada duas vezes na mesma celula (raro, mas possivel) so'
+// contar 1 vez naquele processo. Devolve as 15 partes com mais
+// processos, ordenadas por total (desempate alfabetico).
+function contarPartes(itens, campo) {
+  const contagem = new Map();
+  for (const item of itens) {
+    const nomesUnicos = new Set(item[campo] || []);
+    for (const nome of nomesUnicos) {
+      contagem.set(nome, (contagem.get(nome) || 0) + 1);
+    }
+  }
+  return Array.from(contagem.entries())
+    .map(([nome, total]) => ({ nome, total }))
+    .sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome, "pt-BR"))
+    .slice(0, 15);
+}
+
+// Ranking dos 15 maiores demandantes (polo ativo) e 15 maiores
+// demandados (polo passivo) entre os processos ativos da unidade -
+// reaproveita os nomes ja' extraidos das colunas Autor/Réu do Relatório
+// Geral (ver "textoCelula" em "extrairLinhasTblProcessoLista").
+async function construirPdfRankingPartes(itens, nomeUnidade) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+  const larguraContagem = 80;
+
+  let pagina = null;
+  let y = 0;
+
+  function novaPagina(titulo) {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+    if (titulo) {
+      const linhasTitulo = quebrarLinhas(sanitizarTextoPdf(titulo), fonteNegrito, 13, larguraUtil);
+      for (const linhaTitulo of linhasTitulo) {
+        pagina.drawText(linhaTitulo, { x: margem, y, size: 13, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+        y -= 17;
+      }
+      y -= 8;
+    }
+  }
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina(null);
+    }
+  }
+
+  function desenharRanking(subtitulo, ranking) {
+    garantirEspaco(30);
+    pagina.drawText(subtitulo, { x: margem, y, size: 11, font: fonteNegrito, color: COR_PRIMARIA });
+    y -= 18;
+
+    if (ranking.length === 0) {
+      pagina.drawText("Nenhuma parte identificada nesta relação.", {
+        x: margem,
+        y,
+        size: 9.5,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
+      });
+      y -= 18;
+      return;
+    }
+
+    ranking.forEach((item, indice) => {
+      const linhasNome = quebrarLinhas(
+        sanitizarTextoPdf(`${indice + 1}. ${item.nome}`),
+        fonteNormal,
+        9.5,
+        larguraUtil - larguraContagem
+      );
+      const alturaLinha = Math.max(linhasNome.length * 12, 12) + 4;
+      garantirEspaco(alturaLinha);
+
+      let yLinha = y - 9;
+      linhasNome.forEach((linha) => {
+        pagina.drawText(linha, { x: margem, y: yLinha, size: 9.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+        yLinha -= 12;
+      });
+      pagina.drawText(`${item.total} processo(s)`, {
+        x: margem + larguraUtil - larguraContagem,
+        y: y - 9,
+        size: 9.5,
+        font: fonteNegrito,
+        color: COR_PRIMARIA_ESCURA,
+      });
+
+      y -= alturaLinha;
+    });
+    y -= 12;
+  }
+
+  novaPagina(`Maiores demandantes e demandados — unidade "${nomeUnidade}"`);
+  desenharRanking("15 maiores demandantes (polo ativo)", contarPartes(itens, "autores"));
+  desenharRanking("15 maiores demandados (polo passivo)", contarPartes(itens, "reus"));
 
   desenharRodapePaginas(pdf, fonteNormal, largura, margem);
   return pdf.save();
