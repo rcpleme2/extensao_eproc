@@ -306,6 +306,11 @@ body {
   color: var(--cor-erro);
 }
 
+.status-tempo {
+  opacity: 0.65;
+  font-size: 0.9em;
+}
+
 /* ---- Botões ----
    Três variações, usadas em todo o painel (inclusive no modal):
    .btn (primário), .btn-secundario (contorno) e .btn-ghost (texto). */

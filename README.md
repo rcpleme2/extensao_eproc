@@ -8,10 +8,15 @@ organizadas em cartões colapsáveis no painel lateral: **Gestão
 Gabinete** (Exportar Documentos + Busca específica de localizadores),
 **Gestão da Unidade** (Relatórios, Regras de Automação e Localizadores
 do Órgão) e **Corregedoria** (só para esse perfil). O painel abre enxuto
-(só o primeiro cartão expandido); cada cartão expande ao clicar no
-título, e reabre sozinho quando alguma operação dele progride, conclui
-ou falha. Sucessos aparecem em verde e erros em vermelho na linha de
-status de cada cartão.
+(**todos os cartões fechados**, nenhum aberto por padrão); cada cartão
+expande ao clicar no título, e reabre sozinho quando alguma operação
+dele progride, conclui ou falha. Sucessos aparecem em verde e erros em
+vermelho na linha de status de cada cartão, sempre acompanhados de um
+**cronômetro discreto** (ex.: "Consultando..." → "(12s)" → "(1min 8s)")
+que mede quanto tempo a operação está levando desde o primeiro texto de
+andamento até o resultado final — assim dá pra saber se um relatório
+demorado ainda está rodando ou travou, sem precisar cronometrar por
+fora.
 
 Além do cartão **Corregedoria** (único que é realmente condicional - só
 aparece quando esse é o perfil ativo, ver seção própria abaixo), os
@@ -525,7 +530,15 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      processo mais antigo para o mais novo**. Duas situações com nome
      longo saem abreviadas na coluna Situação: "MOVIMENTO-AGUARDA
      DESPACHO" vira **"Cls. Despacho"** e "MOVIMENTO-AGUARDA SENTENÇA"
-     vira **"Cls. Sentença"**. Cada valor distinto de Situação ganha sua
+     vira **"Cls. Sentença"**. Quando o processo está concluso para
+     despacho ou sentença E tem o campo **"Petição Urgente"** marcado no
+     eproc, a Situação ganha o sufixo **" (Urgente)"** (ex.: "Cls.
+     Despacho (Urgente)") — como esse dado não vem como coluna na tabela
+     de processos em si (só é possível filtrar por ele), a extensão faz
+     **2 consultas a mais** (uma para despacho, outra para sentença,
+     ambas em paralelo), filtrando por "Petição Urgente = Sim", só para
+     descobrir quais números de processo tem o campo marcado. Cada valor
+     distinto de Situação ganha sua
      própria **cor de texto**, sempre a mesma para o mesmo valor ao longo
      do PDF — como a tabela é ordenada por Data de Autuação (não por
      Situação), a cor ajuda a identificar rapidamente processos na mesma
@@ -577,11 +590,19 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      nenhum processo — ver nota na seção de Remessas aos juízes leigos
      abaixo, que teve o mesmo problema). Quando o processo tem **mais de
      um Localizador**, cada um entra numa **linha própria** dentro da
-     célula (em vez de ficar tudo colado numa linha só) - mesma técnica
-     usada para separar Autor/Réu na relação de processos ativos, abaixo;
-     valores exatamente **"?"** (localizador expirado/inconsistente do
-     próprio eproc) são descartados por completo, em vez de aparecerem
-     como um "?" solto sem significado. Esse
+     célula (em vez de ficar tudo colado numa linha só). A própria
+     célula do eproc traz, colado antes de cada nome, um **ícone**
+     (glifo de uma fonte de ícones, fora da faixa de caracteres que o PDF
+     consegue desenhar) sem nenhum separador de texto entre um
+     Localizador e outro — a extensão trata qualquer trecho fora dessa
+     faixa como o limite entre um Localizador e o próximo (a mesma regra
+     também aceita o delimitador `" | "` de "textoCelula", usado em
+     outras colunas com múltiplos valores), então esses ícones **não
+     aparecem** no PDF - nem como um caractere solto, nem grudados no
+     nome do Localizador seguinte. Valores exatamente **"?"** (localizador
+     expirado/inconsistente do próprio eproc) também são descartados por
+     completo, em vez de aparecerem como um "?" solto sem significado.
+     Esse
      detalhamento por situação é a parte mais demorada do relatório (uma
      consulta por situação), então roda **em paralelo**: a lista de ~40
      situações do grupo é dividida em **9 blocos** (o máximo de abas
@@ -795,7 +816,17 @@ manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
    "Localizadores" → "Automatizar Localizadores do Órgão"), do mesmo jeito
    já usado para "Localizadores do Órgão"/"Relatório Geral".
 2. Lê a tabela dessa aba oculta e filtra **apenas as regras ativas**
-   (ignora as marcadas como "** DESATIVADA **").
+   (ignora as marcadas como "** DESATIVADA **"). A tabela pode terminar
+   de montar um pouco depois da própria aba "carregar" (ex.: alguma
+   inicialização em segundo plano) — se a primeira leitura não encontrar
+   nenhuma linha, a extensão **tenta de novo** (até 4 vezes, com um
+   pequeno intervalo entre cada) antes de desistir, em vez de já
+   reportar "nenhuma regra encontrada" numa leitura que só foi rápida
+   demais. Se, mesmo assim, a tela realmente não tiver nenhuma regra
+   cadastrada para a unidade atual, ou se houver regras na tela mas
+   **nenhuma** com o interruptor "Ativa" ligado, a mensagem de erro
+   distingue os dois casos (em vez de um "nenhuma regra ativa
+   encontrada" genérico nas duas situações).
 3. Ordena as regras: se **alguma** regra ativa tiver uma prioridade
    numérica definida (ex.: "Executar 1º"), o relatório segue essa ordem de
    execução; regras sem prioridade não entram nessa comparação. Quando

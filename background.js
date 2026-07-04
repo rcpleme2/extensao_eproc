@@ -3698,7 +3698,7 @@ function mapaCoresPorValor(valores) {
   return mapa;
 }
 
-async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
+async function construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
   const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
@@ -3719,13 +3719,29 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
       .map((nome) => nome.trim())
       .filter(Boolean);
 
+  // Marca "(Urgente)" na Situação quando o processo esta' concluso para
+  // despacho/sentença E tem "Petição Urgente" marcada (dado que não vem
+  // na tabela de processos em si - so' se sabe via consulta separada,
+  // filtrando por esse campo; "processosUrgentes" traz os números já
+  // identificados dessa forma). So' se aplica as duas situações
+  // abreviadas abaixo, que são justamente as que tem esse filtro de
+  // urgência disponível no eproc.
+  const situacaoComUrgencia = (situacaoAbreviada, processo) => {
+    const ehConcluso = situacaoAbreviada === "Cls. Despacho" || situacaoAbreviada === "Cls. Sentença";
+    if (ehConcluso && processosUrgentes && processosUrgentes.has(processo)) {
+      return `${situacaoAbreviada} (Urgente)`;
+    }
+    return situacaoAbreviada;
+  };
+
   const itens = tabela.linhas
     .map((linha) => {
       const autuacao = valorDe(linha, idxAutuacao);
+      const processo = valorDe(linha, idxProcesso);
       return {
-        processo: valorDe(linha, idxProcesso),
+        processo,
         autuacao,
-        situacao: abreviarSituacao(valorDe(linha, idxSituacao)),
+        situacao: situacaoComUrgencia(abreviarSituacao(valorDe(linha, idxSituacao)), processo),
         classe: valorDe(linha, idxClasse),
         ultimoEvento: valorDe(linha, idxEvento),
         dataHora: valorDe(linha, idxDataHora),
@@ -4007,14 +4023,20 @@ async function construirPdfRankingPartes(itens, nomeUnidade) {
 // pelo texto do cabecalho usada em "construirPdfProcessosAtivos".
 // Localizador pode ter mais de um valor no mesmo processo (mesma tecnica
 // de "textoCelula" em "extrairLinhasTblProcessoLista" - varios
-// "<span class='d-block'>" na mesma celula, juntados aqui com " | ").
-// Cada um vira uma LINHA própria na tabela (em vez de ficar tudo colado
-// numa linha só) e os valores exatamente "?" (localizador
-// expirado/inconsistente do proprio eproc) são descartados por
-// completo, em vez de aparecerem como um "?" solto sem significado.
+// "<span class='d-block'>" na mesma celula, juntados aqui com " | " -
+// quando existem). Mas a coluna Localizador tambem traz, na frente de
+// CADA nome, um icone (glifo fora da faixa Latin-1) sem nenhum "|" entre
+// eles - "td.textContent" nesse caso gruda tudo numa string so' (o icone
+// vira "?" depois da sanitizacao, um "?" por localizador, sem quebra de
+// linha nenhuma). Por isso o split abaixo separa tanto por "|" quanto por
+// qualquer sequencia de caracteres fora de Latin-1 (o icone em si) - cada
+// pedaco resultante vira uma LINHA própria na tabela (em vez de ficar
+// tudo colado numa linha só) e os valores exatamente "?" (ou vazios, que
+// sobram quando o icone abre a celula) são descartados por completo, em
+// vez de aparecerem como um "?" solto sem significado.
 function formatarLocalizadores(valorBruto) {
   const nomes = (valorBruto || "")
-    .split("|")
+    .split(/\||[^\x00-\xFF]+/)
     .map((nome) => nome.trim())
     .filter((nome) => nome && nome !== "?");
   return nomes.join("\n");
@@ -4157,6 +4179,42 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     if (r.tabela && r.tabela.erro) processosAtivos.erros.push(r.tabela.erro);
   }
 
+  // Números dos processos conclusos para despacho/sentença com "Petição
+  // Urgente" marcada - o eproc so' permite FILTRAR por esse campo (não
+  // aparece como coluna na tabela em si), entao e' preciso uma consulta a
+  // mais por situação so' pra' descobrir QUAIS processos tem o campo
+  // marcado; usado depois pra' destacar "(Urgente)" ao lado de "Cls.
+  // Despacho"/"Cls. Sentença" na relação de processos ativos.
+  let processosUrgentes = new Set();
+  if (opcoesFinais.processosAtivos) {
+    notificar("Consultando processos urgentes (concluso para despacho/sentença)...");
+    const [rDespachoUrgente, rSentencaUrgente] = await Promise.all([
+      abrirAbaEConsultarUmaVez(abaAtual.url, {
+        valorSituacao: VALOR_SITUACAO_AGUARDA_DESPACHO,
+        urgente: true,
+        diasSituacao: null,
+        valorOrgaoJuizo: valorUnidade,
+        extrairTabela: true,
+      }),
+      abrirAbaEConsultarUmaVez(abaAtual.url, {
+        valorSituacao: VALOR_SITUACAO_AGUARDA_SENTENCA,
+        urgente: true,
+        diasSituacao: null,
+        valorOrgaoJuizo: valorUnidade,
+        extrairTabela: true,
+      }),
+    ]);
+    for (const r of [rDespachoUrgente, rSentencaUrgente]) {
+      if (!r.tabela || !r.tabela.linhas) continue;
+      const idxProcessoUrgente = indiceColunaPorCabecalho(r.tabela.cabecalhos, /processo/i);
+      if (idxProcessoUrgente < 0) continue;
+      for (const linha of r.tabela.linhas) {
+        const numero = linha[idxProcessoUrgente];
+        if (numero) processosUrgentes.add(numero);
+      }
+    }
+  }
+
   // Suspensos/sobrestados: grupo "S" inteiro do filtro Situação (todas
   // as ~40 variantes de suspensão/sobrestamento de uma vez).
   const suspensos = { total: null, mais90Dias: null, detalhamento: [], tabela: null, erros: [], avisoDetalhamentoParcial: null };
@@ -4269,6 +4327,11 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     const r = await abrirAbaEListarRegrasAutomacao(abaAtual.url);
     regrasAutomacao.regras = r.regras || [];
     if (r.erro) regrasAutomacao.erros.push(r.erro);
+    if (!r.erro && regrasAutomacao.regras.length === 0 && r.totalRegrasNaPagina > 0) {
+      regrasAutomacao.erros.push(
+        `${r.totalRegrasNaPagina} regra(s) encontrada(s) na tela, mas nenhuma está com o switch "Ativa" ligado.`
+      );
+    }
   }
 
   let localizadoresOrdenados = [];
@@ -4417,7 +4480,7 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   // de fora, sem quebrar o resto do relatório). Mesma ordem das seções
   // acima: ativos, suspensos e, por fim, remessas aos juízes leigos.
   if (opcoesFinais.processosAtivos && processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
-    const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade);
+    const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade, processosUrgentes);
     const pdfTabela = await PDFDocument.load(bytesTabela);
     const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
@@ -5844,10 +5907,23 @@ async function abrirAbaEListarRegrasAutomacao(urlBase) {
     // carregamento (mesmo padrao usado no Relatório Geral).
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_REGRAS_AUTOMACAO" });
+    // A tabela de regras pode terminar de montar (via AJAX/DataTable)
+    // um pouco depois do "carregamento" da aba - sem repetir a leitura
+    // aqui, uma consulta um pouco mais lenta que o normal lia a tabela
+    // ainda vazia e devolvia "nenhuma regra" mesmo com regras cadastradas.
+    // Tenta ate' 4 vezes (500ms entre cada), parando assim que alguma
+    // linha aparecer na pagina.
+    let resposta = null;
+    for (let tentativa = 0; tentativa < 4; tentativa += 1) {
+      resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_REGRAS_AUTOMACAO" });
+      if (resposta && resposta.totalRegrasNaPagina > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
     return {
       regras: (resposta && resposta.regras) || [],
       tituloPagina: (resposta && resposta.tituloPagina) || "",
+      totalRegrasNaPagina: (resposta && resposta.totalRegrasNaPagina) || 0,
       erro: null,
     };
   } catch (e) {
@@ -6314,10 +6390,20 @@ async function exportarRegrasAutomacao(aoProgredir) {
   }
 
   notificar("Abrindo a tela de Automatizar Tramitação Processual...");
-  const { regras, tituloPagina, erro } = await abrirAbaEListarRegrasAutomacao(abaAtual.url);
+  const { regras, tituloPagina, totalRegrasNaPagina, erro } = await abrirAbaEListarRegrasAutomacao(abaAtual.url);
 
   if (erro) throw new Error(erro);
-  if (regras.length === 0) throw new Error("Nenhuma regra ativa encontrada.");
+  if (regras.length === 0 && totalRegrasNaPagina === 0) {
+    throw new Error(
+      "Nenhuma regra encontrada na tela (a tabela pode não ter terminado de carregar, ou a unidade " +
+        "atualmente habilitada no eproc não tem regras cadastradas). Tente novamente."
+    );
+  }
+  if (regras.length === 0) {
+    throw new Error(
+      `${totalRegrasNaPagina} regra(s) encontrada(s) na tela, mas nenhuma está com o switch "Ativa" ligado.`
+    );
+  }
 
   notificar("Gerando documento...");
   // Exportação em HTML desativada por enquanto - o PDF passou a ser o

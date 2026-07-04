@@ -103,13 +103,63 @@ radioIndividuais.addEventListener("change", atualizarAvisoMdUnico);
 radioPdfUnico.addEventListener("change", atualizarAvisoMdUnico);
 radioMdUnico.addEventListener("change", atualizarAvisoMdUnico);
 
+// Cronometro discreto: mede quanto tempo cada operacao (relatorio,
+// exportacao etc.) leva do primeiro texto "em andamento" ate' o "ok"/
+// "erro" final, mostrado ao lado do proprio texto de status (sem UI
+// separada). Uma entrada por elemento de status - cada area de progresso
+// do painel (relatorio, corregedoria, regras, localizadores etc.) tem a
+// sua propria contagem independente.
+const cronometros = new WeakMap();
+const LIMITE_CRONOMETRO_SEGUNDOS = 600; // trava o ticking apos 10min (operacao "orfa", sem ok/erro final)
+
+function formatarDuracao(segundos) {
+  if (segundos < 60) return `${segundos}s`;
+  const minutos = Math.floor(segundos / 60);
+  const resto = segundos % 60;
+  return `${minutos}min ${resto}s`;
+}
+
+function renderizarStatusComCronometro(el, cron) {
+  el.textContent = "";
+  el.appendChild(document.createTextNode(el.dataset.statusTexto || ""));
+  if (cron) {
+    const tempo = document.createElement("span");
+    tempo.className = "status-tempo";
+    tempo.textContent = ` (${formatarDuracao(Math.round((Date.now() - cron.inicio) / 1000))})`;
+    el.appendChild(tempo);
+  }
+}
+
 // Aplica texto + estado visual a uma area de status. "tipo" opcional:
 // "ok" (verde, operacao concluida), "erro" (vermelho) ou ausente
 // (neutro, andamento/ajuda). Compartilhado por todos os setStatus* do
 // painel, para sucesso e erro terem cara de sucesso e erro em vez de
-// ficarem identicos ao texto de ajuda.
+// ficarem identicos ao texto de ajuda. Tambem liga/desliga o cronometro
+// discreto: comeca a contar no primeiro texto "em andamento" (tipo
+// ausente) e para, mostrando o total decorrido, assim que chega um "ok"
+// ou "erro" - assim o usuario ve' quanto tempo cada relatorio/exportacao
+// realmente levou, sem precisar cronometrar por fora.
 function aplicarStatus(el, texto, tipo) {
-  el.textContent = texto;
+  const emAndamento = tipo !== "ok" && tipo !== "erro";
+  el.dataset.statusTexto = texto;
+
+  let cron = cronometros.get(el);
+  if (emAndamento && !cron) {
+    cron = { inicio: Date.now() };
+    cron.intervalId = setInterval(() => {
+      if (Date.now() - cron.inicio > LIMITE_CRONOMETRO_SEGUNDOS * 1000) {
+        clearInterval(cron.intervalId);
+        return;
+      }
+      renderizarStatusComCronometro(el, cron);
+    }, 1000);
+    cronometros.set(el, cron);
+  } else if (!emAndamento && cron) {
+    clearInterval(cron.intervalId);
+    cronometros.delete(el);
+  }
+
+  renderizarStatusComCronometro(el, cron);
   el.classList.toggle("status--ok", tipo === "ok");
   el.classList.toggle("status--erro", tipo === "erro");
   // Atividade numa secao (progresso/resultado/erro) abre o cartao dela,
