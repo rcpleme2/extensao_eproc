@@ -450,11 +450,157 @@ chrome.storage.onChanged.addListener((mudancas, area) => {
   }
 });
 
+// ---- Separar Comarca/Juízo no campo "Órgão/Juízo" do Relatório Geral ----
+//
+// Mesma logica de duas etapas ja' usada no proprio painel da extensao
+// para escolher a unidade do Relatório para Correição (nomes de unidade
+// seguem o padrao "<Juízo/Vara> de <Comarca>" - separar a Comarca do
+// resto permite duas listas curtas em vez de uma unica com centenas de
+// opcoes) - aqui replicada em cima do campo NATIVO "Órgão/Juízo"
+// (`#selIdOrgaoJuizo`) da propria tela do Relatório Geral do eproc.
+// Recurso OPCIONAL (desligado por padrao, ver Configurações do painel),
+// ja' que altera a interface da propria pagina do eproc em vez de so'
+// ler dados dela.
+const ID_WRAPPER_COMARCA_JUIZO = "eproc-exportador-comarca-juizo";
+
+function separarComarcaDoJuizoOrgao(nomeCompleto) {
+  const texto = (nomeCompleto || "").trim();
+  const marcador = " de ";
+  const indice = texto.lastIndexOf(marcador);
+  if (indice === -1) {
+    return { comarca: "(Outras)", juizo: texto };
+  }
+  return {
+    comarca: texto.slice(indice + marcador.length).trim() || "(Outras)",
+    juizo: texto.slice(0, indice).trim() || texto,
+  };
+}
+
+// Muda o value do <select> nativo e dispara "change" - o bootstrap-select
+// da propria pagina escuta esse evento e atualiza o widget visual junto
+// (mesmo mecanismo que "selecionarOrgaoJuizo" usa em background.js para
+// automatizar essa mesma troca numa aba oculta).
+function selecionarOrgaoJuizoNaPaginaAtual(valorOrgaoJuizo) {
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) return;
+  let encontrou = false;
+  for (const opcao of select.options) {
+    const selecionada = opcao.value === valorOrgaoJuizo;
+    opcao.selected = selecionada;
+    if (selecionada) encontrou = true;
+  }
+  if (encontrou) select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+// O <select> nativo do bootstrap-select fica escondido dentro de um
+// wrapper "div.bootstrap-select" (o botao visivel com o texto/dropdown
+// e' outro elemento dentro desse wrapper) - encontrar esse wrapper e'
+// best-effort: cai para o proprio elemento pai quando a classe não é
+// encontrada, em vez de falhar.
+function wrapperOriginalOrgaoJuizo(select) {
+  return select.closest(".bootstrap-select") || select.parentElement;
+}
+
+function montarComarcaJuizoOrgao() {
+  if (document.getElementById(ID_WRAPPER_COMARCA_JUIZO)) return; // ja' montado nesta pagina
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) return;
+
+  const unidades = Array.from(select.options)
+    .filter((opcao) => opcao.value)
+    .map((opcao) => ({ valor: opcao.value, ...separarComarcaDoJuizoOrgao((opcao.textContent || "").trim()) }));
+  if (unidades.length === 0) return;
+
+  const comarcas = [...new Set(unidades.map((u) => u.comarca))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+  const wrapper = document.createElement("div");
+  wrapper.id = ID_WRAPPER_COMARCA_JUIZO;
+  wrapper.style.cssText = "display:flex;flex-direction:column;gap:4px;margin-top:6px;max-width:420px;";
+
+  const selectComarca = document.createElement("select");
+  selectComarca.className = "form-control form-control-sm";
+  selectComarca.innerHTML = '<option value="" selected disabled>Selecione uma comarca...</option>';
+  for (const comarca of comarcas) {
+    const opcao = document.createElement("option");
+    opcao.value = comarca;
+    opcao.textContent = comarca;
+    selectComarca.appendChild(opcao);
+  }
+
+  const selectJuizo = document.createElement("select");
+  selectJuizo.className = "form-control form-control-sm";
+  selectJuizo.disabled = true;
+  selectJuizo.innerHTML = '<option value="" selected disabled>Selecione um juízo/vara...</option>';
+
+  selectComarca.addEventListener("change", () => {
+    const comarca = selectComarca.value;
+    selectJuizo.innerHTML = '<option value="" selected disabled>Selecione um juízo/vara...</option>';
+    const unidadesDaComarca = unidades
+      .filter((u) => u.comarca === comarca)
+      .sort((a, b) => a.juizo.localeCompare(b.juizo, "pt-BR"));
+    for (const unidade of unidadesDaComarca) {
+      const opcao = document.createElement("option");
+      opcao.value = unidade.valor;
+      opcao.textContent = unidade.juizo;
+      selectJuizo.appendChild(opcao);
+    }
+    selectJuizo.disabled = unidadesDaComarca.length === 0;
+  });
+
+  selectJuizo.addEventListener("change", () => {
+    selecionarOrgaoJuizoNaPaginaAtual(selectJuizo.value);
+  });
+
+  wrapper.appendChild(selectComarca);
+  wrapper.appendChild(selectJuizo);
+
+  const wrapperOriginal = wrapperOriginalOrgaoJuizo(select);
+  wrapperOriginal.insertAdjacentElement("afterend", wrapper);
+  wrapperOriginal.dataset.eprocExportadorEscondido = "1";
+  wrapperOriginal.style.display = "none";
+}
+
+function desmontarComarcaJuizoOrgao() {
+  const wrapper = document.getElementById(ID_WRAPPER_COMARCA_JUIZO);
+  if (wrapper) wrapper.remove();
+
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) return;
+  const wrapperOriginal = wrapperOriginalOrgaoJuizo(select);
+  if (wrapperOriginal && wrapperOriginal.dataset.eprocExportadorEscondido) {
+    wrapperOriginal.style.display = "";
+    delete wrapperOriginal.dataset.eprocExportadorEscondido;
+  }
+}
+
+let configSepararOrgaoJuizoAtivo = false;
+let configSepararOrgaoJuizoCarregada = false;
+
+function aplicarSepararOrgaoJuizoSeAtivo() {
+  if (!configSepararOrgaoJuizoCarregada) return;
+  if (configSepararOrgaoJuizoAtivo) montarComarcaJuizoOrgao();
+  else desmontarComarcaJuizoOrgao();
+}
+
+chrome.storage.local.get({ separarOrgaoJuizoPorComarca: false }, (itens) => {
+  configSepararOrgaoJuizoAtivo = itens.separarOrgaoJuizoPorComarca;
+  configSepararOrgaoJuizoCarregada = true;
+  aplicarSepararOrgaoJuizoSeAtivo();
+});
+
+chrome.storage.onChanged.addListener((mudancas, area) => {
+  if (area === "local" && mudancas.separarOrgaoJuizoPorComarca) {
+    configSepararOrgaoJuizoAtivo = mudancas.separarOrgaoJuizoPorComarca.newValue;
+    aplicarSepararOrgaoJuizoSeAtivo();
+  }
+});
+
 adicionarBotaoAbrirPainel();
 
 const observadorEventos = new MutationObserver(() => {
   aplicarSubstituicaoSiglaSeAtivo();
   adicionarBotaoAbrirPainel();
+  aplicarSepararOrgaoJuizoSeAtivo();
 });
 observadorEventos.observe(document.body, { childList: true, subtree: true });
 

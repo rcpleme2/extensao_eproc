@@ -124,6 +124,20 @@ os botões de ação — abre um pequeno modal com uma opção, salva em
 - **"Substituir a sigla do usuário pelo nome e cargo na movimentação"**
   (ligado por padrão): controla a troca descrita na seção "Nomes de
   usuário na movimentação" acima.
+- **"Separar Comarca/Juízo no campo 'Órgão/Juízo' do Relatório Geral"**
+  (**desligado por padrão**): quando ligada, na própria tela do
+  Relatório Geral do eproc (`#selIdOrgaoJuizo`), o dropdown único com
+  centenas de unidades é substituído por **dois selects em sequência**
+  — primeiro a Comarca, depois o Juízo/Vara (só com as unidades daquela
+  comarca) — igual à escolha em duas etapas já usada pelo próprio painel
+  para o Relatório para Correição (mesma separação de nome pelo padrão
+  "`<Juízo/Vara> de <Comarca>`"). Ao escolher o Juízo/Vara, o `<select>`
+  nativo da página é atualizado e dispara "change" normalmente, então o
+  resto da tela (bootstrap-select, filtros dependentes) continua
+  funcionando como se a unidade tivesse sido escolhida no dropdown
+  original — que fica oculto (não removido) enquanto a opção estiver
+  ligada. Desligada por padrão porque altera a interface da própria
+  página do eproc, não só lê dados dela.
 
 Os menus suspensos preenchidos pela extensão (unidades do Relatório para
 Correição, localizadores da "Busca específica de localizadores") sempre

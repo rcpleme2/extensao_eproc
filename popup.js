@@ -31,6 +31,7 @@ const ROTULO_FASE = {
 // LISTAR_LOCALIZADORES_FINALIZADO mais abaixo).
 const CONFIG_PADRAO = {
   substituirSigla: true,
+  separarOrgaoJuizoPorComarca: false,
 };
 
 function obterConfiguracoes() {
@@ -46,16 +47,22 @@ function salvarConfiguracao(chave, valor) {
 const btnAbrirConfiguracoes = document.getElementById("btn-abrir-configuracoes");
 const modalConfiguracoes = document.getElementById("modal-configuracoes");
 const chkConfigSubstituirSigla = document.getElementById("chk-config-substituir-sigla");
+const chkConfigSepararOrgaoJuizo = document.getElementById("chk-config-separar-orgao-juizo");
 const modalConfigFechar = document.getElementById("modal-config-fechar");
 
 btnAbrirConfiguracoes.addEventListener("click", async () => {
   const config = await obterConfiguracoes();
   chkConfigSubstituirSigla.checked = config.substituirSigla;
+  chkConfigSepararOrgaoJuizo.checked = config.separarOrgaoJuizoPorComarca;
   modalConfiguracoes.hidden = false;
 });
 
 chkConfigSubstituirSigla.addEventListener("change", () => {
   salvarConfiguracao("substituirSigla", chkConfigSubstituirSigla.checked);
+});
+
+chkConfigSepararOrgaoJuizo.addEventListener("change", () => {
+  salvarConfiguracao("separarOrgaoJuizoPorComarca", chkConfigSepararOrgaoJuizo.checked);
 });
 
 modalConfigFechar.addEventListener("click", () => {
