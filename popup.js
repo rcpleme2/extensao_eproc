@@ -568,7 +568,7 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
   textoProgressoRelatorioGerencial.textContent = "Iniciando...";
   iniciarCronometroStatus(areaCorregedoriaInfo);
   setStatusCorregedoria(
-    `Gerando o Relatório para Correição de "${unidade.nome}" em segundo plano (sua aba atual será navegada)...`
+    `Gerando o Relatório para Correição de "${unidade.nome}" em segundo plano...`
   );
 
   // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
@@ -648,7 +648,7 @@ btnExportarRelatorioUnidadeAlt.addEventListener("click", async () => {
   areaProgressoRelatorioUnidadeAlt.hidden = false;
   textoProgressoRelatorioUnidadeAlt.textContent = "Iniciando...";
   iniciarCronometroStatus(areaRelatorioUnidadeAltInfo);
-  setStatusUnidadeAlt("Gerando o Relatório da Unidade em segundo plano (sua aba atual será navegada)...");
+  setStatusUnidadeAlt("Gerando o Relatório da Unidade em segundo plano...");
 
   // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
   // comecou; o resultado final chega pela mensagem

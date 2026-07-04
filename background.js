@@ -56,6 +56,22 @@ function deslocamentoCentralizacaoTexto(alturaLinhaTexto) {
   return alturaLinhaTexto * FATOR_CENTRALIZACAO_TEXTO_TABELA;
 }
 
+// Calcula onde comecar a desenhar (a linha de base da PRIMEIRA linha) o
+// texto de UMA CÉLULA especifica, centralizando essa célula dentro da
+// altura TOTAL da linha da tabela (que é definida pela coluna com mais
+// linhas naquela linha - "maxLinhasNaLinha"). Sem isso, bastava aplicar
+// "deslocamentoCentralizacaoTexto" uma unica vez por linha (pensado so'
+// para a coluna mais alta) e usar o mesmo valor pra todas as colunas -
+// colunas com MENOS linhas que a mais alta (ex.: "Situação" com 1 linha
+// numa linha da tabela em que "Último Evento" quebrou em 2) ficavam
+// "grudadas" perto do topo da própria célula, em vez de centralizadas no
+// espaço realmente disponível ali. Cada linha a menos que a coluna tem em
+// relação a maxLinhasNaLinha desce o texto meia ALTURA_LINHA a mais.
+function yInicialTextoColunaCentralizado(y, alturaLinhaTexto, maxLinhasNaLinha, linhasDestaColuna) {
+  const linhasAMenos = maxLinhasNaLinha - linhasDestaColuna;
+  return y - deslocamentoCentralizacaoTexto(alturaLinhaTexto) - (linhasAMenos * alturaLinhaTexto) / 2;
+}
+
 // Desenha, quando a linha for uma linha "ímpar" (contagem a partir de 0),
 // a faixa de fundo alternada (zebrado) por trás de uma linha de tabela -
 // helper único compartilhado por todas as tabelas com zebrado da
@@ -3677,11 +3693,10 @@ async function construirPdfRemessasJuizesLeigos(linhas, nomeUnidade) {
       });
       indiceLinhaZebra += 1;
 
-      const yTextoInicial = y - deslocamentoCentralizacaoTexto(REMESSAS_ALTURA_LINHA);
       let x = margem + 4;
       for (let i = 0; i < colunas.length; i += 1) {
         const corColuna = colunas[i].campo === "processo" && item.prioridade ? COR_ALERTA_VERMELHO : COR_CINZA_TEXTO;
-        let yColuna = yTextoInicial;
+        let yColuna = yInicialTextoColunaCentralizado(y, REMESSAS_ALTURA_LINHA, maxLinhas, linhasPorColuna[i].length);
         for (const linhaTexto of linhasPorColuna[i]) {
           try {
             pagina.drawText(linhaTexto, { x, y: yColuna, size: REMESSAS_TAMANHO_FONTE, font: fonteNormal, color: corColuna });
@@ -3817,7 +3832,6 @@ async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) 
     });
     indiceLinhaZebra += 1;
 
-    const yTextoInicial = y - deslocamentoCentralizacaoTexto(ALTURA_LINHA);
     let x = margem + 4;
     for (let i = 0; i < colunas.length; i += 1) {
       // Coluna pode definir uma cor propria por VALOR (ex.: "Situação" no
@@ -3825,7 +3839,7 @@ async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) 
       // distinto) - cai para a cor cinza padrao quando a coluna nao
       // define nada.
       const corColuna = colunas[i].cor ? colunas[i].cor(item[colunas[i].campo]) : COR_CINZA_TEXTO;
-      let yColuna = yTextoInicial;
+      let yColuna = yInicialTextoColunaCentralizado(y, ALTURA_LINHA, maxLinhas, linhasPorColuna[i].length);
       for (const linhaTexto of linhasPorColuna[i]) {
         try {
           pagina.drawText(linhaTexto, { x, y: yColuna, size: TAMANHO_FONTE, font: fonteNormal, color: corColuna });
@@ -4959,7 +4973,7 @@ async function exportarRelatorioUnidadeAtual(opcoes, aoProgredir) {
   let nomeUnidade = "Unidade atual";
   try {
     const perfilInfo = await chrome.tabs.sendMessage(abaAtual.id, { tipo: "LER_PERFIL_ATUAL" });
-    if (perfilInfo && perfilInfo.perfil) nomeUnidade = perfilInfo.perfil;
+    if (perfilInfo && perfilInfo.unidadeNome) nomeUnidade = perfilInfo.unidadeNome;
   } catch (e) {
     // Sem resposta do content script (ex.: aba fora do eproc) - segue com o rótulo genérico.
   }
@@ -5533,10 +5547,9 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
     });
     indiceLinhaZebra += 1;
 
-    const yTextoInicial = y - deslocamentoCentralizacaoTexto(PDF_LOCALIZADORES_ALTURA_LINHA);
     let x = margem + 4;
     for (let i = 0; i < colunas.length; i += 1) {
-      let yColuna = yTextoInicial;
+      let yColuna = yInicialTextoColunaCentralizado(y, PDF_LOCALIZADORES_ALTURA_LINHA, maxLinhas, linhasPorColuna[i].length);
       for (const linha of linhasPorColuna[i]) {
         try {
           pagina.drawText(linha, { x, y: yColuna, size: PDF_LOCALIZADORES_TAMANHO_FONTE, font: fonteNormal, color: COR_CINZA_TEXTO });
@@ -6128,24 +6141,44 @@ function clicarLinkAutomatizarLocalizadoresNaPagina() {
 // unidade sem esse filtro aparecer). O value de cada <option> desse
 // select (ex.: "100360|") NÃO é o mesmo value do "Órgão/Juízo" do
 // Relatório Geral (espaços de valores diferentes entre as duas telas) -
-// por isso a selecao aqui casa pelo TEXTO da unidade (prefixo do nome,
-// já que cada opção termina com "- CODIGO (contagem)"), não pelo value.
-// Autocontida, executada via chrome.scripting.executeScript.
+// por isso a selecao aqui casa pelo TEXTO da unidade (nome extraído do
+// rótulo, já que cada opção termina com "- CODIGO (contagem)"), não pelo
+// value. Autocontida, executada via chrome.scripting.executeScript.
 function selecionarOrgaoRegrasAutomacaoNaPagina(nomeUnidade) {
   const select = document.getElementById("selOrgao");
   // Perfis sem esse filtro (MAGISTRADO/GESTÃO DA UNIDADE) simplesmente
   // não tem esse campo na tela - segue sem selecionar nada.
   if (!select) return { ok: true, selecionado: false };
 
-  const alvo = (nomeUnidade || "").trim().toLowerCase();
+  function normalizarEspacos(texto) {
+    return (texto || "").replace(/\s+/g, " ").trim();
+  }
+
+  // Ex.: "Juizado Especial Cível e Juizado Especial da Fazenda Pública de
+  // Astorga  - AST1JE (1)" -> "Juizado Especial Cível e Juizado Especial
+  // da Fazenda Pública de Astorga". Ignora a contagem entre parênteses no
+  // final e tudo a partir do ULTIMO " - " (código/sigla da unidade nesta
+  // tela) - o eproc não é consistente na quantidade de espaços antes
+  // desse hífen (às vezes 1, às vezes 2), então casar pelo texto INTEIRO
+  // da opção (como antes) falhava sempre que aparecia esse espaço extra;
+  // extraindo só o nome (e comparando nome com nome) o espaçamento da
+  // sigla deixa de importar.
+  function nomeUnidadeDaOpcaoOrgao(textoOpcao) {
+    const semContagem = textoOpcao.replace(/\s*\(\d+\)\s*$/, "");
+    const m = semContagem.match(/^(.+)\s+-\s+([^-]*)$/);
+    return normalizarEspacos(m ? m[1] : semContagem);
+  }
+
+  const alvo = normalizarEspacos(nomeUnidade).toLowerCase();
   if (!alvo) {
     return { ok: false, erro: 'Nome da unidade não informado para selecionar o filtro "ÓRGÃO".' };
   }
 
   let encontrouOpcao = false;
   for (const opcao of select.options) {
-    const texto = (opcao.textContent || "").trim().toLowerCase();
-    const selecionada = texto === alvo || texto.startsWith(`${alvo} - `);
+    const textoOpcao = normalizarEspacos(opcao.textContent || "");
+    const nomeExtraido = nomeUnidadeDaOpcaoOrgao(textoOpcao).toLowerCase();
+    const selecionada = textoOpcao.toLowerCase() === alvo || nomeExtraido === alvo;
     opcao.selected = selecionada;
     if (selecionada) encontrouOpcao = true;
   }
@@ -6432,18 +6465,17 @@ function construirDocumentoRegras(regras, tituloPagina) {
 // ---- Geracao do PDF de Regras de Automação ----
 //
 // Mesma informacao do documento HTML (construirDocumentoRegras), redesenhada
-// com pdf-lib: cada regra vira um "cartao" com o fluxo Origem -> Critério ->
-// Destino -> Ação Automatizada empilhado (caixas coloridas + setas), e,
-// quando a regra tem Localizador de Erro, uma caixa vermelha ao lado da
-// Ação Automatizada ligada por uma seta lateral - mesma linguagem visual
-// da versao HTML, para quem preferir baixar/arquivar em PDF em vez de
-// abrir a aba com o HTML.
+// com pdf-lib: cada regra vira um "cartao" com o fluxo Localizador Origem ->
+// Critério -> Destino -> Ação Automatizada empilhado (caixas coloridas +
+// setas) - mesma linguagem visual da versao HTML, para quem preferir
+// baixar/arquivar em PDF em vez de abrir a aba com o HTML. O Localizador
+// de Erro (quando a regra tiver um) NÃO entra nesse fluxograma - so' no
+// detalhamento em texto logo abaixo, junto com a Ação Automatizada.
 const PDF_REGRAS_CORES = {
   origem: { fundo: rgb(0xee / 255, 0xf1 / 255, 0xf5 / 255), acento: rgb(0x8b / 255, 0x99 / 255, 0xa6 / 255), titulo: COR_PRIMARIA },
   criterio: { fundo: rgb(0xff / 255, 0xf6 / 255, 0xe0 / 255), acento: rgb(0x8a / 255, 0x6d / 255, 0x00 / 255), titulo: rgb(0x8a / 255, 0x6d / 255, 0x00 / 255) },
   destino: { fundo: rgb(0xe9 / 255, 0xf7 / 255, 0xee / 255), acento: rgb(0x1a / 255, 0x7f / 255, 0x37 / 255), titulo: rgb(0x1a / 255, 0x7f / 255, 0x37 / 255) },
   acao: { fundo: rgb(0xee / 255, 0xf1 / 255, 0xfd / 255), acento: rgb(0x3d / 255, 0x4f / 255, 0xc4 / 255), titulo: rgb(0x3d / 255, 0x4f / 255, 0xc4 / 255) },
-  erro: { fundo: rgb(0xfd / 255, 0xec / 255, 0xea / 255), acento: COR_ALERTA_VERMELHO, titulo: COR_ALERTA_VERMELHO },
 };
 
 // Desenha uma caixa do fluxo (Origem/Critério/Destino/Ação/Erro): faixa de
@@ -6595,12 +6627,9 @@ async function construirPdfRegras(regras, tituloPagina) {
 
     const linhasAcao = r.acaoLinhas && r.acaoLinhas.length > 0 ? r.acaoLinhas : r.acaoResumo ? [r.acaoResumo] : [];
     const criteriosLista = r.criteriosLista && r.criteriosLista.length > 0 ? r.criteriosLista : [r.criterioResumo];
-    const temErro = Boolean(r.localizadorErro);
-    const larguraAcao = temErro ? larguraUtil * 0.62 : larguraUtil;
-    const larguraErro = larguraUtil * 0.3;
 
     const passos = [
-      { titulo: "Origem", cores: PDF_REGRAS_CORES.origem, paragrafos: [r.localizadorOrigem], largura: larguraUtil },
+      { titulo: "Localizador Origem", cores: PDF_REGRAS_CORES.origem, paragrafos: [r.localizadorOrigem], largura: larguraUtil },
       {
         titulo: "Critério",
         cores: PDF_REGRAS_CORES.criterio,
@@ -6611,7 +6640,7 @@ async function construirPdfRegras(regras, tituloPagina) {
       { titulo: "Destino", cores: PDF_REGRAS_CORES.destino, paragrafos: [r.destinoResumo], largura: larguraUtil },
     ];
     if (linhasAcao.length > 0) {
-      passos.push({ titulo: "Ação automatizada", cores: PDF_REGRAS_CORES.acao, paragrafos: linhasAcao, largura: larguraAcao, comDivisores: true });
+      passos.push({ titulo: "Ação automatizada", cores: PDF_REGRAS_CORES.acao, paragrafos: linhasAcao, largura: larguraUtil, comDivisores: true });
     }
 
     passos.forEach((passo, indice) => {
@@ -6620,7 +6649,6 @@ async function construirPdfRegras(regras, tituloPagina) {
         desenharSetaPdf(pagina, { x: margem + larguraUtil / 2, y, comprimento: 8, direcao: "baixo", cor: rgb(0.6, 0.65, 0.68) });
         y -= 11;
       }
-      const ehAcaoComErro = passo.titulo === "Ação automatizada" && temErro;
       const alturaCaixa = desenharCaixaFluxoPdf(pagina, {
         x: margem,
         yTopo: y,
@@ -6633,27 +6661,6 @@ async function construirPdfRegras(regras, tituloPagina) {
         fonteNegrito,
         comDivisores: passo.comDivisores,
       });
-      if (ehAcaoComErro) {
-        const xErro = margem + larguraAcao + 26;
-        desenharSetaPdf(pagina, {
-          x: margem + larguraAcao + 4,
-          y: y - alturaCaixa / 2,
-          comprimento: 18,
-          direcao: "direita",
-          cor: COR_ALERTA_VERMELHO,
-        });
-        desenharCaixaFluxoPdf(pagina, {
-          x: xErro,
-          yTopo: y,
-          largura: larguraErro,
-          numero: null,
-          titulo: "Localizador de Erro",
-          paragrafos: [r.localizadorErro],
-          cores: PDF_REGRAS_CORES.erro,
-          fonteNormal,
-          fonteNegrito,
-        });
-      }
       y -= alturaCaixa;
     });
 
@@ -6665,6 +6672,8 @@ async function construirPdfRegras(regras, tituloPagina) {
       ["Tipo de Controle / Critério", r.criterioResumo],
       ["Localizador Destino / Ação", r.destinoResumo],
       ["Outros Critérios", (r.outrosCriteriosResumo || []).join(" — ") || "Nenhum"],
+      ...(linhasAcao.length > 0 ? [["Ação Automatizada", linhasAcao.join(" — ")]] : []),
+      ...(r.localizadorErro ? [["Localizador de Erro", r.localizadorErro]] : []),
     ];
     for (const [rotulo, valor] of camposTexto) {
       const linhasRotulo = quebrarLinhas(sanitizarTextoPdf(rotulo), fonteNegrito, 8, larguraUtil);

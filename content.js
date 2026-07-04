@@ -909,11 +909,32 @@ function listarRegrasAutomacaoAtivas() {
 // ativo for "CORREGEDORIA").
 function lerPerfilAtual() {
   const select = document.getElementById("selInfraUnidades");
-  if (!select) return { perfil: null, valor: null };
+  if (!select) return { perfil: null, valor: null, unidadeNome: null };
   const opcaoSelecionada = select.options[select.selectedIndex];
+  const sigla = opcaoSelecionada ? (opcaoSelecionada.textContent || "").trim() : null;
+
+  // O <option> traz, no atributo "title", o nome completo da unidade
+  // seguido da sigla (ex.: title="Vara Única da Comarca de Tomazina -
+  // TOMUN/CHEFE DE SECRETARIA" para o <option>TOMUN/CHEFE DE
+  // SECRETARIA</option>) - usado para exibir o nome da unidade por
+  // extenso (ex.: no Relatório da Unidade) em vez da sigla. Extrai so' o
+  // nome completo removendo o sufixo " - <sigla>" - a comparacao usa a
+  // propria sigla ja lida acima (nao so' corta no primeiro " - "), para
+  // nao quebrar caso o nome da unidade tenha um "-" no meio.
+  let unidadeNome = sigla;
+  const titulo = opcaoSelecionada ? (opcaoSelecionada.getAttribute("title") || "").trim() : "";
+  if (titulo && sigla && titulo.endsWith(sigla)) {
+    const nomeExtraido = titulo
+      .slice(0, titulo.length - sigla.length)
+      .replace(/\s*-\s*$/, "")
+      .trim();
+    if (nomeExtraido) unidadeNome = nomeExtraido;
+  }
+
   return {
-    perfil: opcaoSelecionada ? (opcaoSelecionada.textContent || "").trim() : null,
+    perfil: sigla,
     valor: select.value || null,
+    unidadeNome,
   };
 }
 

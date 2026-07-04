@@ -733,6 +733,15 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
    **texto** do nome, já que os `value` das duas telas não são
    compatíveis) e clica em "Pesquisar" antes de ler a tabela — sem isso,
    a tela simplesmente **não lista regra nenhuma**, mesmo havendo regras
+   cadastradas. Cada `<option>` desse filtro traz o nome da unidade
+   seguido de " - `<código/sigla>` (`<contagem>`)" (ex.: "Juizado Especial
+   Cível e Juizado Especial da Fazenda Pública de Astorga - AST1JE (1)"),
+   nem sempre com a mesma quantidade de espaços antes do hífen — a
+   extensão extrai só o nome (removendo a contagem entre parênteses e
+   tudo a partir do ÚLTIMO " - ") e compara nome com nome, em vez de casar
+   o texto inteiro da opção contra o nome da unidade; comparar o texto
+   inteiro fazia a seleção falhar sempre que aparecia esse espaçamento
+   extra, mesmo com o nome da unidade correto.
    cadastradas (esse filtro é obrigatório na tela, mas a extensão não o
    preenchia antes; essa era a causa real de "regras de automação
    retornando zero" para o perfil Corregedoria).
@@ -833,10 +842,16 @@ cobertas abaixo.
   deste cartão).
 - O nome usado na capa/título do PDF (o texto "Unidade: `<nome>`", diferente
   do título "Relatório da Unidade" acima) vem do próprio seletor de perfil
-  do eproc (`#selInfraUnidades`, cabeçalho superior) — não é o nome da vara
-  em si, só uma identificação best-effort; se não for possível lê-lo por
-  qualquer motivo, cai num rótulo genérico ("Unidade atual") em vez de
-  travar o relatório inteiro por causa só do nome.
+  do eproc (`#selInfraUnidades`, cabeçalho superior) — não a sigla exibida
+  nesse seletor (ex.: "TOMUN/CHEFE DE SECRETARIA"), e sim o **nome por
+  extenso da unidade** (ex.: "Vara Única da Comarca de Tomazina"), lido do
+  atributo `title` do `<option>` selecionado (que traz o nome completo
+  seguido da sigla, ex.: `title="Vara Única da Comarca de Tomazina -
+  TOMUN/CHEFE DE SECRETARIA"` — a extensão remove o sufixo " - `<sigla>`"
+  usando a própria sigla já lida, então funciona mesmo se o nome da
+  unidade tiver um "-" no meio). Se não for possível ler nem o nome nem a
+  sigla por qualquer motivo, cai num rótulo genérico ("Unidade atual") em
+  vez de travar o relatório inteiro por causa só do nome.
 
 ## Regras de Automação
 
@@ -886,8 +901,8 @@ ativas dessa tela, sem precisar estar (nem navegar manualmente) na tela
    "[Sem prioridade definida]" em vez do rótulo "[ Prioridade ]" da
    própria página, que é mais confuso fora de contexto.
 4. Gera o PDF, com um "cartão" por regra ativa. Cada cartão traz, no topo,
-   um **fluxograma numerado em sequência vertical** (1 Origem → 2
-   Critério → 3 Destino → 4 Ação automatizada, quando houver) para
+   um **fluxograma numerado em sequência vertical** (1 Localizador Origem
+   → 2 Critério → 3 Destino → 4 Ação automatizada, quando houver) para
    entender de relance o que aquela regra faz — cada passo numa caixa
    colorida própria, empilhada de cima para baixo com uma seta entre
    elas, todas com o número bem visível (branco sobre o fundo colorido do
@@ -895,44 +910,45 @@ ativas dessa tela, sem precisar estar (nem navegar manualmente) na tela
    numa linha horizontal com quebra automática): com textos de tamanhos
    bem diferentes entre as regras, a quebra de linha da versão horizontal
    ficava imprevisível e as setas pareciam soltas; empilhado e numerado, a
-   ordem de execução fica clara não importa o tamanho de cada texto.
+   ordem de execução fica clara não importa o tamanho de cada texto. O
+   **Localizador de Erro** (quando a regra tiver um) não entra mais nesse
+   fluxograma como uma caixa gráfica à parte — só no detalhamento em
+   texto logo abaixo (ver adiante).
 
    Quando a regra aceita **mais de um critério** (ligados por "OU" na
    página original), a caixa "Critério" lista **todos eles**, um por
    linha com um traço fino entre si — em vez de mostrar só o primeiro com
    um badge "+N alternativa(s)" escondendo quais são os demais.
 
-   Quando a regra tem um **Localizador de Erro** definido (para onde o
-   processo vai se a ação automatizada falhar), ele ganha destaque
-   próprio: uma **seta lateral vermelha** saindo da caixa "Ação
-   automatizada" para uma **caixa vermelha** ao lado, em vez de aparecer
-   como só mais uma linha dentro do texto corrido da ação. E a própria
-   caixa "Ação automatizada" mostra cada informação (ação programada,
+   A caixa "Ação automatizada" mostra cada informação (ação programada,
    evento, texto etc.) em **linhas separadas por um traço fino**, em vez
    de tudo colado num único parágrafo.
 
    Logo abaixo do fluxograma vem o detalhamento completo e legível:
-   número/prioridade, grupo, localizador de origem, o critério que
-   dispara a regra, o localizador de destino/ação (incluindo eventos
-   automatizados programados, quando houver) e outros critérios (ex.:
-   juízo do processo, localizador adicional). O conteúdo detalhado é o
-   mesmo da página original (nada é resumido ou omitido ali), só que
+   número/prioridade, grupo, **Localizador Origem**, o critério que
+   dispara a regra (Tipo de Controle/Critério), o Localizador Destino/Ação
+   (incluindo eventos automatizados programados, quando houver), outros
+   critérios (ex.: juízo do processo, localizador adicional), a **Ação
+   Automatizada** por extenso e, quando a regra tiver um, o
+   **Localizador de Erro** — as duas últimas antes só apareciam no
+   fluxograma gráfico; agora também entram no detalhamento em texto, para
+   não ficarem omitidas de quem lê só essa parte. O conteúdo detalhado é
+   o mesmo da página original (nada é resumido ou omitido ali), só que
    reorganizado em blocos rotulados em vez da tabela apertada.
 
-   Tanto a caixa **"Ação automatizada"** do fluxograma quanto o campo
-   **"Localizador DESTINO / Ação"** do detalhamento levam em conta que a
-   coluna correspondente da tabela original pode ter dois blocos
-   sobrepostos quando o conteúdo é longo (um truncado, escondido por
-   padrão, e um completo) — o mesmo padrão que a coluna "Outros
-   Critérios" já tinha. Sem preferir sempre o bloco completo, os detalhes
-   de qual ação exatamente seria executada (evento, documento, texto,
-   etc.) podiam sair cortados; e o resumo do fluxograma pegava só a linha
-   "Evento: ..." e descartava o resto — agora leva tudo a partir do
-   cabeçalho "AUTOMATIZADO"/"Ação Programada" em diante.
+   Tanto a caixa **"Ação automatizada"** do fluxograma quanto os campos
+   **"Localizador Destino / Ação"** e **"Ação Automatizada"** do
+   detalhamento levam em conta que a coluna correspondente da tabela
+   original pode ter dois blocos sobrepostos quando o conteúdo é longo (um
+   truncado, escondido por padrão, e um completo) — o mesmo padrão que a
+   coluna "Outros Critérios" já tinha. Sem preferir sempre o bloco
+   completo, os detalhes de qual ação exatamente seria executada (evento,
+   documento, texto, etc.) podiam sair cortados; e o resumo do fluxograma
+   pegava só a linha "Evento: ..." e descartava o resto — agora leva tudo
+   a partir do cabeçalho "AUTOMATIZADO"/"Ação Programada" em diante.
 5. Fecha a aba oculta e monta esse bloco (fluxograma completo — caixas,
-   setas, numeração e a caixa vermelha do Localizador de Erro — e o mesmo
-   detalhamento) dentro do PDF do Relatório para Correição/Relatório da
-   Unidade.
+   setas e numeração — e o mesmo detalhamento) dentro do PDF do Relatório
+   para Correição/Relatório da Unidade.
 
 Se o link "Automatizar Localizadores do Órgão" não for encontrado na aba
 oculta (ex.: o rótulo do menu mudou), a extensão avisa exatamente qual
@@ -1051,6 +1067,18 @@ diretamente, sem precisar localizar o ícone na barra de ferramentas.
 O ícone (barra de ferramentas e `chrome://extensions`) é uma balança da
 justiça branca sobre fundo azul (`#2c6ea6`, a mesma cor usada no resto do
 painel), em vez do ícone genérico de documento usado antes.
+
+## Versionamento
+
+A partir da versão **1.0.0** (`manifest.json`), a extensão segue um
+esquema de versão `MAIOR.MENOR.PATCH`:
+
+- **MENOR** (ex.: 1.0.0 → 1.1.0): correções ou pequenos ajustes em
+  ferramentas já existentes (bugs de formatação, textos, comportamento).
+- **MAIOR** (ex.: 1.1.0 → 2.0.0): inclusão de novas funções/ferramentas no
+  painel.
+- **PATCH** fica reservado para eventuais correções pontuais dentro de um
+  MENOR já lançado, quando fizer sentido diferenciar.
 
 ## Observações
 
