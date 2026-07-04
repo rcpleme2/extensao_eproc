@@ -3112,8 +3112,18 @@ async function extrairLinhasRemessasJuizesLeigosNaPagina() {
     const idxData = cabecalhos.findIndex((h) => /data remessa/i.test(h));
     const idxDias = cabecalhos.findIndex((h) => /dias/i.test(h));
 
+    // Quando a consulta nao encontra nenhum processo, o DataTables desenha
+    // uma unica linha "vazia" (classe "dataTables_empty", 1 <td> so' com
+    // colspan cobrindo todas as colunas e o texto "Nenhum registro
+    // encontrado") em vez de simplesmente nao ter <tr> nenhum no <tbody>.
+    // Um filtro de "tem pelo menos 1 <td>" deixava essa linha passar como
+    // se fosse um processo de verdade (virava um "juiz" chamado "Nenhum
+    // registro encontrado" com 1 processo) - por isso o relatório mostrava
+    // ao mesmo tempo "Nenhum registro encontrado" E "Total: 1
+    // processo(s)", uma contradição. Exigir o mesmo numero de <td> que de
+    // colunas no cabecalho descarta essa linha "vazia" (que so' tem 1).
     const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
-      (tr) => tr.querySelectorAll("td").length > 0
+      (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
     );
 
     const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) => {
@@ -3537,6 +3547,18 @@ async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) 
 // Autuação do mais antigo para o mais novo. Casa cada campo pelo texto
 // do cabecalho (nao pela posicao), para nao depender da ordem exata das
 // colunas na tela.
+// Algumas situações do eproc tem um nome longo/tecnico que ocupa muito
+// espaço na coluna "Situação" da tabela - trocadas por uma abreviação
+// mais compacta, mantendo o sentido (ambas continuam representando
+// "concluso para despacho/sentença", so' que num rotulo mais curto).
+const ABREVIACOES_SITUACAO = {
+  "MOVIMENTO-AGUARDA DESPACHO": "Cls. Despacho",
+  "MOVIMENTO-AGUARDA SENTENÇA": "Cls. Sentença",
+};
+function abreviarSituacao(situacao) {
+  return ABREVIACOES_SITUACAO[situacao] || situacao;
+}
+
 async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
@@ -3552,7 +3574,7 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
       return {
         processo: valorDe(linha, idxProcesso),
         autuacao,
-        situacao: valorDe(linha, idxSituacao),
+        situacao: abreviarSituacao(valorDe(linha, idxSituacao)),
         classe: valorDe(linha, idxClasse),
         ultimoEvento: valorDe(linha, idxEvento),
         dataHora: valorDe(linha, idxDataHora),
@@ -3570,11 +3592,133 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade) {
     { titulo: "Data/Hora", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "dataHora" },
   ];
 
-  return construirPdfTabelaCuradaRetrato(
+  const bytesTabela = await construirPdfTabelaCuradaRetrato(
     itens,
     colunas,
     `Processos ativos da unidade "${nomeUnidade}" — ${itens.length} processo(s), do mais antigo ao mais novo`
   );
+
+  // Grafico de distribuicao por classe processual, anexado como pagina(s)
+  // extra no FINAL da relacao de processos ativos - reaproveita os mesmos
+  // "itens" ja' extraidos (campo "classe"), sem nenhuma consulta a mais.
+  const bytesGrafico = await construirPdfGraficoClassesAtivos(itens, nomeUnidade);
+  const pdfFinal = await PDFDocument.load(bytesTabela);
+  const pdfGrafico = await PDFDocument.load(bytesGrafico);
+  const paginasGrafico = await pdfFinal.copyPages(pdfGrafico, pdfGrafico.getPageIndices());
+  paginasGrafico.forEach((pagina) => pdfFinal.addPage(pagina));
+  return pdfFinal.save();
+}
+
+// Grafico de barras horizontais com a distribuicao das classes
+// processuais entre os processos ativos: as 15 classes mais frequentes,
+// cada uma com a fracao percentual sobre o total da unidade, e o
+// restante agrupado em "Outros" (quando houver mais de 15 classes
+// distintas) - da' uma visao rapida do perfil da vara sem precisar somar
+// nada manualmente na tabela linha a linha.
+async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  let pagina = null;
+  let y = 0;
+
+  function novaPagina(comTitulo) {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+    if (comTitulo) {
+      const linhasTitulo = quebrarLinhas(
+        sanitizarTextoPdf(`Distribuição por classe processual — unidade "${nomeUnidade}"`),
+        fonteNegrito,
+        13,
+        larguraUtil
+      );
+      for (const linhaTitulo of linhasTitulo) {
+        pagina.drawText(linhaTitulo, { x: margem, y, size: 13, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+        y -= 17;
+      }
+      pagina.drawText(`${itens.length} processo(s) no total`, {
+        x: margem,
+        y,
+        size: 9.5,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
+      });
+      y -= 22;
+    }
+  }
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina(false);
+    }
+  }
+
+  novaPagina(true);
+
+  const contagemPorClasse = new Map();
+  for (const item of itens) {
+    const chave = (item.classe || "").trim() || "(sem classe)";
+    contagemPorClasse.set(chave, (contagemPorClasse.get(chave) || 0) + 1);
+  }
+  const ordenado = Array.from(contagemPorClasse.entries())
+    .map(([classe, contagem]) => ({ classe, contagem }))
+    .sort((a, b) => b.contagem - a.contagem);
+
+  const top15 = ordenado.slice(0, 15);
+  const totalOutros = ordenado.slice(15).reduce((soma, item) => soma + item.contagem, 0);
+  const dados = [...top15];
+  if (totalOutros > 0) dados.push({ classe: "Outros", contagem: totalOutros });
+
+  const total = itens.length || 1;
+  const maiorContagem = Math.max(...dados.map((d) => d.contagem), 1);
+
+  const larguraRotulo = 200;
+  const larguraPercentual = 90;
+  const larguraMaxBarra = larguraUtil - larguraRotulo - larguraPercentual;
+  const alturaBarra = 14;
+  const tamanhoFonte = 8.5;
+
+  for (const item of dados) {
+    const linhasRotulo = quebrarLinhas(sanitizarTextoPdf(item.classe), fonteNormal, tamanhoFonte, larguraRotulo - 6);
+    const alturaLinha = Math.max(alturaBarra, linhasRotulo.length * 10) + 8;
+    garantirEspaco(alturaLinha);
+
+    let yRotulo = y - 9;
+    for (const linha of linhasRotulo) {
+      pagina.drawText(linha, { x: margem, y: yRotulo, size: tamanhoFonte, font: fonteNormal, color: COR_CINZA_TEXTO });
+      yRotulo -= 10;
+    }
+
+    const percentual = (item.contagem / total) * 100;
+    const larguraBarra = Math.max(2, (item.contagem / maiorContagem) * larguraMaxBarra);
+    pagina.drawRectangle({
+      x: margem + larguraRotulo,
+      y: y - alturaBarra,
+      width: larguraBarra,
+      height: alturaBarra - 3,
+      color: item.classe === "Outros" ? COR_CINZA_BORDA : COR_PRIMARIA,
+    });
+
+    pagina.drawText(`${percentual.toFixed(1)}% (${item.contagem})`, {
+      x: margem + larguraRotulo + larguraBarra + 6,
+      y: y - 9,
+      size: tamanhoFonte,
+      font: fonteNegrito,
+      color: COR_PRIMARIA_ESCURA,
+    });
+
+    y -= alturaLinha;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+  return pdf.save();
 }
 
 // Monta o PDF (A4 RETRATO) da relação de suspensos/sobrestados: so' os 4
@@ -3666,6 +3810,7 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   conclusosSentenca: true,
   semMovimentacao: true,
   remessasJuizesLeigos: true,
+  regrasAutomacao: true,
   localizadores: true,
 };
 
@@ -3817,6 +3962,21 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     if (r.erro) remessasJuizesLeigos.erros.push(r.erro);
   }
 
+  // Regras de Automação: a tela "Automatizar Localizadores do Órgão" NAO
+  // tem um seletor de "Órgão/Juízo" como o Relatório Geral - ela sempre
+  // lista as regras da unidade atualmente HABILITADA no eproc (o perfil
+  // logado), independente da unidade escolhida acima para o restante
+  // deste relatório. Por isso essa seção pode nao corresponder a' unidade
+  // do relatório quando o usuario gera o PDF de uma unidade diferente da
+  // que tem habilitada no momento - um aviso avisa exatamente isso.
+  const regrasAutomacao = { regras: [], erros: [] };
+  if (opcoesFinais.regrasAutomacao) {
+    notificar("Consultando regras de automação ativas...");
+    const r = await abrirAbaEListarRegrasAutomacao(abaAtual.url);
+    regrasAutomacao.regras = r.regras || [];
+    if (r.erro) regrasAutomacao.erros.push(r.erro);
+  }
+
   let localizadoresOrdenados = [];
   let erroLocalizadores = null;
   if (opcoesFinais.localizadores) {
@@ -3890,6 +4050,12 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
       linhas: [{ rotulo: "Total de processos em remessa", valor: remessasJuizesLeigos.linhas.length }],
     });
   }
+  if (opcoesFinais.regrasAutomacao) {
+    secoesResumo.push({
+      titulo: "REGRAS DE AUTOMAÇÃO",
+      linhas: [{ rotulo: "Total de regras ativas", valor: regrasAutomacao.regras.length }],
+    });
+  }
 
   const avisos = [];
   if (opcoesFinais.processosAtivos && processosAtivos.erros.length > 0) {
@@ -3912,6 +4078,16 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
   }
   if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.erros.length > 0) {
     avisos.push(`Remessas aos juízes leigos: ${remessasJuizesLeigos.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.regrasAutomacao && regrasAutomacao.erros.length > 0) {
+    avisos.push(`Regras de automação: ${regrasAutomacao.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
+    avisos.push(
+      "Regras de automação: lista as regras da unidade atualmente habilitada no eproc - a tela " +
+        '"Automatizar Localizadores do Órgão" não permite escolher outra unidade, então essa seção pode não ' +
+        "corresponder à unidade selecionada acima caso sejam diferentes."
+    );
   }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
 
@@ -3945,6 +4121,18 @@ async function exportarRelatorioGerencialUnidade(valorUnidade, nomeUnidade, opco
     const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
     const pdfRemessas = await PDFDocument.load(bytesRemessas);
     const paginas = await pdfFinal.copyPages(pdfRemessas, pdfRemessas.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  // Regras de Automação: um "cartão" por regra ativa (fluxograma +
+  // detalhamento), igual ao PDF avulso gerado pelo cartão "Regras de
+  // Automação" da Gestão da Unidade - entra ANTES de Localizadores (ver
+  // comentário acima sobre essa seção refletir a unidade habilitada, não
+  // necessariamente a escolhida para o restante deste relatório).
+  if (opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
+    const bytesRegras = await construirPdfRegras(regrasAutomacao.regras, nomeUnidade);
+    const pdfRegras = await PDFDocument.load(bytesRegras);
+    const paginas = await pdfFinal.copyPages(pdfRegras, pdfRegras.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
   }
 

@@ -448,6 +448,7 @@ const chkRelConclusosDecisao = document.getElementById("chk-rel-conclusos-decisa
 const chkRelConclusosSentenca = document.getElementById("chk-rel-conclusos-sentenca");
 const chkRelSemMovimentacao = document.getElementById("chk-rel-sem-movimentacao");
 const chkRelRemessasJuizesLeigos = document.getElementById("chk-rel-remessas-juizes-leigos");
+const chkRelRegrasAutomacao = document.getElementById("chk-rel-regras-automacao");
 const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
 const areaBtnExportarGerencial = document.getElementById("area-btn-exportar-gerencial");
 const btnExportarRelatorioGerencial = document.getElementById("btn-exportar-relatorio-gerencial");
@@ -637,6 +638,7 @@ function lerOpcoesRelatorioUnidade() {
     conclusosSentenca: chkRelConclusosSentenca.checked,
     semMovimentacao: chkRelSemMovimentacao.checked,
     remessasJuizesLeigos: chkRelRemessasJuizesLeigos.checked,
+    regrasAutomacao: chkRelRegrasAutomacao.checked,
     localizadores: chkRelLocalizadores.checked,
   };
 }
