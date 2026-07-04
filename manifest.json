@@ -2,14 +2,14 @@
   "manifest_version": 3,
   "name": "Extensão Auxiliar eProc",
   "version": "1.0.0",
-  "description": "Identifica e baixa em lote todos os documentos de um processo no sistema eproc (TJPR, TJSC, TJAL, Justiça Federal, etc.).",
-  "permissions": ["downloads", "activeTab", "scripting", "tabs", "sidePanel"],
-  "host_permissions": ["*://*/eproc/*"],
+  "description": "Extensão para auxiliar no uso e extração de relatórios do eProc",
+  "permissions": ["downloads", "activeTab", "scripting", "tabs", "sidePanel", "storage"],
+  "host_permissions": ["https://eproc1g.tjpr.jus.br/eproc/*", "https://eproc1g.tre.tjpr.jus.br/eproc/*"],
   "side_panel": {
     "default_path": "popup.html"
   },
   "action": {
-    "default_title": "Extensão Auxiliar eProc",
+    "default_title": "Extensão eProc",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -26,7 +26,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*/eproc/controlador.php*"],
+      "matches": [
+        "https://eproc1g.tjpr.jus.br/eproc/controlador.php*",
+        "https://eproc1g.tre.tjpr.jus.br/eproc/controlador.php*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
@@ -34,7 +37,7 @@
   "web_accessible_resources": [
     {
       "resources": ["libs/pdf.worker.min.js"],
-      "matches": ["<all_urls>"]
+      "matches": ["https://eproc1g.tjpr.jus.br/*", "https://eproc1g.tre.tjpr.jus.br/*"]
     }
   ]
 }

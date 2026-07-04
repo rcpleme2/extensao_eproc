@@ -1,9 +1,42 @@
 # Extensão Auxiliar eProc
 
-Extensão para Chrome/Edge com funcionalidades para o sistema **eproc**
-(usado por diversos tribunais brasileiros: TJPR, TJSC, TJAL, Justiça Federal,
-etc.), organizadas em três cartões separados no painel: **Exportar
-Documentos**, **Relatórios** e **Regras de Automação**.
+Extensão para Chrome/Edge com funcionalidades para o sistema **eproc** do
+TJPR, restrita aos endereços `https://eproc1g.tjpr.jus.br/eproc/` e
+`https://eproc1g.tre.tjpr.jus.br/eproc/` (únicos hosts com permissão no
+`manifest.json` — a extensão não roda em nenhum outro domínio),
+organizadas em cartões colapsáveis no painel lateral: **Gestão
+Gabinete** (Exportar Documentos + Busca específica de localizadores),
+**Gestão da Unidade** (Exportar Relatório da Unidade em PDF, sem exigir
+escolha de unidade — ver seção própria abaixo) e **Corregedoria**
+(exclusivo desse perfil, com o Relatório para Correição de uma unidade
+escolhida). O painel abre enxuto (**todos os cartões fechados**,
+nenhum aberto por padrão); cada cartão expande ao clicar no título, e
+reabre sozinho quando alguma operação dele progride, conclui ou falha.
+Sucessos aparecem em verde e erros em vermelho na linha de status de
+cada cartão. Os botões que **geram um arquivo para baixar** (Exportar
+Documentos, Exportar Relatório da Unidade, Exportar Relatório para
+Correição, Exportar processos/documentos de um localizador) ganham um
+**cronômetro discreto** (ex.: "Gerando... (12s)" → "Gerando... (1min
+8s)"), medindo quanto tempo aquela exportação está levando desde o
+primeiro texto de andamento até o resultado final — assim dá pra saber
+se uma exportação demorada ainda está rodando ou travou, sem precisar
+cronometrar por fora. Essa linha de status fica parada na mensagem
+inicial (só o cronômetro segue contando por cima dela); o passo atual
+em detalhe (qual seção/consulta está sendo processada no momento)
+aparece **só** na linha de progresso logo abaixo, para as duas áreas não
+mostrarem o mesmo texto duas vezes. Operações que só **carregam
+informação na tela** (Detectar documentos, Carregar unidades, Carregar
+localizadores) não mostram esse cronômetro.
+
+O cartão **Corregedoria** é o único realmente condicional - só aparece
+quando esse é o perfil ativo (ver seção própria abaixo); os demais
+ficam sempre visíveis e utilizáveis por qualquer perfil.
+
+A ordem padrão dos cartões é **Corregedoria > Gestão da Unidade >
+Gestão Gabinete**, mas cada um tem uma alça (⠿) ao lado do ícone
+que pode ser arrastada com o mouse para reordená-los como preferir; a
+ordem escolhida fica salva (`chrome.storage.local`) e é reaplicada da
+próxima vez que o painel for aberto.
 
 ## Exportar Documentos
 
@@ -78,6 +111,77 @@ fonte menor (ex.: `CRISLAINY MARCELO - DIRETOR DE DISTRIBUIÇÃO`), lido do
 próprio HTML da página (a informação já existe ali, usada hoje só para o
 tooltip que aparece ao passar o mouse). O tooltip com cargo e lotação
 continua funcionando normalmente.
+
+Esse comportamento pode ser desligado na engrenagem de **Configurações**
+do painel (ver seção própria abaixo) — desligar não desfaz o que já foi
+trocado numa página já aberta (passa a valer a partir da próxima
+navegação/recarregamento daquela página).
+
+## Magistrado nos eventos "Conclusos \*"
+
+Na tabela de eventos do processo (`#tblEventos`), quando um evento é um
+"Conclusos" (ex.: "Conclusos para decisão/despacho", "Conclusos para
+sentença" — qualquer descrição que **comece** com "Conclusos"), o
+Magistrado responsável já existe na página, só que escondido atrás do
+tooltip nativo "Informações do Evento" (o ícone de lupa ao lado da
+descrição, que só aparece ao passar o mouse) — não vem na própria coluna
+Descrição. A extensão lê esse dado direto do atributo `aria-description`
+do `<span class="sr-only">` vizinho ao ícone (o mesmo texto usado pelos
+leitores de tela, sempre presente no HTML independente do hover) e
+acrescenta **só o nome do Magistrado**, entre parênteses, ao final do
+texto já existente na coluna — ex.: "Conclusos para decisão/despacho"
+vira **"Conclusos para decisão/despacho (ROSANGELA FAORO)"**. O cargo
+(ex.: "Juiz da Fase", vindo depois do nome como "NOME - Cargo" nesse
+mesmo atributo) fica de fora, só o nome entra.
+
+Esse atributo concatena "Data do Evento:", "Evento:", "Usuário:" e
+"Magistrado(s):" **sem nenhum separador visível** entre os valores (o
+eproc usa `<br>` só na versão visual do tooltip; a versão para leitor de
+tela perde essas quebras) — por isso a extensão isola cada campo
+ancorando no **rótulo do campo seguinte**, nunca em espaço ou pontuação,
+e conclusão só é procurada no campo "Magistrado(s):" (o último), lendo
+tudo que sobra depois desse rótulo.
+
+Assim como a troca de sigla por nome (acima), esse comportamento pode ser
+desligado na engrenagem de **Configurações** do painel — desligar não
+desfaz o que já foi acrescentado numa página já aberta.
+
+## Configurações
+
+O ícone de engrenagem (⚙) no canto superior direito do painel — com um
+fundo sutil para não passar despercebido, mas sem chamar mais atenção que
+os botões de ação — abre um pequeno modal com uma opção, salva em
+`chrome.storage.local`
+(preferência deste navegador, não sincronizada entre máquinas):
+
+- **"Substituir a sigla do usuário pelo nome e cargo na movimentação"**
+  (ligado por padrão): controla a troca descrita na seção "Nomes de
+  usuário na movimentação" acima.
+- **"Separar Comarca/Juízo no campo 'Órgão/Juízo' do Relatório Geral"**
+  (**desligado por padrão**): quando ligada, na própria tela do
+  Relatório Geral do eproc (`#selIdOrgaoJuizo`), o dropdown único com
+  centenas de unidades é substituído por **dois selects em sequência**
+  — primeiro a Comarca, depois o Juízo/Vara (só com as unidades daquela
+  comarca) — igual à escolha em duas etapas já usada pelo próprio painel
+  para o Relatório para Correição (mesma separação de nome pelo padrão
+  "`<Juízo/Vara> de <Comarca>`"). Ao escolher o Juízo/Vara, o `<select>`
+  nativo da página é atualizado e dispara "change" normalmente, então o
+  resto da tela (bootstrap-select, filtros dependentes) continua
+  funcionando como se a unidade tivesse sido escolhida no dropdown
+  original — que fica oculto (não removido) enquanto a opção estiver
+  ligada. Desligada por padrão porque altera a interface da própria
+  página do eproc, não só lê dados dela.
+- **"Acrescentar o Magistrado aos eventos 'Conclusos \*' na tela do
+  processo"** (ligado por padrão): ver seção "Magistrado nos eventos
+  'Conclusos \*'" abaixo.
+
+Os menus suspensos preenchidos pela extensão (unidades do Relatório para
+Correição, localizadores da "Busca específica de localizadores") sempre
+aparecem em ordem alfabética — não é uma opção configurável, é aplicado
+automaticamente.
+
+Cada opção salva assim que marcada/desmarcada (sem precisar de um botão
+"Salvar" separado); o botão "Fechar" só esconde o modal.
 
 ## PDF único combinado
 
@@ -220,7 +324,11 @@ completa") permite ajustar a detecção com precisão.
   antes de terminar), a extensão tenta como último recurso um download
   direto (`fetch` autenticado da mesma URL). Só quando isso também falha
   o documento entra no arquivo final com uma nota de erro. Veja a seção
-  de diagnóstico abaixo para os detalhes de cada tentativa.
+  de diagnóstico abaixo para os detalhes de cada tentativa. A conversão
+  para texto simples remove por inteiro (tag **e** conteúdo) qualquer
+  `<style>`/`<script>`/comentário embutido no HTML do documento (comum em
+  certidões/mandados, que trazem CSS de impressão junto) — sem isso, o
+  conteúdo dessas tags vazava como se fosse texto do próprio documento.
 
 ### Anonimização (melhor esforço)
 
@@ -289,90 +397,461 @@ exportação).
    falharem, um aviso `"tentando baixar bruto via fetch como último
    recurso"` indica que a extensão está tentando o fallback de download
    direto antes de desistir do documento.
-4. Nenhuma etapa demorada fica presa para sempre: download de documento
-   tem limite de 30s, e a extração de texto de cada PDF tem limite de
-   60s — ao estourar, vira um erro tratado normalmente (nos avisos do
-   arquivo final), em vez de travar a exportação inteira.
+4. Nenhuma requisição de rede fica presa para sempre: toda chamada
+   `fetch` feita pela extensão (resolver a URL real de um documento,
+   baixar o conteúdo de um PDF/imagem, buscar a lista de Localizadores)
+   usa um `AbortController` com limite de **10 segundos** — ao estourar,
+   a requisição específica é **abortada de fato** (não só "desistida"), o
+   item correspondente (documento, consulta) é pulado e o motivo
+   ("Tempo esgotado (10s) aguardando resposta de ...") entra nos
+   avisos/erros do resultado final, sem impedir os próximos itens de
+   serem processados. A extração de texto de cada PDF (que envolve várias
+   páginas, não só uma requisição) tem um limite maior, de 60s.
 
-## Relatório Geral (conclusos para despacho/sentença)
+## Corregedoria
 
-O painel também tem um botão **"Relatórios"** que automatiza uma consulta
-que hoje precisa ser feita manualmente, **sem alterar a página que você
-está vendo**. Para cada situação (**"MOVIMENTO-AGUARDA DESPACHO"** e
-**"MOVIMENTO-AGUARDA SENTENÇA"**), ele levanta três números:
+Quando o perfil ativo (select de perfil no cabeçalho do eproc,
+`#selInfraUnidades`) é **"CORREGEDORIA"**, um cartão exclusivo
+**"Corregedoria"** aparece no painel (fica oculto para qualquer outro
+perfil), com selo e borda destacada indicando que é condicional. Por
+enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
 
-- **Total**: quantos processos estão nessa situação.
-- **Urgentes**: quantos desses têm a marcação "Informação complementar" =
-  "Petição Urgente - Sim".
-- **+30 dias**: quantos desses estão na situação há mais de 30 dias
-  (preenchendo o campo "Dias na situação" com `30` antes de consultar).
+> **Relatório Geral (todas as unidades)** — desativado temporariamente.
+> O botão, a área de progresso e toda a lógica (`exportarRelatorioPanoramico`
+> em `background.js`) continuam no código, só comentados/ocultos em
+> `popup.html`/`popup.js` — a ideia é melhorar esse relatório antes de
+> voltar a expô-lo no painel.
 
-Além disso, o mesmo botão levanta um demonstrativo de **processos sem
-movimentação**, preenchendo numericamente o campo "Dias sem movimentação"
-(`#txtDiasSemMovimentacao`) com três faixas: **30, 90 e 120 dias**. Esse
-filtro não depende de nenhuma situação selecionada.
+### Relatório para Correição
 
-Isso dá 9 consultas ao todo (6 de situação + 3 de sem movimentação). Cada
-uma delas roda em uma **aba oculta própria** (criada com `active: false`,
-sem roubar o foco nem alterar o que você está vendo), que abre a página,
-navega até o Relatório Geral, seleciona a situação (quando aplicável) e o
-filtro daquela consulta específica, clica em "Consultar", lê o resultado e
-fecha a aba — uma aba nova para cada consulta, nunca reaproveitando a
-mesma aba para mais de uma.
-Isso é proposital: reaproveitar a mesma aba para interagir duas vezes
-seguidas com o campo "Informação complementar" (um componente Tagify)
-se mostrou instável nos testes — a primeira consulta na aba sempre
-funcionava, a segunda às vezes não. Com uma aba nova por consulta, esse
-problema desaparece por completo, ao custo de o relatório completo levar
-mais tempo (a ordem de alguns segundos por consulta, já que cada uma
-recarrega a página do zero).
+1. **"Carregar unidades (Relatório para Correição)"**: navega a aba atual até
+   o Relatório Geral e lê todas as opções do filtro "Órgão/Juízo" dessa
+   tela — visualmente
+   um dropdown do bootstrap-select, mas a leitura é feita direto no
+   `<select id="selIdOrgaoJuizo">` nativo por trás dele. O botão **some
+   assim que clicado** — ele só serve para um carregamento inicial, e só
+   volta a aparecer se o carregamento falhar (para tentar de novo).
+2. Como os nomes de unidade do eproc seguem o padrão "`<Juízo/Vara> de
+   <Comarca>`" (ex.: "Juizado Especial Cível, Criminal e da Fazenda
+   Pública de Piraquara"), o painel separa a **Comarca** (tudo depois do
+   último " de " do nome) do restante e oferece a escolha em **duas
+   etapas**, em vez de uma lista única com centenas de unidades:
+   - Primeiro, um menu **"Selecione uma comarca..."** (em ordem
+     alfabética), preenchido assim que a lista termina de carregar.
+   - Ao escolher uma comarca, um segundo menu **"Selecione um
+     juízo/vara..."** aparece, já filtrado só com as unidades daquela
+     comarca (também em ordem alfabética) — o nome mostrado nesse menu
+     **não repete** o sufixo "de `<Comarca>`" (já está implícito na
+     comarca escolhida acima), mas o **nome completo original** é o que
+     aparece na confirmação abaixo e é usado de fato no relatório/PDF.
+     Nomes sem nenhum " de " (ex.: siglas curtas) caem numa comarca
+     "(Outras)". Exceção conhecida: comarcas cujo próprio nome tem "de"
+     (hoje só **"Cândido de Abreu"**) entrariam erradas nesse split
+     ingênuo pelo ÚLTIMO " de " — ex.: "... do Juízo Único de Cândido de
+     Abreu" viraria comarca "Abreu" — por isso essas comarcas ficam numa
+     lista de exceções, verificadas pelo nome inteiro antes de qualquer
+     tentativa de split.
+3. Ao **escolher um juízo/vara** no segundo menu, o painel mostra
+   "Informações serão extraídas de: `<nome completo da unidade>`" e
+   libera a lista **"Itens a incluir no PDF"** (checkboxes, um por seção
+   do relatório — todos marcados por padrão) e o botão **"Exportar
+   Relatório para Correição (PDF)"**. Esse relatório sempre confere se uma
+   unidade foi escolhida antes de rodar — sem isso, mostra o erro
+   "Selecione uma unidade na lista antes de gerar este relatório." em vez
+   de seguir sem saber de onde extrair os dados; e confere se pelo menos
+   1 item está marcado — sem isso, mostra "Marque ao menos um item do
+   relatório antes de exportar.".
+4. **"Exportar Relatório para Correição (PDF)"** gera, filtrado pela unidade
+   escolhida e pelos itens marcados, um único PDF com as seções abaixo
+   **nesta ordem** (mesma ordem dos checkboxes "Itens a incluir no PDF"):
+   - Nome da unidade e data/hora da extração.
+   - **Relação de processos ativos**: o próprio Relatório Geral filtrado
+     pela unidade e por **todos os macro grupos do filtro "Situação"
+     EXCETO BAIXADO e SUSPENSÃO** (e os respectivos subitens) — em vez de
+     deixar o campo em branco, o que contava também suspensos/sobrestados
+     e baixados como "ativos". Sai em **página retrato** própria, com só
+     os campos **Nº do Processo, Data da Autuação, Situação, Classe,
+     Último Evento e Data/Hora** (a tabela real do eproc traz mais
+     colunas, como Sigilo e Localizador, que ficam de fora aqui) — casados
+     pelo texto do cabeçalho, não pela posição, para não depender da ordem
+     exata das colunas na tela. Ordenada pela **Data de Autuação, do
+     processo mais antigo para o mais novo**. Duas situações com nome
+     longo saem abreviadas na coluna Situação: "MOVIMENTO-AGUARDA
+     DESPACHO" vira **"Cls. Despacho"** e "MOVIMENTO-AGUARDA SENTENÇA"
+     vira **"Cls. Sentença"**. Quando o processo está concluso para
+     despacho ou sentença E tem o campo **"Petição Urgente"** marcado no
+     eproc, a Situação ganha o sufixo **" (Urgente)"** (ex.: "Cls.
+     Despacho (Urgente)") — como esse dado não vem como coluna na tabela
+     de processos em si (só é possível filtrar por ele), a extensão faz
+     **2 consultas a mais** (uma para despacho, outra para sentença,
+     ambas em paralelo), filtrando por "Petição Urgente = Sim", só para
+     descobrir quais números de processo tem o campo marcado. Cada valor
+     distinto de Situação ganha sua
+     própria **cor de texto**, sempre a mesma para o mesmo valor ao longo
+     do PDF — como a tabela é ordenada por Data de Autuação (não por
+     Situação), a cor ajuda a identificar rapidamente processos na mesma
+     situação mesmo espalhados entre linhas não adjacentes.
 
-O campo "Informação complementar" usa o dropdown de sugestões nativo do
-Tagify (confirmado inspecionando a página ao vivo: os itens aparecem como
-`div.tagify__dropdown__item`, com o valor exato no atributo `value`). A
-extensão simula a digitação de "Petição Urgente" no campo, espera a
-sugestão "Petição Urgente - Sim" aparecer no dropdown e clica nela — o
-mesmo que um clique real faria. Se alguma consulta falhar por qualquer
-motivo, as demais continuam normalmente; o painel mostra um aviso listando
-especificamente o que não pôde ser determinado, sem travar o resto do
-relatório.
+     Ao final dessa relação (mesmo PDF, páginas extras), entram mais duas
+     seções, montadas com os mesmos dados já extraídos (sem nenhuma
+     consulta a mais):
+     - Um **gráfico de barras** com a distribuição por classe processual:
+       as **15 classes mais frequentes**, cada uma com a fração percentual
+       sobre o total de processos ativos da unidade, e as demais
+       agrupadas em **"Outros"** (quando houver mais de 15 classes
+       distintas). O nome da classe é **uniformizado em maiúsculas** antes
+       de agrupar — sem isso, a mesma classe grafada de forma diferente
+       entre processos (ex.: "Procedimento Comum Cível" e "PROCEDIMENTO
+       COMUM CÍVEL") virava duas fatias separadas no gráfico em vez de uma
+       só.
+     - Os **15 maiores demandantes** (polo ativo) e os **15 maiores
+       demandados** (polo passivo), com o número de processos ativos em
+       que cada parte aparece — lidos das colunas **Autor** e **Réu** da
+       mesma tabela do Relatório Geral. Quando um processo tem mais de uma
+       parte no mesmo polo (litisconsórcio), cada nome vem no seu próprio
+       `<span class="d-block">` dentro da célula (sem espaço nem
+       pontuação entre eles) — a extensão separa cada nome individualmente
+       antes de contar, em vez de somar tudo como se fosse um nome só.
+   - **Suspensos/sobrestados**: há mais de 90 dias (grupo inteiro do
+     filtro "Situação" — os values de `#selStatusProcesso` seguem o
+     formato `status;codigo;grupo`; o grupo SUSPENSÃO é o sufixo `;S`) e
+     um **detalhamento por situação específica**: cada uma das ~40
+     opções do grupo é consultada individualmente, mas só entram no
+     relatório as que têm pelo menos 1 processo (ex.: "SUSPENSAO: 12",
+     "SOBRESTADO CONVÊNIO: 3") — as dezenas de variantes zeradas ficam de
+     fora, para não poluir o relatório. O **Total** vem por último,
+     depois de todos os processos individuais listados acima, com a
+     contagem de **processos há mais de 90 dias entre parênteses** (ex.:
+     "Total 21 (5 há mais de 90 dias)") — em vez de uma linha
+     própria para esse recorte, já que é só um subconjunto do próprio
+     Total, não um número independente. O parêntese só aparece quando o
+     Total é maior que 0 (com Total 0 não há nada a detalhar) e mostra
+     **"nenhum"** em vez de "0" quando não há nenhum processo com mais de
+     90 dias (ex.: "Total 10 (nenhum há mais de 90 dias)") —
+     mesma regra usada em Conclusos para decisão/sentença, abaixo. Além do
+     total, o relatório também traz a **relação de processos**, em
+     **página retrato**, com só os campos **Nº do Processo, Data da
+     Autuação, Situação, Localizador e Data/Hora** (a tabela real do eproc
+     traz mais colunas, como Sigilo e Classe, que ficam de fora aqui) —
+     casados pelo texto do cabeçalho, igual à relação de processos ativos
+     (mesmo filtro contra a linha "vazia" do DataTables quando não há
+     nenhum processo — ver nota na seção de Remessas aos juízes leigos
+     abaixo, que teve o mesmo problema). Quando o processo tem **mais de
+     um Localizador**, cada um entra numa **linha própria** dentro da
+     célula (em vez de ficar tudo colado numa linha só). A própria
+     célula do eproc traz, colado antes de cada nome, um **ícone**
+     (glifo de uma fonte de ícones, fora da faixa de caracteres que o PDF
+     consegue desenhar) sem nenhum separador de texto entre um
+     Localizador e outro — a extensão trata qualquer trecho fora dessa
+     faixa como o limite entre um Localizador e o próximo (a mesma regra
+     também aceita o delimitador `" | "` de "textoCelula", usado em
+     outras colunas com múltiplos valores), então esses ícones **não
+     aparecem** no PDF - nem como um caractere solto, nem grudados no
+     nome do Localizador seguinte. Valores exatamente **"?"** (localizador
+     expirado/inconsistente do próprio eproc) também são descartados por
+     completo, em vez de aparecerem como um "?" solto sem significado.
+     Esse
+     detalhamento por situação é a parte mais demorada do relatório (uma
+     consulta por situação), então roda **em paralelo**: a lista de ~40
+     situações do grupo é dividida em **9 blocos** (o máximo de abas
+     ocultas simultâneas permitido, ver "Limite de abas ocultas
+     simultâneas" abaixo) e cada bloco é consultado numa **aba oculta
+     própria, simultaneamente** às demais (em vez de uma única aba
+     consultando as ~40 situações uma de cada vez). Dentro de cada bloco,
+     cada situação espera o evento **`draw.dt`** do próprio DataTable da
+     tela (o mesmo mecanismo já usado para esperar a tabela de processos
+     terminar de carregar) em vez de comparar o texto da contagem antes/
+     depois com um intervalo fixo de espera — como a maioria das ~40
+     situações costuma ter 0 processos, duas consultas seguidas com
+     contagem igual ("0") faziam esse método antigo esperar até 2s
+     "achando" que a consulta ainda não tinha terminado, mesmo já tendo
+     concluído há muito tempo; o `draw.dt` elimina essa espera
+     desnecessária e deixa o detalhamento sensivelmente mais rápido no
+     caso comum. Cada bloco tem um
+     orçamento interno de 60s (verificado ENTRE uma situação e outra,
+     preservando o que já foi apurado até ali) e um timeout externo de
+     75s como rede de segurança; se algum bloco não terminar a tempo (ou
+     falhar por qualquer motivo), o relatório sai com o que os demais
+     blocos conseguiram apurar e um aviso discreto do tipo "Consulta em
+     paralelo (9 bloco(s) simultâneos) não concluiu a tempo - N de 40
+     situação(ões) não consultada(s)." — o **Total geral de suspensos**
+     (que vem de uma consulta separada, à parte) nunca é afetado por
+     esse limite, só o detalhamento por situação específica fica
+     incompleto.
+   - Conclusos para decisão e para sentença: Urgentes, Não urgentes
+     (calculado como Total − Urgentes, sem precisar de uma consulta a
+     mais) e, **por último, o Total**, com a contagem de **processos há
+     mais de 90 dias entre parênteses** (ex.: "Total 10 (3 há mais de 90
+     dias)") — mesmo formato usado em Suspensos/Sobrestados, também sem
+     uma linha própria para esse recorte, sem o parêntese quando o Total é
+     0 e escrevendo **"nenhum"** em vez de "0" quando não há nenhum
+     processo com mais de 90 dias. As 3 sub-consultas de cada
+     bloco (total/urgentes/atraso), e os dois blocos (decisão e sentença)
+     entre si, rodam **em paralelo**.
+   - Processos sem movimentação há mais de 30, 90 e 120 dias — as 3
+     faixas também consultadas **em paralelo**.
+   - **Processos paralisados**: relação **completa** dos processos parados
+     **a partir de 31 dias** sem movimentação (mesmo campo "Dias sem
+     movimentação" usado no demonstrativo acima, só que numa única
+     consulta com o piso em 31, em vez de repetir para 30/90/120) — ao
+     contrário do item anterior (só a contagem), aqui a extensão lê a
+     **relação de processos** de verdade, numa única tabela (sem separar
+     por faixa de dias), em **página retrato**, com os campos **Nº do
+     Processo, Situação, Classe, Localizador, Último Evento e Data/Hora**
+     (a tabela real do eproc traz mais colunas, como Sigilo e Data da
+     Autuação, que ficam de fora aqui) — casados pelo texto do cabeçalho,
+     igual às demais relações deste relatório. Localizadores seguem a
+     mesma técnica de quebra de linha das demais tabelas (um por linha,
+     "?" descartado), mas aqui, quando há **mais de um**, cada linha
+     também ganha um **marcador "- "** na frente (diferente da relação de
+     suspensos, que não usa marcador nenhum) — pedido específico desta
+     seção. Ordenados do processo **mais paralisado para o menos
+     paralisado**: como "paralisado" significa "sem nenhuma movimentação
+     há muito tempo", isso é o mesmo que ordenar pela **Data/Hora do
+     último evento, da mais antiga para a mais recente** (quanto mais
+     antiga essa data, mais tempo o processo está parado).
+   - **Remessas aos juízes leigos**: extraída da tela própria do menu
+     lateral "Relatórios → Relatório de remessas em aberto"
+     (`acao=relatorio_remessas_em_aberto/listar`), preenchendo o filtro
+     "Órgão Julgador" (`#IdOrgaoSecretaria`) com a mesma unidade
+     escolhida. Sai em **página retrato** (diferente das demais tabelas
+     deste relatório, que usam página virada), com o **total geral** no
+     topo e, em seguida, um bloco por juiz leigo (subtítulo com nome e
+     total daquele juiz) seguido da tabela com Nome do Juiz Leigo, Número
+     do Processo, Classe Processual, Data Remessa e Dias da Remessa de
+     cada processo dele, ordenada do **mais antigo para o mais novo**
+     (maior quantidade de dias em remessa primeiro). Processos com
+     **prioridade legal** (idoso, doença grave etc. — identificados pelo
+     `<label>` extra que o eproc inclui na célula de Classe Processual
+     desses processos) aparecem com o **número do processo em vermelho**
+     e o motivo da prioridade **entre parênteses** logo depois (ex.:
+     "0000001-11.2024.8.16.0001 (Idoso)"), com uma legenda no topo da
+     página explicando a cor sempre que houver ao menos um caso. Quando a
+     consulta não encontra nenhum processo em remessa, o DataTables da
+     tela desenha uma linha "vazia" (célula única com o texto "Nenhum
+     registro encontrado") em vez de simplesmente não ter linha nenhuma no
+     resultado — essa linha é descartada da extração (não é um processo de
+     verdade), evitando a contradição de mostrar ao mesmo tempo "Nenhum
+     registro encontrado" e "Total: 1 processo(s)".
+   - O **nome de cada Localizador** da unidade, em ordem alfabética, em
+     páginas próprias no **final do PDF**, depois de todas as demais
+     seções — valores exatamente **"?"** (localizador expirado/
+     inconsistente do próprio eproc) são descartados da lista, em vez de
+     aparecerem como um "?" solto sem significado. Logo abaixo do título
+     dessa seção, um **subtítulo discreto**
+     (fonte pequena, sem destaque) avisa que a lista traz só os nomes —
+     por enquanto, a única forma de obter o total de processos de cada
+     localizador é se habilitar na própria unidade e usar a ferramenta
+     "Localizadores do Órgão" do painel. Essa observação fica junto da
+     seção que ela explica (não mais misturada com os "Avisos" gerais no
+     início do relatório).
 
-Enquanto processa, o painel mostra um indicador de progresso com o passo
-atual (qual situação/filtro está sendo consultado no momento), então dá
-para acompanhar sem achar que a extensão travou.
+   **Limite de abas ocultas simultâneas**: todo o Relatório para Correição
+   (e as demais rotinas desta extensão que abrem abas ocultas - Localizadores
+   do Órgão, Busca específica de localizadores, Regras de Automação etc.)
+   compartilha um **semáforo global** que nunca deixa mais de **9 abas
+   ocultas** abertas ao mesmo tempo - o excesso espera na fila, na ordem
+   de chegada, e ganha um "lugar" assim que uma aba anterior termina e
+   fecha. Esse limite existe para não sobrecarregar o navegador nem fazer
+   o próprio eproc atrasar/bloquear por excesso de requisições simultâneas
+   da mesma sessão. Graças a esse limite compartilhado, várias partes do
+   relatório (ex.: conclusos para decisão e para sentença, cada uma com
+   suas 3 sub-consultas, mais as 3 faixas de sem movimentação) podem
+   disparar suas consultas **todas ao mesmo tempo** sem risco de abrir
+   dezenas de abas de uma vez - o semáforo escalona automaticamente.
 
-Ao lado do botão "Relatórios" há um ícone **↗** que, diferente do botão
-principal, navega a **aba atual e visível** direto para a tela do
-Relatório Geral (sem consultar nada) — um atalho para quem prefere
-conferir manualmente.
+   As "relações de processos" (ativos e suspensos) usam a API do
+   DataTables só para **mostrar tudo de uma vez** (sem paginação) na
+   tabela de resultado do Relatório Geral (`#tblProcessoLista`) antes de
+   ler; a leitura em si é feita direto nas células `<td>` já renderizadas
+   (na mesma ordem visual dos cabeçalhos), colunas limitadas às 8
+   primeiras. A relação de remessas aos juízes leigos usa a mesma técnica,
+   direto na tabela `#tbl_remessas_em_aberto` dessa tela. Ler da API
+   `rows().data()` (usada em versões anteriores) devolvia o objeto de
+   dados BRUTO de cada linha, cujas chaves nem sempre seguem a mesma
+   ordem das colunas visíveis — causava desalinhamento entre cabeçalho e
+   valor (ex.: coluna "Situação" saindo vazia com o conteúdo de outra
+   coluna aparecendo no lugar errado); ler as células já renderizadas
+   evita esse problema por completo. Essas leituras (e o "mostrar tudo")
+   rodam no **MAIN world** da página (`chrome.scripting.executeScript`
+   com `world: "MAIN"`) — o `jQuery`/`DataTable` da própria página só
+   existe nesse contexto; injetar no mundo isolado padrão (usado nas
+   demais funções, que só mexem no DOM) faria a extensão nunca enxergar
+   esse `jQuery`, mesmo com a tabela funcionando normalmente na tela. Se a
+   extração falhar por qualquer motivo, um aviso aparece na capa e a
+   seção simplesmente não entra no PDF, sem interromper o resto do
+   relatório.
 
-Todos os números das duas tabelas — os 6 de Total/Urgentes/+30 dias ×
-Despacho/Sentença e os 3 do demonstrativo de sem movimentação (30/90/120
-dias) — são clicáveis. Ao clicar, a extensão pergunta o que fazer:
+   Desmarcar um item pula tanto a(s) consulta(s) dele quanto o trecho
+   correspondente no PDF — não é só uma questão de esconder o resultado,
+   a consulta daquele item nem chega a rodar. Como cada seção equivale a
+   uma ou mais consultas no Relatório Geral (cada uma com sua própria aba
+   oculta), desmarcar itens que a unidade não precisa (ex.: uma vara que
+   não quer o detalhamento de suspensos) também deixa a exportação mais
+   rápida.
 
-- **Abrir relatório**: abre uma **aba nova**, em primeiro plano, que
-  navega até o Relatório Geral já com a mesma situação (ou, no caso de
-  "sem movimentação", sem nenhuma situação) e o mesmo filtro daquele
-  número selecionados, e a consulta já executada, mostrando a lista de
-  processos por trás dele — útil para conferir exatamente quais processos
-  compõem aquela contagem.
-- **Exportar planilha (Excel)**: faz a mesma navegação/consulta acima
-  (também numa aba nova) e, em seguida, clica automaticamente no botão
-  "Exportar" da tabela de resultados e na opção "Excel", disparando o
-  download da planilha que o próprio eproc gera para aquele filtro exato.
-  O arquivo baixado é renomeado automaticamente para identificar o
-  relatório de origem, ex.: `relatorio_despacho_urgentes.xlsx`,
-  `relatorio_sentenca_mais30dias.xlsx`,
-  `relatorio_sem_movimentacao_90dias.xlsx`.
+   Tudo isso reaproveita as funções já existentes no painel: as mesmas
+   consultas do Relatório Geral (agora com um filtro extra de
+   Órgão/Juízo) e o mesmo gerador de tabela em PDF — combinados num
+   único arquivo `Relatório_<unidade>.pdf` em `Downloads/eproc/`, em vez
+   de arquivos separados.
 
-A aba onde você estava trabalhando **nunca é navegada nem alterada** —
-essa aba nova é aberta à parte (usando a mesma URL base do eproc só para
-saber onde entrar) e permanece aberta ao final, para você ver o resultado
-ou conferir o download.
+   O PDF segue uma identidade visual sóbria e institucional, com o
+   cabeçalho **"TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ · Sistema eProc"**
+   repetido no topo de cada página, capa com os números organizados em
+   seções coloridas (rótulo/valor, uma por bloco, na ordem acima) e rodapé
+   só com a **paginação** ("Página X de Y", centralizada) — sem nenhum
+   outro texto. Títulos longos (ex.: nome de unidade extenso) quebram em
+   mais de uma linha em vez de ultrapassar a margem da página. A lista de
+   Localizadores **não** vira uma tabela em página
+   virada (paisagem) — os nomes entram **um por linha** (com um marcador
+   "-" e recuo pendurado para nomes longos que precisem quebrar em mais
+   de uma linha) em página(s) retrato próprias, no final do PDF — bem
+   mais fácil de escanear visualmente do que um parágrafo corrido com
+   todos os nomes separados por vírgula. As relações de **processos
+   ativos** e de **suspensos/sobrestados** usam página **retrato**, com
+   colunas curadas (casadas pelo texto do cabeçalho, não pela posição, e
+   por isso imunes a mudanças na ordem das colunas reais da tela). Já a
+   relação de remessas aos juízes leigos usa página **retrato**, agrupada
+   por juiz leigo (ver acima), com destaque em vermelho para prioridades
+   legais. Título, cabeçalho e zebrado seguem a mesma identidade visual em
+   todas as tabelas. Essa mesma identidade visual também vale para os
+   PDFs de Localizadores/Processos por Localizador exportados fora do
+   painel da Corregedoria, já que reaproveitam o mesmo gerador de
+   tabela.
 
-O botão funciona a partir de qualquer página do eproc que tenha o menu
-lateral visível (não precisa estar na tela de um processo
-especificamente).
+   **Regras de Automação**: a mesma relação de regras ativas do cartão
+   "Regras de Automação" (fluxograma + detalhamento, ver seção própria
+   abaixo), entra **antes** de Localizadores. Essa seção vem da tela
+   "Automatizar Tramitação Processual", que tem um seletor **próprio**
+   (`#selOrgao`, diferente do "Órgão/Juízo" do Relatório Geral, inclusive
+   com um espaço de valores diferente entre as duas telas) — **só
+   aparece para o perfil CORREGEDORIA** (que enxerga todas as unidades);
+   para quem está logado direto numa unidade, esse filtro nem existe na
+   tela. Quando uma unidade foi escolhida no dropdown da Corregedoria, a
+   extensão seleciona a unidade correspondente nesse filtro (casando pelo
+   **texto** do nome, já que os `value` das duas telas não são
+   compatíveis) e clica em "Pesquisar" antes de ler a tabela — sem isso,
+   a tela simplesmente **não lista regra nenhuma**, mesmo havendo regras
+   cadastradas. Cada `<option>` desse filtro traz o nome da unidade
+   seguido de " - `<código/sigla>` (`<contagem>`)" (ex.: "Juizado Especial
+   Cível e Juizado Especial da Fazenda Pública de Astorga - AST1JE (1)"),
+   nem sempre com a mesma quantidade de espaços antes do hífen — a
+   extensão extrai só o nome (removendo a contagem entre parênteses e
+   tudo a partir do ÚLTIMO " - ") e compara nome com nome, em vez de casar
+   o texto inteiro da opção contra o nome da unidade; comparar o texto
+   inteiro fazia a seleção falhar sempre que aparecia esse espaçamento
+   extra, mesmo com o nome da unidade correto.
+   cadastradas (esse filtro é obrigatório na tela, mas a extensão não o
+   preenchia antes; essa era a causa real de "regras de automação
+   retornando zero" para o perfil Corregedoria).
+
+   A extração dos Localizadores **não** usa a tela "Localizadores do
+   Órgão" (diferente do resto do painel) — o Relatório Geral tem seu
+   próprio campo **"Localizador"** (um widget Tagify, igual ao de
+   "Informação complementar"), que só lista os localizadores da unidade
+   depois que um Órgão/Juízo é selecionado no filtro da tela.
+
+   Para obter a **lista de nomes**, a extensão busca direto o mesmo
+   endpoint JSON que o botão **"Listar todos"** chama por baixo dos panos
+   (`acao=relatorio_geral/listar_localizador_orgao`, achado inspecionando
+   a aba de Rede do navegador) — um único `fetch`, sem clicar em nada nem
+   esperar o dropdown do Tagify renderizar. Só cai para o modo antigo
+   (clicar em "Listar todos" e ler os itens do dropdown do Tagify) se
+   esse fetch não encontrar a URL do endpoint na página ou a chamada
+   falhar.
+
+   Esse endpoint, porém, devolve **só os nomes** dos localizadores — sem
+   nenhum total de processos —, e não existe (até onde verificamos)
+   nenhum endpoint equivalente que devolva o total de todos de uma vez só
+   para uma unidade arbitrária (o total depende da combinação de filtros
+   de uma consulta no Relatório Geral, não é um dado fixo do localizador
+   em si). Descobrir esse número um por um (uma aba nova por localizador)
+   ficava lento demais para unidades com muitos localizadores, então **o
+   relatório, por ora, traz só a lista de nomes** (em ordem alfabética) —
+   o PDF sempre inclui um aviso explicando que a única forma de obter o
+   total de processos de um localizador específico é se habilitar na
+   própria unidade e usar a ferramenta **"Localizadores do Órgão"** do
+   painel (que já mostra esse total, já que ali a extração é direto da
+   tabela da tela, sem precisar de nenhuma consulta a mais).
+
+## Gestão da Unidade
+
+Cartão para quem já está logado **diretamente numa unidade** (em vez do
+perfil CORREGEDORIA, que enxerga todas as unidades e por isso precisa
+escolher uma no cartão "Corregedoria" — ver acima). Reaproveita **quase
+inteiramente** o mesmo Relatório para Correição do cartão Corregedoria
+(mesmas seções, mesmas consultas, mesmo gerador de PDF:
+`exportarRelatorioGerencialUnidade`), com algumas diferenças de conteúdo
+cobertas abaixo.
+
+- **Não exige nenhuma unidade selecionada** — não há dropdown de
+  Comarca/Juízo neste cartão. Basta marcar os itens desejados em "Itens a
+  incluir no PDF" e clicar em **"Exportar Relatório da Unidade (PDF)"**.
+- Cada consulta interna (processos ativos, suspensos, conclusos, sem
+  movimentação, processos paralisados, remessas aos juízes leigos) recebe um
+  valor de unidade **nulo** em vez do valor escolhido num dropdown — isso faz
+  a extensão **pular** a etapa de selecionar um Órgão/Juízo (ou um Órgão
+  Julgador, no caso das remessas) em cada tela e simplesmente usar o filtro
+  que a própria tela do eproc **já aplica sozinha** para o perfil logado.
+  Regras de Automação nunca dependeu de unidade selecionada (sempre reflete
+  a unidade habilitada no momento), então não muda nada nessa seção.
+- O **título da capa** é **"Relatório da Unidade"** (em vez de "Relatório
+  para Correição") e sai **centralizado horizontalmente** na página — a
+  mesma capa (`construirCapaRelatorioGerencial`) aceita um título
+  customizável, sempre centralizado, com "Relatório para Correição" como
+  padrão para não mudar nada no relatório da Corregedoria.
+- A seção de **Localizadores** também muda: em vez do campo "Localizador" do
+  Relatório Geral (que só traz o nome, sem total de processos — ver a seção
+  equivalente do Relatório para Correição, acima), este cartão reaproveita a
+  mesma coleta multi-página da tela **"Localizadores do Órgão"** (só
+  possível aqui porque, sem unidade escolhida, a unidade é sempre a
+  habilitada no momento). Isso traz o **total de processos de cada
+  localizador**, algo que o relatório da Corregedoria não consegue oferecer.
+  A lista mostra **todos os localizadores da unidade, inclusive os com 0
+  processos** (diferente da "Busca específica de localizadores", que só
+  lista os com pelo menos 1 — ali o interesse é "para onde navegar"; aqui é
+  o panorama completo), ordenados do **maior para o menor total de
+  processos**. Cada linha vira "Nome — N processo(s)" em vez de só o nome.
+- Item **exclusivo** deste cartão (não existe no relatório da
+  Corregedoria): **Mandados em aberto**, logo **após "Processos sem
+  movimentação"** na capa e nas tabelas anexas. Extraído da tela
+  **"Relatório de Mandados Distribuídos"** (menu lateral,
+  `acao=mandados/relatorio_secretaria/consultar`), marcando **todas** as
+  opções do filtro "Situação do mandado" (`#selStatusMandado`, um
+  bootstrap-select de múltipla seleção) **exceto "Devolvido"** — ou seja,
+  tudo que ainda não foi devolvido: "Aguardando cumprimento", "Aguardando
+  distribuição", "Aguardando redistribuição" e "Não Remetido". Quando a
+  situação vem como **"Aguardando cumprimento - `<NOME DO OFICIAL>`"**
+  (formato usado pelo eproc assim que um oficial de justiça é designado), a
+  extensão separa esse nome numa coluna própria **Responsável**, deixando a
+  Situação só com "Aguardando cumprimento" — mandados ainda sem oficial
+  designado mantêm a coluna Responsável em branco. A relação discriminada
+  sai em **página retrato**, com os campos **Número do Processo, Tipo de
+  Ato** (coluna real da tela: "Atos"), **Data da Remessa** (coluna real:
+  "Data Remessa" — casada por "remessa" no cabeçalho, para não confundir
+  com a coluna vizinha "Data Juntada"), **Situação** e **Responsável**,
+  ordenada pela Data da Remessa do mandado parado há **mais tempo para o
+  mais recente**. Na capa, o resumo traz duas seções: **"MANDADOS EM
+  ABERTO"**, com a contagem por Situação (da mais frequente para a menos
+  frequente, Total por último), e **"MANDADOS POR OFICIAL"**, com a
+  contagem de mandados aguardando cumprimento por Responsável (também da
+  mais frequente para a menos frequente; só aparece quando algum mandado
+  já tem oficial designado). Não precisa de nenhuma seleção de unidade (a
+  tela já reflete a unidade habilitada, mesma lógica das demais seções
+  deste cartão).
+- O nome usado na capa/título do PDF (o texto "Unidade: `<nome>`", diferente
+  do título "Relatório da Unidade" acima) vem do próprio seletor de perfil
+  do eproc (`#selInfraUnidades`, cabeçalho superior) — não a sigla exibida
+  nesse seletor (ex.: "TOMUN/CHEFE DE SECRETARIA"), e sim o **nome por
+  extenso da unidade** (ex.: "Vara Única da Comarca de Tomazina"), lido do
+  atributo `title` do `<option>` selecionado (que traz o nome completo
+  seguido da sigla, ex.: `title="Vara Única da Comarca de Tomazina -
+  TOMUN/CHEFE DE SECRETARIA"` — a extensão remove o sufixo " - `<sigla>`"
+  usando a própria sigla já lida, então funciona mesmo se o nome da
+  unidade tiver um "-" no meio). Se não for possível ler nem o nome nem a
+  sigla por qualquer motivo, cai num rótulo genérico ("Unidade atual") em
+  vez de travar o relatório inteiro por causa só do nome.
 
 ## Regras de Automação
 
@@ -383,16 +862,37 @@ DESATIVADA **" ao lado de cada linha). Essa tabela é difícil de ler de
 relance: as colunas são estreitas e cada regra mistura critério, ação e
 outros filtros num texto corrido.
 
-O cartão **"Regras de Automação"** tem um botão **"Exportar regras
-ativas"**, sempre habilitado — não é preciso estar (nem navegar
-manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
+Marcando o item **"Regras de automação"** em "Itens a incluir no PDF" (no
+cartão "Corregedoria" ou "Gestão da Unidade"), a extensão inclui no
+Relatório para Correição/Relatório da Unidade um bloco com as regras
+ativas dessa tela, sem precisar estar (nem navegar manualmente) na tela
+"Automatizar Tramitação Processual":
 
 1. A extensão abre uma aba oculta a partir da URL da aba atual e clica no
    link "Automatizar Localizadores do Órgão" do menu lateral (menu
    "Localizadores" → "Automatizar Localizadores do Órgão"), do mesmo jeito
    já usado para "Localizadores do Órgão"/"Relatório Geral".
 2. Lê a tabela dessa aba oculta e filtra **apenas as regras ativas**
-   (ignora as marcadas como "** DESATIVADA **").
+   (ignora as marcadas como "** DESATIVADA **"). A tabela pode terminar
+   de montar um pouco depois da própria aba "carregar" (ex.: alguma
+   inicialização em segundo plano) — se a primeira leitura não encontrar
+   nenhuma linha, a extensão **tenta de novo** (até 4 vezes, com um
+   pequeno intervalo entre cada) antes de desistir, em vez de já
+   reportar "nenhuma regra encontrada" numa leitura que só foi rápida
+   demais. Se, mesmo assim, a tela realmente não tiver nenhuma regra
+   cadastrada para a unidade atual, ou se houver regras na tela mas
+   **nenhuma** com o interruptor "Ativa" ligado, a mensagem de erro
+   distingue os dois casos (em vez de um "nenhuma regra ativa
+   encontrada" genérico nas duas situações).
+
+   > **Perfil CORREGEDORIA**: essa tela tem um filtro obrigatório
+   > "ÓRGÃO" (`#selOrgao`) que só aparece para esse perfil — sem
+   > selecionar uma unidade nele e clicar em "Pesquisar", a tabela nunca
+   > lista regra nenhuma, mesmo havendo regras cadastradas. No cartão
+   > "Corregedoria", esse filtro é preenchido automaticamente com a
+   > unidade escolhida no dropdown (ver seção "Corregedoria" acima). O
+   > cartão "Gestão da Unidade" não precisa desse filtro — ele é exclusivo
+   > de quem já está logado numa unidade, não do perfil CORREGEDORIA.
 3. Ordena as regras: se **alguma** regra ativa tiver uma prioridade
    numérica definida (ex.: "Executar 1º"), o relatório segue essa ordem de
    execução; regras sem prioridade não entram nessa comparação. Quando
@@ -400,38 +900,75 @@ manualmente) na tela "Automatizar Tramitação Processual". Ao clicar:
    número da regra. Regras sem prioridade aparecem como
    "[Sem prioridade definida]" em vez do rótulo "[ Prioridade ]" da
    própria página, que é mais confuso fora de contexto.
-4. Gera um documento HTML novo, com um "cartão" por regra ativa. Cada
-   cartão traz, no topo, um **fluxograma** (Origem → Critério → Destino →
-   Ação automatizada, quando houver) para entender de relance o que
-   aquela regra faz, e logo abaixo o detalhamento completo e legível:
-   número/prioridade, grupo, localizador de origem, o critério que
-   dispara a regra, o localizador de destino/ação (incluindo eventos
-   automatizados programados, quando houver) e outros critérios (ex.:
-   juízo do processo, localizador adicional). O conteúdo detalhado é o
-   mesmo da página original (nada é resumido ou omitido ali), só que
+4. Gera o PDF, com um "cartão" por regra ativa. Cada cartão traz, no topo,
+   um **fluxograma numerado em sequência vertical** (1 Localizador Origem
+   → 2 Critério → 3 Destino → 4 Ação automatizada, quando houver) para
+   entender de relance o que aquela regra faz — cada passo numa caixa
+   colorida própria, empilhada de cima para baixo com uma seta entre
+   elas, todas com o número bem visível (branco sobre o fundo colorido do
+   círculo). Esse layout vertical substitui a versão anterior (caixas
+   numa linha horizontal com quebra automática): com textos de tamanhos
+   bem diferentes entre as regras, a quebra de linha da versão horizontal
+   ficava imprevisível e as setas pareciam soltas; empilhado e numerado, a
+   ordem de execução fica clara não importa o tamanho de cada texto. O
+   **Localizador de Erro** (quando a regra tiver um) não entra mais nesse
+   fluxograma como uma caixa gráfica à parte — só no detalhamento em
+   texto logo abaixo (ver adiante).
+
+   Quando a regra aceita **mais de um critério** (ligados por "OU" na
+   página original), a caixa "Critério" lista **todos eles**, um por
+   linha com um traço fino entre si — em vez de mostrar só o primeiro com
+   um badge "+N alternativa(s)" escondendo quais são os demais.
+
+   A caixa "Ação automatizada" mostra cada informação (ação programada,
+   evento, texto etc.) em **linhas separadas por um traço fino**, em vez
+   de tudo colado num único parágrafo.
+
+   Logo abaixo do fluxograma vem o detalhamento completo e legível:
+   número/prioridade, grupo, **Localizador Origem**, o critério que
+   dispara a regra (Tipo de Controle/Critério), o Localizador Destino/Ação
+   (incluindo eventos automatizados programados, quando houver), outros
+   critérios (ex.: juízo do processo, localizador adicional), a **Ação
+   Automatizada** por extenso e, quando a regra tiver um, o
+   **Localizador de Erro** — as duas últimas antes só apareciam no
+   fluxograma gráfico; agora também entram no detalhamento em texto, para
+   não ficarem omitidas de quem lê só essa parte. O conteúdo detalhado é
+   o mesmo da página original (nada é resumido ou omitido ali), só que
    reorganizado em blocos rotulados em vez da tabela apertada.
-5. Fecha a aba oculta e abre o documento em uma **aba nova visível**, com
-   um link de atalho em cada cartão para editar aquela regra ou ver seu
-   histórico diretamente no eproc.
+
+   Tanto a caixa **"Ação automatizada"** do fluxograma quanto os campos
+   **"Localizador Destino / Ação"** e **"Ação Automatizada"** do
+   detalhamento levam em conta que a coluna correspondente da tabela
+   original pode ter dois blocos sobrepostos quando o conteúdo é longo (um
+   truncado, escondido por padrão, e um completo) — o mesmo padrão que a
+   coluna "Outros Critérios" já tinha. Sem preferir sempre o bloco
+   completo, os detalhes de qual ação exatamente seria executada (evento,
+   documento, texto, etc.) podiam sair cortados; e o resumo do fluxograma
+   pegava só a linha "Evento: ..." e descartava o resto — agora leva tudo
+   a partir do cabeçalho "AUTOMATIZADO"/"Ação Programada" em diante.
+5. Fecha a aba oculta e monta esse bloco (fluxograma completo — caixas,
+   setas e numeração — e o mesmo detalhamento) dentro do PDF do Relatório
+   para Correição/Relatório da Unidade.
 
 Se o link "Automatizar Localizadores do Órgão" não for encontrado na aba
 oculta (ex.: o rótulo do menu mudou), a extensão avisa exatamente qual
 link procurou — nesse caso, pode ser preciso regravar o script de acesso
 para confirmar o caminho atual do menu.
 
-## Localizadores do Órgão (exportar em PDF/Excel)
+## Localizadores do Órgão (coleta reaproveitada)
 
-O cartão **"Localizadores do Órgão"** exporta a lista completa de
-Localizadores do Órgão (tela `acao=localizador_orgao_listar` do eproc) em
-PDF e/ou planilha Excel, com três colunas: **Localizador** (nome), a
-**Descrição do Localizador** e o **Total de processos**.
+A tela **"Localizadores do Órgão"** do eproc (`acao=localizador_orgao_listar`)
+lista, por página, cada Localizador com sua Descrição e o Total de
+processos. Em vez de um botão de exportação próprio, essa coleta é
+reaproveitada por duas funcionalidades do painel: o item **"Localizadores"**
+do Relatório da Unidade (ver seção "Gestão da Unidade" acima, que traz o
+total de processos de cada um) e a **"Busca específica de localizadores"**
+(cartão "Gestão Gabinete", ver abaixo). A coleta em si:
 
-Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
-
-1. A extensão abre uma aba oculta a partir da URL da aba atual e clica no
-   link "Localizadores do Órgão" do menu lateral (funciona mesmo com o
-   submenu colapsado, já que o link já existe no DOM independente do
-   estado visual do menu).
+1. Abre uma aba oculta a partir da URL da aba atual e clica no link
+   "Localizadores do Órgão" do menu lateral (funciona mesmo com o submenu
+   colapsado, já que o link já existe no DOM independente do estado visual
+   do menu).
 2. O eproc lembra a última página vista nessa listagem e reabre a tela
    nela (não sempre na página 1) — antes de coletar, a extensão confere
    se o botão "Primeira Página" está desabilitado (sinal de que já está
@@ -446,28 +983,22 @@ Ao clicar em **"Exportar"** (com PDF e/ou Excel marcados):
    contínuo dentro da própria página), para não quebrar com "Frame with
    ID 0 was removed" caso a paginação dispare uma navegação de verdade em
    vez de só atualizar a tabela via AJAX.
-4. Ordena os localizadores pelo **Total de processos** (do maior para o
-   menor) e gera os arquivos marcados em `Downloads/eproc/`:
-   - **PDF**: tabela paginada (A4 paisagem), com cabeçalho repetido em
-     cada página e as colunas de nome/descrição quebradas em várias
-     linhas quando o texto for longo, para nunca cortar conteúdo.
-   - **Excel**: arquivo `.xls` no formato nativo "Excel XML Spreadsheet"
-     (texto XML puro, sem precisar de nenhuma biblioteca de compressão
-     ZIP) — abre diretamente no Excel/LibreOffice como uma planilha
-     comum, sem aviso de formato incompatível.
 
 A aba oculta usada para navegar e coletar os dados é fechada
 automaticamente ao final, sem interferir na aba que você está usando.
 
 ## Busca específica de localizadores
 
-O cartão **"Busca específica de localizadores"** carrega os
-Localizadores do Órgão com pelo menos um processo atribuído e permite ir
-direto até a lista de processos de um deles, ou exportar um relatório
-desses processos - sem precisar abrir a tela de Localizadores
-manualmente e procurar a linha certa.
+A subseção **"Busca específica de localizadores"** (dentro do cartão
+**"Gestão Gabinete"**) carrega os Localizadores do Órgão com pelo menos
+um processo atribuído e permite ir direto até a lista de processos de um
+deles, ou exportar um relatório desses processos - sem precisar abrir a
+tela de Localizadores manualmente e procurar a linha certa.
 
-Ao clicar em **"Carregar localizadores"**:
+Ao clicar em **"Carregar localizadores"** (o botão **some assim que
+clicado** — mesmo padrão do "Carregar unidades" do Relatório para Correição;
+só volta a aparecer se o carregamento falhar ou não encontrar nenhum
+localizador, para tentar de novo):
 
 1. A extensão roda a mesma coleta multi-página usada pela exportação em
    PDF/Excel (aba oculta, volta para a página 1 se necessário, percorre
@@ -476,7 +1007,7 @@ Ao clicar em **"Carregar localizadores"**:
    atribuído — os demais não têm para onde navegar, já que o número da
    coluna "Total de processos" só é um link quando maior que zero.
 3. Preenche um menu suspenso com esses localizadores (nome e total de
-   processos entre parênteses), ordenados alfabeticamente.
+   processos entre parênteses), sempre em ordem alfabética.
 
 Ao **escolher um localizador** no menu, aparecem duas ações (a escolha
 no menu sozinha não navega nem exporta nada — é preciso clicar em um dos
@@ -487,18 +1018,38 @@ a. **"Ir para o relatório"**: navega a aba em que o painel foi aberto
    localizador — a mesma página que abriria clicando no número da coluna
    "Total de processos" na listagem (URL já capturada, com sessão/hash
    inclusos, durante a coleta).
-b. **"Exportar processos deste localizador"** (com PDF e/ou planilha
-   Excel marcados): gera um relatório só com os processos desse
-   localizador, com três colunas: **Número Processo**, **Classe** e
-   **Inclusão no localizador**. O relatório é gerado em segundo plano
-   (percorrendo todas as páginas da listagem de processos, com a mesma
-   correção de "volta pra página 1" já usada na exportação de
-   Localizadores) e ordenado pela **Inclusão no localizador da data mais
-   antiga para a mais nova**. Os arquivos saem em `Downloads/eproc/`
-   como `processos_localizador_<nome_do_localizador>_<data>.pdf`/`.xls`.
+b. **"Exportar relação de processos deste localizador"** (com PDF e/ou
+   planilha Excel marcados) — nome escolhido para não ser confundido com
+   a opção (c): gera um relatório só com os processos desse localizador,
+   com três colunas: **Número Processo**, **Classe** e **Inclusão no
+   localizador**. O relatório é gerado em segundo plano (percorrendo
+   todas as páginas da listagem de processos, com a mesma correção de
+   "volta pra página 1" já usada na exportação de Localizadores) e
+   ordenado pela **Inclusão no localizador da data mais antiga para a
+   mais nova**. Os arquivos saem em `Downloads/eproc/` como
+   `processos_localizador_<nome_do_localizador>_<data>.pdf`/`.xls`.
+c. **"Exportar na íntegra todos os processos nesse localizador"**: entra, um de
+   cada vez, em CADA processo da lista do localizador escolhido (numa
+   aba oculta controlada pela própria extensão) e monta, para cada um,
+   um PDF único combinado com todos os seus documentos — mesmo formato
+   do modo "PDF único combinado" do cartão "Exportar Documentos", com a
+   movimentação intercalada entre os documentos de cada evento. Como
+   processa um processo inteiro por vez (abrir a aba, ler os documentos,
+   baixar cada um, montar o PDF), pode demorar bastante para
+   localizadores com muitos processos — o progresso mostra qual
+   processo e documento estão sendo tratados no momento. Os arquivos
+   saem em `Downloads/eproc/<número do processo>/Exportado -
+   <localizador>.pdf` — a mesma pasta por processo usada pelo resto da
+   extensão (não uma pasta própria por localizador), com o arquivo
+   nomeado pelo localizador escolhido; assim, exportar o mesmo processo
+   por localizadores diferentes não sobrescreve nada, cada exportação
+   fica em seu próprio arquivo dentro da pasta do processo. Processos sem
+   nenhum documento ou com falha ao abrir são pulados e aparecem como
+   aviso ao final, sem interromper os demais.
 
-Se precisar carregar a lista de novo (por exemplo, depois que os números
-mudarem), basta clicar em "Carregar localizadores" novamente.
+Como o botão "Carregar localizadores" some depois de carregado, para
+atualizar a lista (por exemplo, depois que os números mudarem) basta
+fechar e reabrir o painel — ele volta a aparecer do zero.
 
 ## Abrir o painel a partir da própria página
 
@@ -516,6 +1067,18 @@ diretamente, sem precisar localizar o ícone na barra de ferramentas.
 O ícone (barra de ferramentas e `chrome://extensions`) é uma balança da
 justiça branca sobre fundo azul (`#2c6ea6`, a mesma cor usada no resto do
 painel), em vez do ícone genérico de documento usado antes.
+
+## Versionamento
+
+A partir da versão **1.0.0** (`manifest.json`), a extensão segue um
+esquema de versão `MAIOR.MENOR.PATCH`:
+
+- **MENOR** (ex.: 1.0.0 → 1.1.0): correções ou pequenos ajustes em
+  ferramentas já existentes (bugs de formatação, textos, comportamento).
+- **MAIOR** (ex.: 1.1.0 → 2.0.0): inclusão de novas funções/ferramentas no
+  painel.
+- **PATCH** fica reservado para eventuais correções pontuais dentro de um
+  MENOR já lançado, quando fizer sentido diferenciar.
 
 ## Observações
 
@@ -539,10 +1102,20 @@ painel), em vez do ícone genérico de documento usado antes.
   aba, salvando um `.html` autocontido só com o conteúdo real da
   certidão/ato. Isso pode fazer o download desses documentos específicos
   demorar um pouco mais (a aba precisa carregar de verdade).
-- A extensão funciona em qualquer domínio que siga o padrão de URL do eproc
-  (`.../eproc/controlador.php`), não é restrita a um tribunal específico.
+- A extensão é restrita aos hosts `eproc1g.tjpr.jus.br` e
+  `eproc1g.tre.tjpr.jus.br` (ver `manifest.json`) — não roda em nenhum
+  outro domínio.
 - Se um download falhar (ex.: link expirado), o erro aparece no painel ao
   final do processo; os demais downloads continuam normalmente.
+- Textos extraídos de páginas do eproc às vezes trazem um caractere de
+  controle C1 (U+0080-U+009F) no lugar do caractere tipográfico que
+  realmente pretendiam representar (mojibake de Windows-1252 não
+  convertido direito para UTF-8) — ex.: um travessão vira o controle
+  invisível U+0096, que a fonte WinAnsi usada nos PDFs não sabe desenhar
+  e lançava o erro "WinAnsi cannot encode ... (0x96)", interrompendo a
+  geração do PDF inteiro. `sanitizarTextoPdf` (em `background.js`), usada
+  por todo texto desenhado em qualquer PDF da extensão, mapeia esses
+  controles para o equivalente ASCII mais próximo antes de desenhar.
 - Todas as funcionalidades desta extensão (exportar documentos, PDF
   único, MD único, relatórios, regras de automação) funcionam
   inteiramente offline/local, sem nenhuma chamada de rede além do próprio

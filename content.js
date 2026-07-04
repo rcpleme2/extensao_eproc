@@ -318,6 +318,64 @@ function substituirSiglaPorNomeUsuario() {
   }
 }
 
+// ---- Anexar Magistrado(s) ao evento "Conclusos *" ----
+//
+// Quando um evento da tabela "#tblEventos" e' um "Conclusos para
+// decisão/despacho" (ou qualquer outro que comece com "Conclusos"), o
+// nome do magistrado responsável já existe na página, só que escondido
+// atrás do tooltip nativo "Informações do Evento" (ícone de lupa ao lado
+// da descrição) - não aparece na coluna Descrição em si. Lido do
+// atributo "aria-description" do "<span class='sr-only'>" vizinho
+// (texto puro gerado pelo próprio eproc para leitores de tela); esse
+// texto concatena "Data do Evento:", "Evento:", "Usuário:" e
+// "Magistrado(s):" SEM nenhum separador entre os valores (o eproc usa
+// "<br>" na versão visual/tooltip, mas eles somem na versão para leitor
+// de tela) - por isso cada campo só pode ser isolado ancorando no
+// RÓTULO do campo seguinte, nunca por espaço ou pontuação.
+function extrairMagistradoDoEvento(linha) {
+  const spanSr = linha.querySelector("span.sr-only[aria-description]");
+  if (!spanSr) return null;
+  const texto = spanSr.getAttribute("aria-description") || "";
+  const m = texto.match(/Magistrado\(s\):\s*(.+)$/);
+  if (!m) return null;
+  const bruto = m[1].trim();
+  if (!bruto) return null;
+  // O campo vem como "NOME - Cargo" (ex.: "ROSANGELA FAORO - Juiz da
+  // Fase") - só o nome entra no texto acrescentado.
+  return bruto.split(/\s+-\s+/)[0].trim() || null;
+}
+
+const CLASSE_CONCLUSOS_MAGISTRADO = "eproc-exportador-conclusos-magistrado";
+
+// Acrescenta " (NOME DO MAGISTRADO)" ao final do texto já existente na
+// coluna Descrição, so' para eventos "Conclusos *" - ex.: "Conclusos
+// para decisão/despacho" vira "Conclusos para decisão/despacho
+// (ROSANGELA FAORO)". Idempotente via "data-magistrado-verificado"
+// (mesmo padrão de "substituirSiglaPorNomeUsuario" acima): cada linha só
+// é examinada uma vez, mesmo chamada de novo a cada mutação do DOM.
+function anexarMagistradoEmConclusos() {
+  const linhas = document.querySelectorAll(
+    '#tblEventos tbody > tr[id^="trEvento"]:not([data-magistrado-verificado]), ' +
+      'table.infraTable tbody > tr[id^="trEvento"]:not([data-magistrado-verificado])'
+  );
+
+  for (const linha of linhas) {
+    linha.setAttribute("data-magistrado-verificado", "1");
+
+    const tdDescricao = linha.querySelector(":scope > td.infraEventoDescricao");
+    if (!tdDescricao) continue;
+    if (!/^\s*Conclusos\b/i.test(tdDescricao.textContent || "")) continue;
+
+    const nomeMagistrado = extrairMagistradoDoEvento(linha);
+    if (!nomeMagistrado) continue;
+
+    const spanMagistrado = document.createElement("span");
+    spanMagistrado.className = CLASSE_CONCLUSOS_MAGISTRADO;
+    spanMagistrado.textContent = ` (${nomeMagistrado})`;
+    tdDescricao.appendChild(spanMagistrado);
+  }
+}
+
 // Botao injetado ao lado da logo do Portal jus.br no cabecalho do eproc,
 // que abre o painel lateral da extensao com um clique - alternativa para
 // quem prefere nao depender do icone da extensao na barra de ferramentas
@@ -410,12 +468,243 @@ function adicionarBotaoAbrirPainel() {
   logo.insertAdjacentElement("afterend", botao);
 }
 
-substituirSiglaPorNomeUsuario();
+// Configuracao do painel (engrenagem): liga/desliga a substituicao da
+// sigla pelo nome+cargo. Default "true" preserva o comportamento de
+// antes dessa opcao existir. Le' uma vez no carregamento da pagina e
+// tambem escuta mudancas (chrome.storage.onChanged) para reagir na hora
+// se o usuario alternar a opcao com esta mesma aba do eproc ja' aberta,
+// sem precisar recarregar a pagina.
+//
+// "configuracaoSiglaCarregada" existe para evitar uma corrida: o
+// MutationObserver logo abaixo comeca a observar de forma SINCRONA,
+// muito antes do "chrome.storage.local.get" (assincrono) responder - o
+// carregamento inicial da pagina do eproc dispara varias mutacoes no DOM
+// nesse meio-tempo, e sem essa guarda o observer chamava
+// "substituirSiglaPorNomeUsuario()" usando o valor padrao (true) mesmo
+// quando o usuario tinha desligado a opcao, ja' que o valor real ainda
+// nao tinha chegado. Enquanto essa flag for false, nenhuma chamada faz
+// efeito; assim que o valor real chega, ela vira true e roda uma vez
+// (cobrindo o que ja mudou no DOM nesse meio-tempo).
+let configSubstituirSiglaAtivo = true;
+let configuracaoSiglaCarregada = false;
+
+function aplicarSubstituicaoSiglaSeAtivo() {
+  if (configuracaoSiglaCarregada && configSubstituirSiglaAtivo) substituirSiglaPorNomeUsuario();
+}
+
+chrome.storage.local.get({ substituirSigla: true }, (itens) => {
+  configSubstituirSiglaAtivo = itens.substituirSigla;
+  configuracaoSiglaCarregada = true;
+  aplicarSubstituicaoSiglaSeAtivo();
+});
+
+chrome.storage.onChanged.addListener((mudancas, area) => {
+  if (area === "local" && mudancas.substituirSigla) {
+    configSubstituirSiglaAtivo = mudancas.substituirSigla.newValue;
+    aplicarSubstituicaoSiglaSeAtivo();
+    // Desligar agora nao desfaz o que ja foi trocado nesta pagina (exigiria
+    // guardar o texto original de cada label) - so' passa a nao trocar mais
+    // nada dai pra frente, ate' a proxima navegacao/recarregamento.
+  }
+});
+
+// Configuracao do painel: liga/desliga o anexo do Magistrado aos eventos
+// "Conclusos *" (ver "anexarMagistradoEmConclusos" acima). Default
+// "true"; mesmo mecanismo de guarda contra corrida do "substituirSigla"
+// acima (o MutationObserver comeca a observar antes do
+// "chrome.storage.local.get" responder).
+let configAnexarMagistradoAtivo = true;
+let configuracaoMagistradoCarregada = false;
+
+function aplicarAnexoMagistradoSeAtivo() {
+  if (configuracaoMagistradoCarregada && configAnexarMagistradoAtivo) anexarMagistradoEmConclusos();
+}
+
+chrome.storage.local.get({ anexarMagistradoConclusos: true }, (itens) => {
+  configAnexarMagistradoAtivo = itens.anexarMagistradoConclusos;
+  configuracaoMagistradoCarregada = true;
+  aplicarAnexoMagistradoSeAtivo();
+});
+
+chrome.storage.onChanged.addListener((mudancas, area) => {
+  if (area === "local" && mudancas.anexarMagistradoConclusos) {
+    configAnexarMagistradoAtivo = mudancas.anexarMagistradoConclusos.newValue;
+    // Desligar não desfaz o que já foi anexado nesta página - mesma
+    // observação de "substituirSigla" acima.
+    aplicarAnexoMagistradoSeAtivo();
+  }
+});
+
+// ---- Separar Comarca/Juízo no campo "Órgão/Juízo" do Relatório Geral ----
+//
+// Mesma logica de duas etapas ja' usada no proprio painel da extensao
+// para escolher a unidade do Relatório para Correição (nomes de unidade
+// seguem o padrao "<Juízo/Vara> de <Comarca>" - separar a Comarca do
+// resto permite duas listas curtas em vez de uma unica com centenas de
+// opcoes) - aqui replicada em cima do campo NATIVO "Órgão/Juízo"
+// (`#selIdOrgaoJuizo`) da propria tela do Relatório Geral do eproc.
+// Recurso OPCIONAL (desligado por padrao, ver Configurações do painel),
+// ja' que altera a interface da propria pagina do eproc em vez de so'
+// ler dados dela.
+const ID_WRAPPER_COMARCA_JUIZO = "eproc-exportador-comarca-juizo";
+
+// Algumas comarcas do Paraná tem "de" no PRÓPRIO nome (ex.: "Cândido de
+// Abreu") - separar pelo ÚLTIMO " de " cortaria errado nesses casos (ex.:
+// "... do Juízo Único de Cândido de Abreu" viraria comarca "Abreu" em vez
+// de "Cândido de Abreu"). Mesma lista de exceções usada em
+// "separarComarcaDoJuizo" (popup.js).
+const COMARCAS_COM_DE_NO_NOME_ORGAO = ["Cândido de Abreu"];
+
+function separarComarcaDoJuizoOrgao(nomeCompleto) {
+  const texto = (nomeCompleto || "").trim();
+
+  for (const comarcaExcecao of COMARCAS_COM_DE_NO_NOME_ORGAO) {
+    const sufixo = ` de ${comarcaExcecao}`;
+    if (texto.toLowerCase().endsWith(sufixo.toLowerCase())) {
+      return {
+        comarca: comarcaExcecao,
+        juizo: texto.slice(0, texto.length - sufixo.length).trim() || texto,
+      };
+    }
+  }
+
+  const marcador = " de ";
+  const indice = texto.lastIndexOf(marcador);
+  if (indice === -1) {
+    return { comarca: "(Outras)", juizo: texto };
+  }
+  return {
+    comarca: texto.slice(indice + marcador.length).trim() || "(Outras)",
+    juizo: texto.slice(0, indice).trim() || texto,
+  };
+}
+
+// Muda o value do <select> nativo e dispara "change" - o bootstrap-select
+// da propria pagina escuta esse evento e atualiza o widget visual junto
+// (mesmo mecanismo que "selecionarOrgaoJuizo" usa em background.js para
+// automatizar essa mesma troca numa aba oculta).
+function selecionarOrgaoJuizoNaPaginaAtual(valorOrgaoJuizo) {
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) return;
+  let encontrou = false;
+  for (const opcao of select.options) {
+    const selecionada = opcao.value === valorOrgaoJuizo;
+    opcao.selected = selecionada;
+    if (selecionada) encontrou = true;
+  }
+  if (encontrou) select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+// O <select> nativo do bootstrap-select fica escondido dentro de um
+// wrapper "div.bootstrap-select" (o botao visivel com o texto/dropdown
+// e' outro elemento dentro desse wrapper) - encontrar esse wrapper e'
+// best-effort: cai para o proprio elemento pai quando a classe não é
+// encontrada, em vez de falhar.
+function wrapperOriginalOrgaoJuizo(select) {
+  return select.closest(".bootstrap-select") || select.parentElement;
+}
+
+function montarComarcaJuizoOrgao() {
+  if (document.getElementById(ID_WRAPPER_COMARCA_JUIZO)) return; // ja' montado nesta pagina
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) return;
+
+  const unidades = Array.from(select.options)
+    .filter((opcao) => opcao.value)
+    .map((opcao) => ({ valor: opcao.value, ...separarComarcaDoJuizoOrgao((opcao.textContent || "").trim()) }));
+  if (unidades.length === 0) return;
+
+  const comarcas = [...new Set(unidades.map((u) => u.comarca))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+  const wrapper = document.createElement("div");
+  wrapper.id = ID_WRAPPER_COMARCA_JUIZO;
+  wrapper.style.cssText = "display:flex;flex-direction:column;gap:4px;margin-top:6px;max-width:420px;";
+
+  const selectComarca = document.createElement("select");
+  selectComarca.className = "form-control form-control-sm";
+  selectComarca.innerHTML = '<option value="" selected disabled>Selecione uma comarca...</option>';
+  for (const comarca of comarcas) {
+    const opcao = document.createElement("option");
+    opcao.value = comarca;
+    opcao.textContent = comarca;
+    selectComarca.appendChild(opcao);
+  }
+
+  const selectJuizo = document.createElement("select");
+  selectJuizo.className = "form-control form-control-sm";
+  selectJuizo.disabled = true;
+  selectJuizo.innerHTML = '<option value="" selected disabled>Selecione um juízo/vara...</option>';
+
+  selectComarca.addEventListener("change", () => {
+    const comarca = selectComarca.value;
+    selectJuizo.innerHTML = '<option value="" selected disabled>Selecione um juízo/vara...</option>';
+    const unidadesDaComarca = unidades
+      .filter((u) => u.comarca === comarca)
+      .sort((a, b) => a.juizo.localeCompare(b.juizo, "pt-BR"));
+    for (const unidade of unidadesDaComarca) {
+      const opcao = document.createElement("option");
+      opcao.value = unidade.valor;
+      opcao.textContent = unidade.juizo;
+      selectJuizo.appendChild(opcao);
+    }
+    selectJuizo.disabled = unidadesDaComarca.length === 0;
+  });
+
+  selectJuizo.addEventListener("change", () => {
+    selecionarOrgaoJuizoNaPaginaAtual(selectJuizo.value);
+  });
+
+  wrapper.appendChild(selectComarca);
+  wrapper.appendChild(selectJuizo);
+
+  const wrapperOriginal = wrapperOriginalOrgaoJuizo(select);
+  wrapperOriginal.insertAdjacentElement("afterend", wrapper);
+  wrapperOriginal.dataset.eprocExportadorEscondido = "1";
+  wrapperOriginal.style.display = "none";
+}
+
+function desmontarComarcaJuizoOrgao() {
+  const wrapper = document.getElementById(ID_WRAPPER_COMARCA_JUIZO);
+  if (wrapper) wrapper.remove();
+
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) return;
+  const wrapperOriginal = wrapperOriginalOrgaoJuizo(select);
+  if (wrapperOriginal && wrapperOriginal.dataset.eprocExportadorEscondido) {
+    wrapperOriginal.style.display = "";
+    delete wrapperOriginal.dataset.eprocExportadorEscondido;
+  }
+}
+
+let configSepararOrgaoJuizoAtivo = false;
+let configSepararOrgaoJuizoCarregada = false;
+
+function aplicarSepararOrgaoJuizoSeAtivo() {
+  if (!configSepararOrgaoJuizoCarregada) return;
+  if (configSepararOrgaoJuizoAtivo) montarComarcaJuizoOrgao();
+  else desmontarComarcaJuizoOrgao();
+}
+
+chrome.storage.local.get({ separarOrgaoJuizoPorComarca: false }, (itens) => {
+  configSepararOrgaoJuizoAtivo = itens.separarOrgaoJuizoPorComarca;
+  configSepararOrgaoJuizoCarregada = true;
+  aplicarSepararOrgaoJuizoSeAtivo();
+});
+
+chrome.storage.onChanged.addListener((mudancas, area) => {
+  if (area === "local" && mudancas.separarOrgaoJuizoPorComarca) {
+    configSepararOrgaoJuizoAtivo = mudancas.separarOrgaoJuizoPorComarca.newValue;
+    aplicarSepararOrgaoJuizoSeAtivo();
+  }
+});
+
 adicionarBotaoAbrirPainel();
 
 const observadorEventos = new MutationObserver(() => {
-  substituirSiglaPorNomeUsuario();
+  aplicarSubstituicaoSiglaSeAtivo();
+  aplicarAnexoMagistradoSeAtivo();
   adicionarBotaoAbrirPainel();
+  aplicarSepararOrgaoJuizoSeAtivo();
 });
 observadorEventos.observe(document.body, { childList: true, subtree: true });
 
@@ -432,9 +721,21 @@ observadorEventos.observe(document.body, { childList: true, subtree: true });
 // Copia o elemento, troca cada <br> por uma quebra de linha real e devolve
 // o texto puro - usado para conseguir separar o conteudo das celulas em
 // "linhas" de forma confiavel (textContent sozinho ignora <br>).
+//
+// Blocos (div/p/li/tr/h1-h6) tambem representam uma quebra visual na
+// pagina, mas "textContent" ignora fronteiras de elemento (so' <br> vira
+// quebra real) - sem tratar isso tambem, duas linhas em <div>s/<p>s
+// separadas (comum na coluna "Localizador DESTINO/Ação" do eproc, onde o
+// cabecalho "AUTOMATIZADO" e os detalhes da acao programada vem em blocos
+// proprios sem <br> entre eles) saiam coladas uma na outra (ex.: "LANÇAR
+// EVENTOAUTOMATIZADOEvento: ..."), o que tornava o "Ação Automatizada" do
+// relatório ilegível.
 function textoComQuebras(elemento) {
   const clone = elemento.cloneNode(true);
   clone.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
+  clone.querySelectorAll("div, p, li, tr, h1, h2, h3, h4, h5, h6").forEach((bloco) => {
+    bloco.appendChild(document.createTextNode("\n"));
+  });
   return (clone.textContent || "").replace(/[ \t]+/g, " ").trim();
 }
 
@@ -475,7 +776,17 @@ function listarRegrasAutomacaoAtivas() {
 
     const localizadorOrigem = (tds[3].textContent || "").trim() || "Nenhum";
     const criterioHtml = (tds[4].innerHTML || "").trim();
-    const destinoAcaoHtml = (tds[5].innerHTML || "").trim();
+
+    // A coluna "Localizador DESTINO/Ação" pode ter o mesmo padrao de DOIS
+    // blocos sobrepostos que a coluna "Outros Critérios" tem quando o
+    // conteudo e' longo: "dadosResumidos_{cod}" (truncado, oculto por
+    // padrao) e "dadosCompletos_{cod}" (o texto inteiro). Sem preferir o
+    // bloco "completo" aqui tambem, os detalhes da Ação Automatizada
+    // (o que exatamente sera' executado) saiam cortados no meio - essa
+    // era a causa do "Ação Automatizada" incompleto na exportacao.
+    const divDestinoCompleto = tds[5].querySelector('[id^="dadosCompletos_"]');
+    const origemDestinoAcao = divDestinoCompleto || tds[5];
+    const destinoAcaoHtml = (origemDestinoAcao.innerHTML || "").trim();
 
     // A coluna "Outros Critérios" tem, quando o conteudo e' longo, DOIS
     // blocos sobrepostos: "dadosResumidos_{cod}" (truncado, oculto por
@@ -494,19 +805,48 @@ function listarRegrasAutomacaoAtivas() {
       .split(/\s*OU\s*/)
       .map((s) => s.trim())
       .filter(Boolean);
-    const criterioResumo = linhasCriterio[0] || "Sem critério definido";
-    const criterioAlternativas = Math.max(0, linhasCriterio.length - 1);
+    // Todos os critérios levados em consideração (quando a regra tem mais
+    // de um, ligados por "OU" na página original) - o fluxograma lista
+    // todos eles, um por linha, em vez de só o primeiro com um badge
+    // "+N alternativa(s)" escondendo quais são os demais.
+    const criteriosLista = linhasCriterio.length > 0 ? linhasCriterio : ["Sem critério definido"];
+    const criterioResumo = criteriosLista[0];
 
-    const linhasDestino = textoComQuebras(tds[5])
+    const linhasDestino = textoComQuebras(origemDestinoAcao)
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
     const destinoResumo = linhasDestino[0] || "Sem destino definido";
-    const linhaEvento = linhasDestino.find((l) => l.startsWith("Evento:"));
-    const temAcaoProgramada = linhasDestino.some(
+    // A linha "AUTOMATIZADO"/"Ação Programada" e' so' o cabecalho do
+    // bloco - os detalhes de qual acao sera' executada (evento, texto,
+    // destino, etc.) vem nas linhas SEGUINTES. Pegar so' a linha
+    // "Evento:" descartava o resto; agora leva tudo dali pra frente.
+    const indiceAcaoProgramada = linhasDestino.findIndex(
       (l) => l.includes("AUTOMATIZADO") || l.includes("Ação Programada")
     );
-    const acaoResumo = temAcaoProgramada ? linhaEvento || "Ação automatizada programada" : "";
+    const linhasAcao = indiceAcaoProgramada !== -1 ? linhasDestino.slice(indiceAcaoProgramada) : [];
+
+    // O "Localizador de Erro" (para onde o processo vai se a acao
+    // automatizada falhar) e' destacado a parte no relatório (seta + caixa
+    // vermelha), em vez de so' mais uma linha dentro do texto corrido da
+    // Ação Automatizada - por isso sai da lista antes de montar o resumo.
+    const indiceLocalizadorErro = linhasAcao.findIndex((l) => /localizador de erro/i.test(l));
+    const localizadorErro =
+      indiceLocalizadorErro !== -1
+        ? linhasAcao[indiceLocalizadorErro].replace(/^.*localizador de erro:?\s*/i, "").trim()
+        : "";
+    const linhasAcaoSemErro =
+      indiceLocalizadorErro !== -1
+        ? [...linhasAcao.slice(0, indiceLocalizadorErro), ...linhasAcao.slice(indiceLocalizadorErro + 1)]
+        : linhasAcao;
+
+    const acaoResumo =
+      linhasAcaoSemErro.length > 0 ? linhasAcaoSemErro.join(" — ") || "Ação automatizada programada" : "";
+    // Linhas separadas (sem juntar tudo num paragrafo so' com " — "), para
+    // o relatório poder desenhar cada informação (ação programada, evento,
+    // texto etc.) em seu proprio bloco, com um divisor entre elas, em vez
+    // de um texto corrido dificil de escanear.
+    const acaoLinhas = linhasAcaoSemErro.length > 0 ? linhasAcaoSemErro : [];
 
     const outrosCriteriosResumo = textoComQuebras(origemOutrosCriterios)
       .split("\n")
@@ -529,9 +869,11 @@ function listarRegrasAutomacaoAtivas() {
       destinoAcaoHtml,
       outrosCriteriosHtml,
       criterioResumo,
-      criterioAlternativas,
+      criteriosLista,
       destinoResumo,
       acaoResumo,
+      acaoLinhas,
+      localizadorErro,
       outrosCriteriosResumo,
       linkEditar: linkEditar ? linkEditar.href : "",
       linkLog: linkLog ? linkLog.href : "",
@@ -560,12 +902,51 @@ function listarRegrasAutomacaoAtivas() {
   };
 }
 
+// Le' o perfil/unidade atualmente selecionado no seletor de perfil do
+// eproc (select#selInfraUnidades, no cabecalho superior, presente em
+// qualquer pagina logada) - usado para decidir se o botao "Relatório
+// Gerencial da Unidade" deve aparecer no painel (so' quando o perfil
+// ativo for "CORREGEDORIA").
+function lerPerfilAtual() {
+  const select = document.getElementById("selInfraUnidades");
+  if (!select) return { perfil: null, valor: null, unidadeNome: null };
+  const opcaoSelecionada = select.options[select.selectedIndex];
+  const sigla = opcaoSelecionada ? (opcaoSelecionada.textContent || "").trim() : null;
+
+  // O <option> traz, no atributo "title", o nome completo da unidade
+  // seguido da sigla (ex.: title="Vara Única da Comarca de Tomazina -
+  // TOMUN/CHEFE DE SECRETARIA" para o <option>TOMUN/CHEFE DE
+  // SECRETARIA</option>) - usado para exibir o nome da unidade por
+  // extenso (ex.: no Relatório da Unidade) em vez da sigla. Extrai so' o
+  // nome completo removendo o sufixo " - <sigla>" - a comparacao usa a
+  // propria sigla ja lida acima (nao so' corta no primeiro " - "), para
+  // nao quebrar caso o nome da unidade tenha um "-" no meio.
+  let unidadeNome = sigla;
+  const titulo = opcaoSelecionada ? (opcaoSelecionada.getAttribute("title") || "").trim() : "";
+  if (titulo && sigla && titulo.endsWith(sigla)) {
+    const nomeExtraido = titulo
+      .slice(0, titulo.length - sigla.length)
+      .replace(/\s*-\s*$/, "")
+      .trim();
+    if (nomeExtraido) unidadeNome = nomeExtraido;
+  }
+
+  return {
+    perfil: sigla,
+    valor: select.value || null,
+    unidadeNome,
+  };
+}
+
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "LISTAR_DOCUMENTOS") {
     sendResponse(listarDocumentos());
   }
   if (mensagem && mensagem.tipo === "LISTAR_REGRAS_AUTOMACAO") {
     sendResponse(listarRegrasAutomacaoAtivas());
+  }
+  if (mensagem && mensagem.tipo === "LER_PERFIL_ATUAL") {
+    sendResponse(lerPerfilAtual());
   }
   return true;
 });

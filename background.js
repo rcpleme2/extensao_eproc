@@ -6,7 +6,132 @@
 // perto de "Construcao do MD unico", sobre o motivo).
 
 importScripts("libs/pdf-lib.min.js");
-const { PDFDocument, StandardFonts } = self.PDFLib;
+const { PDFDocument, StandardFonts, rgb } = self.PDFLib;
+
+// Identidade visual institucional (TJPR/eProc) reaproveitada em todos os
+// PDFs gerados pela extensao (tabelas de Localizadores/Processos/
+// Remessas e o resumo do Relatório Gerencial da Unidade) - mesma paleta
+// ja' usada nos documentos HTML exportados (Regras de Automação), para
+// manter consistencia visual entre os diferentes formatos de saida.
+const COR_PRIMARIA_ESCURA = rgb(0x1c / 255, 0x3d / 255, 0x5a / 255); // #1c3d5a
+const COR_PRIMARIA = rgb(0x2c / 255, 0x6e / 255, 0xa6 / 255); // #2c6ea6
+const COR_CINZA_TEXTO = rgb(0.35, 0.35, 0.35);
+const COR_CINZA_CLARO = rgb(0.95, 0.96, 0.97);
+const COR_CINZA_BORDA = rgb(0.82, 0.85, 0.87);
+const COR_BRANCO = rgb(1, 1, 1);
+const COR_ALERTA_VERMELHO = rgb(0.75, 0.1, 0.1);
+
+// Fator vertical (em relação à altura de uma linha de texto) usado para
+// posicionar o TOPO da faixa "zebra" (fundo cinza claro, linhas
+// alternadas) acima da linha de base da primeira linha de texto de cada
+// linha da tabela. Precisa ser grande o bastante para cobrir a parte
+// mais alta dos caracteres realmente desenhados (maiúsculas e,
+// principalmente, acentos comuns em português como "ç", "ã", "é"), que
+// sobem ~0,7-0,8x a altura da linha acima da linha de base - um fator
+// menor (ex.: 0,3, usado antes) deixa esse topo "pendurado" no fundo
+// branco, só entrando na faixa cinza a partir da metade da letra para
+// baixo.
+const FATOR_TOPO_ZEBRA_TABELA = 0.6;
+
+// Folga vertical extra (em relação à altura de uma linha de texto)
+// somada à altura "natural" de cada linha da tabela (maxLinhas *
+// ALTURA_LINHA), usada nas 3 tabelas com zebrado desta extensão -
+// existe pra dar um respiro entre uma linha e a próxima, em vez de
+// linhas coladas uma na outra.
+const FATOR_FOLGA_ALTURA_LINHA_TABELA = 0.4;
+
+// Quanto descer a linha de base da PRIMEIRA linha de texto (em relação
+// ao "y" de referência da linha da tabela - o mesmo "y" usado pelo
+// zebrado) para CENTRALIZAR verticalmente o texto dentro da altura total
+// da linha. Não é simplesmente metade da folga acima: as letras minúsculas
+// da fonte Helvetica sobem menos da linha de base (~0,53x ALTURA_LINHA,
+// métrica CapHeight da fonte) do que descem (~0,15x, métrica Descender) -
+// dividindo a folga ao meio, o "peso visual" do texto (que já é maior
+// para cima do que para baixo) ficava perto demais do topo da célula.
+// Valor calculado a partir dessas métricas (CapHeight/Descender da
+// Helvetica) e conferido visualmente no PDF renderizado.
+const FATOR_CENTRALIZACAO_TEXTO_TABELA = 0.29;
+
+function deslocamentoCentralizacaoTexto(alturaLinhaTexto) {
+  return alturaLinhaTexto * FATOR_CENTRALIZACAO_TEXTO_TABELA;
+}
+
+// Calcula onde comecar a desenhar (a linha de base da PRIMEIRA linha) o
+// texto de UMA CÉLULA especifica, centralizando essa célula dentro da
+// altura TOTAL da linha da tabela (que é definida pela coluna com mais
+// linhas naquela linha - "maxLinhasNaLinha"). Sem isso, bastava aplicar
+// "deslocamentoCentralizacaoTexto" uma unica vez por linha (pensado so'
+// para a coluna mais alta) e usar o mesmo valor pra todas as colunas -
+// colunas com MENOS linhas que a mais alta (ex.: "Situação" com 1 linha
+// numa linha da tabela em que "Último Evento" quebrou em 2) ficavam
+// "grudadas" perto do topo da própria célula, em vez de centralizadas no
+// espaço realmente disponível ali. Cada linha a menos que a coluna tem em
+// relação a maxLinhasNaLinha desce o texto meia ALTURA_LINHA a mais.
+function yInicialTextoColunaCentralizado(y, alturaLinhaTexto, maxLinhasNaLinha, linhasDestaColuna) {
+  const linhasAMenos = maxLinhasNaLinha - linhasDestaColuna;
+  return y - deslocamentoCentralizacaoTexto(alturaLinhaTexto) - (linhasAMenos * alturaLinhaTexto) / 2;
+}
+
+// Desenha, quando a linha for uma linha "ímpar" (contagem a partir de 0),
+// a faixa de fundo alternada (zebrado) por trás de uma linha de tabela -
+// helper único compartilhado por todas as tabelas com zebrado da
+// extensão (Processos Ativos/Suspensos/Paralisados/Mandados,
+// Localizadores, Processos do Localizador, panorama da Corregedoria e
+// Remessas aos Juízes Leigos), para manter o mesmo posicionamento
+// vertical (e a mesma correção, se for preciso ajustar de novo) num
+// único lugar em vez de cópias divergentes. "y" é a linha de base da
+// PRIMEIRA linha de texto da linha da tabela (o mesmo "y" usado para
+// desenhar o texto); "alturaLinha" é a altura total reservada para essa
+// linha (incluindo o espaçamento até a próxima); "alturaLinhaTexto" é a
+// altura de uma única linha de texto dentro da célula (usada só para
+// calcular o deslocamento do topo da faixa, não a altura da faixa em
+// si).
+function desenharZebraLinhaTabela(pagina, { x, y, largura, alturaLinha, alturaLinhaTexto, indiceLinhaZebra, cor = COR_CINZA_CLARO }) {
+  if (indiceLinhaZebra % 2 !== 1) return;
+  pagina.drawRectangle({
+    x,
+    y: y - alturaLinha + alturaLinhaTexto * FATOR_TOPO_ZEBRA_TABELA,
+    width: largura,
+    height: alturaLinha,
+    color: cor,
+  });
+}
+
+// ---- Semáforo global de abas ocultas ----
+//
+// O Relatório da Unidade (e outras rotinas desta extensão) abre várias
+// abas ocultas em paralelo (uma por consulta/bloco) para ir mais rápido.
+// Sem um limite, nada impede dezenas de abas serem abertas ao mesmo
+// tempo, o que pode sobrecarregar o navegador e, principalmente, fazer o
+// próprio eproc bloquear/atrasar por excesso de requisições simultâneas
+// da mesma sessão. Este semáforo é compartilhado por TODA função que
+// abre uma aba oculta (chrome.tabs.create) neste arquivo: cada uma
+// adquire um "lugar" antes de criar a aba e libera assim que termina
+// (finally), nunca deixando mais de LIMITE_ABAS_SIMULTANEAS rodando ao
+// mesmo tempo - o excesso simplesmente espera na fila, na ordem de
+// chegada.
+const LIMITE_ABAS_SIMULTANEAS = 9;
+let abasOcultasEmUso = 0;
+const filaDeEsperaPorAba = [];
+
+function adquirirSlotDeAbaOculta() {
+  if (abasOcultasEmUso < LIMITE_ABAS_SIMULTANEAS) {
+    abasOcultasEmUso += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => filaDeEsperaPorAba.push(resolve));
+}
+
+function liberarSlotDeAbaOculta() {
+  const proximo = filaDeEsperaPorAba.shift();
+  if (proximo) {
+    // Repassa o lugar direto para quem esta' esperando ha' mais tempo,
+    // sem decrementar o contador (o lugar nunca ficou de fato livre).
+    proximo();
+  } else {
+    abasOcultasEmUso = Math.max(0, abasOcultasEmUso - 1);
+  }
+}
 
 // Abre o painel lateral (side panel) ao clicar no icone da extensao, em
 // vez do popup efemero padrao, para que ele permaneca visivel enquanto o
@@ -50,6 +175,32 @@ function montarNomeArquivo(pastaBase, doc, sequencial) {
 
 const REGEX_IFRAME_CONTEUDO = /id=["']conteudoIframe["'][^>]*\ssrc=["']([^"']+)["']/i;
 
+// Nenhuma requisicao de rede desta extensao pode travar a exportacao para
+// sempre: se o eproc nao responder em 10s (proxy lento, sessao expirada
+// sem redirecionar, etc.), a requisicao especifica e' abortada, o item
+// (documento/consulta) e' pulado e o motivo entra nos avisos/erros do
+// resultado final, sem impedir os proximos itens de serem processados.
+const TIMEOUT_REQUISICAO_MS = 10000;
+
+// Envolve "fetch" com um AbortController que cancela a requisicao (nao so'
+// desiste de esperar - cancela de fato a conexao) apos "ms" milissegundos,
+// convertendo o timeout num erro tratavel normalmente pelo chamador (em
+// vez de a requisicao ficar pendurada indefinidamente).
+async function fetchComTimeout(url, opcoes, ms = TIMEOUT_REQUISICAO_MS) {
+  const controller = new AbortController();
+  const idTimeout = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...opcoes, signal: controller.signal });
+  } catch (e) {
+    if (e && e.name === "AbortError") {
+      throw new Error(`Tempo esgotado (${Math.round(ms / 1000)}s) aguardando resposta de "${url}".`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(idTimeout);
+  }
+}
+
 // A URL do link do documento (acao=acessar_documento) retorna uma pagina
 // "casca" em HTML com um <iframe id="conteudoIframe"> cujo src e' quem
 // efetivamente serve o arquivo (acao=acessar_documento_implementacao).
@@ -57,7 +208,7 @@ const REGEX_IFRAME_CONTEUDO = /id=["']conteudoIframe["'][^>]*\ssrc=["']([^"']+)[
 async function resolverUrlReal(url) {
   let resposta;
   try {
-    resposta = await fetch(url, { credentials: "same-origin" });
+    resposta = await fetchComTimeout(url, { credentials: "same-origin" });
   } catch (e) {
     return url;
   }
@@ -301,7 +452,7 @@ async function abrirAbaEExtrairHtmlDivDochtml(url) {
 // vez de devolver bytes binarios como se fossem texto.
 async function tentarFallbackFetchHtml(url) {
   try {
-    const resposta = await fetch(url, { credentials: "same-origin" });
+    const resposta = await fetchComTimeout(url, { credentials: "same-origin" });
     if (!resposta.ok) {
       return { html: null, erro: `Falha ao baixar via fetch (HTTP ${resposta.status}).` };
     }
@@ -358,10 +509,23 @@ async function obterConteudoHtmlReal(url, nomeDocumento) {
 // Converte o HTML do documento para texto simples, preservando quebras de
 // linha aproximadas (troca tags de bloco/<br> por "\n" antes de remover as
 // demais tags), para uso nas paginas de texto corrido do PDF unico.
+//
+// Documentos "html" do eproc (certidoes, mandados, atos ordinatorios) quase
+// sempre trazem um <style> de formatacao para impressao embutido no proprio
+// "#divdochtml", e ocasionalmente um <script>. Remover so' as TAGS (como a
+// versao anterior fazia) apaga "<style>" e "</style>", mas deixa o CONTEUDO
+// delas (regras CSS, codigo JS) solto no meio do texto como se fosse parte
+// do documento - e' isso que aparecia como "elementos do html" no resultado
+// final. Por isso essas duas tags precisam ser removidas por INTEIRO (tag +
+// conteudo) antes de qualquer outra substituicao.
 function converterHtmlParaTextoSimples(html) {
   return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<(br|BR)\s*\/?>/g, "\n")
     .replace(/<\/(p|P|div|DIV|li|LI|tr|TR|h[1-6]|H[1-6])>/g, "\n")
+    .replace(/<\/(td|TD|th|TH)>/g, "\t")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/g, "&")
@@ -369,6 +533,7 @@ function converterHtmlParaTextoSimples(html) {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -431,8 +596,51 @@ const MIMETYPES_IMAGEM = new Set(["jpg", "jpeg", "png", "gif", "bmp", "webp"]);
 // As fontes padrao do PDF (WinAnsi) nao cobrem todo o Unicode. Troca
 // aspas/travessoes tipograficos por equivalentes simples e qualquer outro
 // caractere fora do intervalo basico por "?", para nao falhar ao desenhar.
+const MAPA_CONTROLES_C1_MOJIBAKE = {
+  0x80: "EUR",
+  0x82: "'",
+  0x83: "f",
+  0x84: '"',
+  0x85: "...",
+  0x86: "+",
+  0x87: "++",
+  0x88: "^",
+  0x89: "%",
+  0x8a: "S",
+  0x8b: "<",
+  0x8c: "OE",
+  0x8e: "Z",
+  0x91: "'",
+  0x92: "'",
+  0x93: '"',
+  0x94: '"',
+  0x95: "*",
+  0x96: "-",
+  0x97: "-",
+  0x98: "~",
+  0x99: "(TM)",
+  0x9a: "s",
+  0x9b: ">",
+  0x9c: "oe",
+  0x9e: "z",
+  0x9f: "Y",
+};
+
+function removerControlesC1Mojibake(texto) {
+  let resultado = "";
+  for (const ch of texto) {
+    const codigo = ch.codePointAt(0);
+    if (codigo >= 0x80 && codigo <= 0x9f) {
+      resultado += MAPA_CONTROLES_C1_MOJIBAKE[codigo] || "";
+    } else {
+      resultado += ch;
+    }
+  }
+  return resultado;
+}
+
 function sanitizarTextoPdf(texto) {
-  return String(texto)
+  return removerControlesC1Mojibake(String(texto))
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/[–—]/g, "-")
@@ -521,7 +729,7 @@ async function converterImagemParaPng(bytesOriginais, mimetypeOriginal) {
 
 async function adicionarDocumentoAoPdf(pdfFinal, fonteTexto, doc, urlReal) {
   if (doc.mimetype === "pdf") {
-    const resposta = await fetch(urlReal, { credentials: "same-origin" });
+    const resposta = await fetchComTimeout(urlReal, { credentials: "same-origin" });
     const bytes = await resposta.arrayBuffer();
     const pdfOrigem = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const paginasCopiadas = await pdfFinal.copyPages(pdfOrigem, pdfOrigem.getPageIndices());
@@ -530,7 +738,7 @@ async function adicionarDocumentoAoPdf(pdfFinal, fonteTexto, doc, urlReal) {
   }
 
   if (MIMETYPES_IMAGEM.has(doc.mimetype)) {
-    const resposta = await fetch(urlReal, { credentials: "same-origin" });
+    const resposta = await fetchComTimeout(urlReal, { credentials: "same-origin" });
     const bufferOriginal = await resposta.arrayBuffer();
     const { bytes, largura, altura } = await converterImagemParaPng(
       new Uint8Array(bufferOriginal),
@@ -590,7 +798,12 @@ function listarDocumentosDoEvento(docs) {
 // unico) - agrupa os documentos por evento e devolve tambem os que nao
 // tem evento correspondente, para o PDF unico nao ordenar/juntar tudo
 // numa lista so'.
-async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProcesso, movimentacao, aoProgredir) {
+// So' monta os bytes do PDF unico (sem baixar nada) - usado tanto por
+// "construirPdfUnico" (exportacao normal, um processo por vez, nome de
+// arquivo fixo) quanto pela exportacao em lote por localizador (varios
+// processos, cada um com nome de pasta/arquivo proprios), para nao
+// duplicar a logica de montagem em dois lugares.
+async function montarBytesPdfUnico(documentos, resolverUrl, movimentacao, aoProgredir) {
   const pdfFinal = await PDFDocument.create();
   const fonteTexto = await pdfFinal.embedFont(StandardFonts.Helvetica);
 
@@ -641,10 +854,32 @@ async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProce
     }
   }
 
-  const bytesFinais = await pdfFinal.save();
+  return pdfFinal.save();
+}
+
+async function construirPdfUnico(documentos, resolverUrl, pastaBase, numeroProcesso, movimentacao, aoProgredir) {
+  const bytesFinais = await montarBytesPdfUnico(documentos, resolverUrl, movimentacao, aoProgredir);
   const dataUrl = construirDataUrlBinario("application/pdf", bytesFinais);
   const nomeArquivo = `${pastaBase}/${sanitizarNomeArquivo(numeroProcesso)}_completo.pdf`;
   await baixarUm(nomeArquivo, dataUrl);
+}
+
+// Cria um resolvedor de URL com cache proprio (mesma logica ja' usada em
+// "processarFila": documentos "html" nunca sao cacheados, pois a segunda
+// camada deles parece nao aceitar ser acessada duas vezes com a mesma URL
+// resolvida). Extraido para ser reaproveitado pela exportacao em lote por
+// localizador, que monta um PDF unico por processo, um processo de cada vez.
+function criarResolvedorUrlDocumento() {
+  const urlsResolvidas = new Map();
+  return async function obterUrlResolvida(doc) {
+    if (doc.mimetype === "html") {
+      return resolverUrlReal(doc.href);
+    }
+    if (urlsResolvidas.has(doc.idDocumento)) return urlsResolvidas.get(doc.idDocumento);
+    const urlReal = await resolverUrlReal(doc.href);
+    urlsResolvidas.set(doc.idDocumento, urlReal);
+    return urlReal;
+  };
 }
 
 // ---- Construcao do MD unico (texto + anonimizacao "melhor esforco") ----
@@ -695,7 +930,19 @@ function prepararAmbientePdfNaPagina() {
 
   window.__eprocExtrairTextoPdf = async function (parametros) {
     try {
-      const resposta = await fetch(parametros.url, { credentials: "same-origin" });
+      const controladorAbort = new AbortController();
+      const idTimeoutAbort = setTimeout(() => controladorAbort.abort(), 10000);
+      let resposta;
+      try {
+        resposta = await fetch(parametros.url, { credentials: "same-origin", signal: controladorAbort.signal });
+      } catch (e) {
+        if (e && e.name === "AbortError") {
+          throw new Error("Tempo esgotado (10s) baixando o documento.");
+        }
+        throw e;
+      } finally {
+        clearTimeout(idTimeoutAbort);
+      }
       if (!resposta.ok) {
         throw new Error(`Falha ao baixar o documento (HTTP ${resposta.status}).`);
       }
@@ -1134,16 +1381,7 @@ async function processarFila(numeroProcesso, documentos, opcoes, movimentacao) {
   // AJAX) parece nao aceitar bem ser acessada duas vezes com a mesma URL
   // resolvida (a segunda tentativa fica vazia); resolver de novo a cada
   // uso evita reaproveitar uma URL que a outra fase ja tenha consumido.
-  const urlsResolvidas = new Map();
-  async function obterUrlResolvida(doc) {
-    if (doc.mimetype === "html") {
-      return resolverUrlReal(doc.href);
-    }
-    if (urlsResolvidas.has(doc.idDocumento)) return urlsResolvidas.get(doc.idDocumento);
-    const urlReal = await resolverUrlReal(doc.href);
-    urlsResolvidas.set(doc.idDocumento, urlReal);
-    return urlReal;
-  }
+  const obterUrlResolvida = criarResolvedorUrlDocumento();
 
   if (opcoes.individuais) {
     const total = documentos.length;
@@ -1254,6 +1492,11 @@ const DIAS_LIMITE_ATRASO = 30;
 // (campo #txtDiasSemMovimentacao no Relatório Geral).
 const FAIXAS_DIAS_SEM_MOVIMENTACAO = [30, 90, 120];
 
+// Piso usado na relação de processos paralisados do Relatório da Unidade
+// (Corregedoria e Gestão da Unidade (alternativo)) - uma única tabela "a
+// partir de 31 dias", sem separar por faixa como o demonstrativo acima.
+const DIAS_MINIMO_PARALISADOS = 31;
+
 // Cada consulta (total / urgentes / +30 dias, para cada situacao) agora
 // abre sua PROPRIA aba oculta, usada uma unica vez e descartada. Duas
 // tentativas anteriores mostraram que reaproveitar a mesma aba para
@@ -1305,73 +1548,152 @@ function consultarUmaVezNaPagina(parametros) {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  // Seleciona TODAS as opcoes de um grupo de situacao de uma vez. Os
+  // values de "selStatusProcesso" seguem o formato "status;codigo;grupo"
+  // (ex.: "M;02;S") - o sufixo ";S" identifica o grupo SUSPENSÃO, ";M" o
+  // grupo MOVIMENTO, etc. Usado pelo Relatório da Unidade (Corregedoria)
+  // para contar suspensos/sobrestados (grupo S) e acervo em tramitacao
+  // (grupo M) sem precisar enumerar as ~40 opcoes uma a uma.
+  function selecionarGrupoSituacao(grupo) {
+    const select = document.getElementById("selStatusProcesso");
+    if (!select) throw new Error('Campo "Situação" não encontrado nesta página.');
+
+    const sufixo = `;${grupo}`;
+    let alguma = false;
+    for (const opcao of select.options) {
+      const selecionada = (opcao.value || "").endsWith(sufixo);
+      opcao.selected = selecionada;
+      if (selecionada) alguma = true;
+    }
+    if (!alguma) {
+      throw new Error(`Nenhuma opção de situação do grupo "${grupo}" encontrada na lista.`);
+    }
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // Seleciona TODAS as opcoes de TODOS os grupos macro do filtro
+  // "Situação", EXCETO os grupos informados (ex.: ["B", "S"] para
+  // excluir BAIXADO e SUSPENSÃO) - usado pela "Relação de processos
+  // ativos" do Relatório da Unidade: em vez de deixar o campo em branco
+  // (o que conta TODO processo, inclusive suspensos e baixados, como se
+  // fosse "ativo"), marca every macro grupo/subitem exceto os excluidos,
+  // do mesmo jeito que "selecionarGrupoSituacao" marca um unico grupo.
+  //
+  // O select tem duas "camadas" de option: os cabecalhos de cada grupo
+  // (value = so' a letra do grupo, ex. "B", "S", "M" - sem ";", exibidos
+  // em negrito só para organizar visualmente a lista) e os itens de fato
+  // (value no formato "status;codigo;grupo", ex. "M;02;S"). So' os itens
+  // de fato entram na selecao (o mesmo padrao ja' usado por
+  // "selecionarGrupoSituacao", que casa pelo sufixo ";grupo" e por isso
+  // tambem nunca marca o cabecalho) - marcar o cabecalho junto seria
+  // redundante e o value dele nao segue o formato "status;codigo;grupo"
+  // que o restante do relatório espera.
+  function selecionarTodosGruposExceto(gruposExcluir) {
+    const select = document.getElementById("selStatusProcesso");
+    if (!select) throw new Error('Campo "Situação" não encontrado nesta página.');
+
+    const sufixosExcluidos = (gruposExcluir || []).map((g) => `;${g}`);
+    let alguma = false;
+    for (const opcao of select.options) {
+      const valor = opcao.value || "";
+      const ehItemDeGrupo = valor.includes(";");
+      const excluida = sufixosExcluidos.some((sufixo) => valor.endsWith(sufixo));
+      const selecionada = ehItemDeGrupo && !excluida;
+      opcao.selected = selecionada;
+      if (selecionada) alguma = true;
+    }
+    if (!alguma) {
+      throw new Error("Nenhuma opção de situação restou selecionada após excluir os grupos informados.");
+    }
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // Usado pelo Relatório Gerencial da Unidade (Corregedoria): filtra a
+  // consulta por uma unidade especifica (Órgão/Juízo), em vez da unidade
+  // padrao do perfil logado. Visualmente um dropdown do bootstrap-select,
+  // mas o <select> nativo continua no DOM por baixo (so' escondido) com
+  // as mesmas <option> - mudar seu valor e disparar "change" atualiza o
+  // filtro e o widget visual junto (bootstrap-select escuta esse
+  // evento), do mesmo jeito que "selecionarSituacao" ja' faz.
+  function selecionarOrgaoJuizo(valorOrgaoJuizo) {
+    const select = document.getElementById("selIdOrgaoJuizo");
+    if (!select) throw new Error('Campo "Órgão/Juízo" (#selIdOrgaoJuizo) não encontrado nesta página.');
+
+    let encontrouOpcao = false;
+    for (const opcao of select.options) {
+      const selecionada = opcao.value === valorOrgaoJuizo;
+      opcao.selected = selecionada;
+      if (selecionada) encontrouOpcao = true;
+    }
+    if (!encontrouOpcao) {
+      throw new Error(`Unidade "${valorOrgaoJuizo}" não encontrada no filtro Órgão/Juízo.`);
+    }
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   // Usa o setter nativo do HTMLInputElement (em vez de so' "input.value =
   // ...") para garantir que a mudanca seja percebida mesmo se algum
   // framework de formulario estiver "escutando" o proprio setter da
   // propriedade, alem de disparar os eventos nativos "input"/"change".
-  function definirDiasSituacao(dias) {
-    const input = document.getElementById("txtDiasSituacao");
+  // Generica: serve "Dias na situação" (#txtDiasSituacao), "Dias sem
+  // movimentação" (#txtDiasSemMovimentacao) e "Autuação fim"
+  // (#txtDataAutuacaoFim), entre outros campos de texto da tela.
+  function definirCampoTexto(idCampo, rotulo, valor) {
+    const input = document.getElementById(idCampo);
     if (!input) {
-      throw new Error('Campo "Dias na situação" (#txtDiasSituacao) não encontrado nesta página.');
+      throw new Error(`Campo "${rotulo}" (#${idCampo}) não encontrado nesta página.`);
     }
     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-    nativeSetter.call(input, String(dias));
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  // Mesma logica de "definirDiasSituacao", so' que para o campo "Dias sem
-  // movimentação" (#txtDiasSemMovimentacao), usado no demonstrativo de
-  // processos parados. Esse campo nao depende de nenhuma situacao
-  // selecionada no outro filtro.
-  function definirDiasSemMovimentacao(dias) {
-    const input = document.getElementById("txtDiasSemMovimentacao");
-    if (!input) {
-      throw new Error(
-        'Campo "Dias sem movimentação" (#txtDiasSemMovimentacao) não encontrado nesta página.'
-      );
-    }
-    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-    nativeSetter.call(input, String(dias));
+    nativeSetter.call(input, String(valor));
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   // Simula a digitacao no span editavel do Tagify e clica no item do
   // dropdown cujo atributo "value" bate com o alvo.
-  async function marcarPeticaoUrgente() {
-    const wrapper = document.getElementById("selDadoComplementar-wrapper");
-    if (!wrapper) {
-      throw new Error('Campo "Informação complementar" não encontrado nesta página.');
-    }
-    const inputSpan = wrapper.querySelector(".tagify__input");
-    const tagsEl = wrapper.querySelector("tags.tagify");
-    if (!inputSpan || !tagsEl) {
-      throw new Error('Estrutura do campo "Informação complementar" não reconhecida.');
-    }
+  // Localiza um campo Tagify pelo aria-label visivel do span editavel
+  // (ex.: "Informação complementar", "Localizador") - os dois campos sao
+  // construidos pelo mesmo widget (Tagify), so' mudando o rotulo e a
+  // lista de sugestoes.
+  function localizarCampoTagify(ariaLabel) {
+    const inputSpan = document.querySelector(`span.tagify__input[aria-label="${ariaLabel}"]`);
+    if (!inputSpan) return null;
+    const tagsEl = inputSpan.closest("tags.tagify");
+    if (!tagsEl) return null;
+    return { inputSpan, tagsEl };
+  }
 
-    const TEXTO_BUSCA = "Petição Urgente";
-    const VALOR_ALVO = "Petição Urgente - Sim";
+  // Digita "textoDigitado" no campo, espera a sugestao cujo texto/valor
+  // bate com "valorAlvo" aparecer no dropdown e clica nela - generaliza o
+  // que antes era so' "marcarPeticaoUrgente", reaproveitado agora tambem
+  // para selecionar um Localizador especifico no Relatório Gerencial da
+  // Unidade (Corregedoria).
+  async function selecionarTagify(ariaLabel, textoDigitado, valorAlvo) {
+    const campo = localizarCampoTagify(ariaLabel);
+    if (!campo) {
+      throw new Error(`Campo "${ariaLabel}" não encontrado nesta página.`);
+    }
+    const { inputSpan, tagsEl } = campo;
 
     inputSpan.focus();
-    inputSpan.textContent = TEXTO_BUSCA;
+    inputSpan.textContent = textoDigitado;
     inputSpan.dispatchEvent(
-      new InputEvent("input", { bubbles: true, inputType: "insertText", data: TEXTO_BUSCA })
+      new InputEvent("input", { bubbles: true, inputType: "insertText", data: textoDigitado })
     );
 
     let itemAlvo = null;
     for (let tentativa = 0; tentativa < 25; tentativa += 1) {
       await aguardar(200);
       itemAlvo =
-        document.querySelector(`.tagify__dropdown__item[value="${VALOR_ALVO}"]`) ||
+        document.querySelector(`.tagify__dropdown__item[value="${valorAlvo}"]`) ||
         Array.from(document.querySelectorAll(".tagify__dropdown__item")).find(
-          (el) => (el.textContent || "").trim() === VALOR_ALVO
+          (el) => (el.textContent || "").trim() === valorAlvo
         );
       if (itemAlvo) break;
     }
 
     if (!itemAlvo) {
-      throw new Error(`Sugestão "${VALOR_ALVO}" não encontrada no dropdown do Tagify.`);
+      throw new Error(`Sugestão "${valorAlvo}" não encontrada no dropdown do campo "${ariaLabel}".`);
     }
 
     itemAlvo.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
@@ -1381,8 +1703,12 @@ function consultarUmaVezNaPagina(parametros) {
     await aguardar(200);
 
     if (tagsEl.querySelectorAll(".tagify__tag").length === 0) {
-      throw new Error('A tag "Petição Urgente - Sim" não foi adicionada ao campo.');
+      throw new Error(`A tag "${valorAlvo}" não foi adicionada ao campo "${ariaLabel}".`);
     }
+  }
+
+  async function marcarPeticaoUrgente() {
+    await selecionarTagify("Informação complementar", "Petição Urgente", "Petição Urgente - Sim");
   }
 
   async function clicarConsultarELer() {
@@ -1416,8 +1742,105 @@ function consultarUmaVezNaPagina(parametros) {
     throw new Error("Tempo esgotado esperando o resultado da consulta.");
   }
 
+  // Le' a "relação de processos" (linhas da tabela de resultado, nao so'
+  // o total) da tabela de resultado "#tblProcessoLista" - usada pelo
+  // Relatório da Unidade para trazer a lista de processos ativos/
+  // suspensos, alem do total. Nunca lanca excecao: sempre resolve com
+  // { cabecalhos, linhas, erro }.
+  async function extrairLinhasTblProcessoLista() {
+    // 12 pra' caber todas as colunas conhecidas da tabela real (checkbox,
+    // Nº Processo, Autuação, Situação, Sigilo, Classe, Localizador, Último
+    // Evento, Data/Hora, Autor, Réu - 11 no total, com folga de 1).
+    const LIMITE_COLUNAS = 12;
+    const LIMITE_LINHAS = 500;
+    try {
+      if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
+        return { cabecalhos: [], linhas: [], erro: "jQuery DataTables não disponível nesta página." };
+      }
+      const tabelaEl = jQuery("#tblProcessoLista");
+      if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tblProcessoLista")) {
+        return { cabecalhos: [], linhas: [], erro: 'Tabela "#tblProcessoLista" não encontrada ou ainda não inicializada.' };
+      }
+      const dt = tabelaEl.DataTable();
+
+      const aguardarRedesenho = () =>
+        Promise.race([
+          new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true))),
+          aguardar(8000).then(() => false),
+        ]);
+
+      // Mostra todas as linhas de uma vez (sem paginacao do DataTables)
+      // antes de ler - senao so' pegariamos a pagina atual visivel.
+      const promessaMostrarTudo = aguardarRedesenho();
+      dt.page.len(-1).draw(false);
+      await promessaMostrarTudo;
+
+      const tabelaDom = document.getElementById("tblProcessoLista");
+      const cabecalhos = Array.from(tabelaDom.querySelectorAll("thead th"))
+        .map((th) => (th.textContent || "").replace(/\s+/g, " ").trim())
+        .slice(0, LIMITE_COLUNAS);
+
+      // Le' direto das celulas <td> ja' RENDERIZADAS (na mesma ordem
+      // visual dos cabecalhos), em vez de "dt.rows().data()": essa API
+      // devolve o objeto de dados BRUTO de cada linha, cujas chaves nem
+      // sempre seguem a mesma ordem das colunas visiveis na tela -
+      // "Object.values()" sobre esse objeto produzia colunas
+      // desalinhadas com o cabecalho (ex.: "Situação" saindo vazia e o
+      // conteudo de "Sigilo" aparecendo embaixo de "Último Evento").
+      // Ler o texto que a propria tabela renderizou evita esse problema
+      // por completo.
+      // As colunas "Autor"/"Réu" podem ter MAIS de uma parte no mesmo
+      // polo (litisconsórcio): cada parte vem no seu proprio
+      // "<span class="d-block">Nome</span>" dentro da mesma celula, sem
+      // nenhum separador de texto entre eles - "td.textContent" colaria
+      // "NOME 1NOME 2NOME 3" sem espaco nenhum. Quando a celula tem esses
+      // spans, cada um vira um "nome" separado, juntados aqui com " | "
+      // (delimitador que nao aparece em nome de parte) para o codigo que
+      // monta o ranking de maiores demandantes/demandados poder separa-los
+      // de volta - as demais colunas continuam lidas por texto simples.
+      function textoCelula(td) {
+        const spansPartes = td.querySelectorAll("span.d-block");
+        if (spansPartes.length > 0) {
+          return Array.from(spansPartes)
+            .map((span) => (span.textContent || "").replace(/\s+/g, " ").trim())
+            .filter(Boolean)
+            .join(" | ");
+        }
+        return (td.textContent || "").replace(/\s+/g, " ").trim();
+      }
+
+      // Quando a consulta nao encontra nenhum processo, o DataTables
+      // desenha uma unica linha "vazia" (classe "dataTables_empty", 1
+      // <td> so' com colspan cobrindo todas as colunas e o texto "Nenhum
+      // registro encontrado") em vez de simplesmente nao ter <tr> nenhum
+      // no <tbody> - um filtro de "tem pelo menos 1 <td>" deixava essa
+      // linha passar como se fosse um processo de verdade (mesmo bug ja'
+      // corrigido em "extrairLinhasRemessasJuizesLeigosNaPagina"). Exigir
+      // o mesmo numero de <td> que de colunas no cabecalho descarta essa
+      // linha "vazia".
+      const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
+        (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
+      );
+      const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) =>
+        Array.from(tr.querySelectorAll("td")).slice(0, LIMITE_COLUNAS).map(textoCelula)
+      );
+
+      return { cabecalhos, linhas, erro: null };
+    } catch (e) {
+      return { cabecalhos: [], linhas: [], erro: e && e.message ? e.message : String(e) };
+    }
+  }
+
   return (async () => {
     try {
+      // Se um Órgão/Juízo especifico foi pedido (Relatório Gerencial da
+      // Unidade), seleciona ele ANTES de tudo - a troca de unidade pode
+      // recarregar/reajustar outros campos da tela.
+      if (parametros.valorOrgaoJuizo) {
+        selecionarOrgaoJuizo(parametros.valorOrgaoJuizo);
+        await aguardar(300);
+      }
+
       // O filtro "Dias sem movimentação" (demonstrativo de processos
       // parados) e' independente da "Situação": nesse caso
       // "parametros.valorSituacao" vem nulo e o select nao e' tocado.
@@ -1425,23 +1848,64 @@ function consultarUmaVezNaPagina(parametros) {
         selecionarSituacao(parametros.valorSituacao);
       }
 
+      // Grupo inteiro de situacoes (ex.: "S" = todos os SUSPENSÃO, "M" =
+      // todos os MOVIMENTO) - mutuamente exclusivo com "valorSituacao".
+      if (parametros.grupoSituacao) {
+        selecionarGrupoSituacao(parametros.grupoSituacao);
+      }
+
+      // Todos os grupos macro EXCETO os informados (ex.: ["B", "S"] para
+      // excluir BAIXADO e SUSPENSÃO) - usado na "Relação de processos
+      // ativos", mutuamente exclusivo com "valorSituacao"/"grupoSituacao".
+      if (parametros.gruposSituacaoExcluir) {
+        selecionarTodosGruposExceto(parametros.gruposSituacaoExcluir);
+      }
+
       if (parametros.diasSituacao != null) {
-        definirDiasSituacao(parametros.diasSituacao);
+        definirCampoTexto("txtDiasSituacao", "Dias na situação", parametros.diasSituacao);
       }
 
       if (parametros.diasSemMovimentacao != null) {
-        definirDiasSemMovimentacao(parametros.diasSemMovimentacao);
+        definirCampoTexto("txtDiasSemMovimentacao", "Dias sem movimentação", parametros.diasSemMovimentacao);
+      }
+
+      // Limite superior da data de autuação (formato dd/mm/aaaa) - usado
+      // para contar o acervo antigo ("autuados ha' mais de N anos").
+      if (parametros.dataAutuacaoFim) {
+        definirCampoTexto("txtDataAutuacaoFim", "Autuação (fim)", parametros.dataAutuacaoFim);
       }
 
       if (parametros.urgente) {
         await marcarPeticaoUrgente();
       }
 
+      // Usado pelo Relatório Gerencial da Unidade (Corregedoria): filtra
+      // a consulta por um Localizador especifico (campo Tagify
+      // "Localizador", que so' lista os localizadores da unidade depois
+      // que um Órgão/Juízo foi selecionado no outro filtro). O Tagify
+      // comeca sem nenhuma sugestao carregada - e' preciso clicar em
+      // "Listar todos" (id="selLocalizadorPrincipal-listAll") antes,
+      // senao nenhum texto digitado encontra opção nenhuma no dropdown.
+      if (parametros.valorLocalizador) {
+        const botaoListarTodos = document.getElementById("selLocalizadorPrincipal-listAll");
+        if (botaoListarTodos) {
+          botaoListarTodos.click();
+          await aguardar(300);
+        }
+        await selecionarTagify("Localizador", parametros.valorLocalizador, parametros.valorLocalizador);
+      }
+
       await aguardar(200);
       const contagem = await clicarConsultarELer();
-      return { contagem, erro: null };
+
+      let tabela = null;
+      if (parametros.extrairTabela) {
+        tabela = await extrairLinhasTblProcessoLista();
+      }
+
+      return { contagem, tabela, erro: null };
     } catch (e) {
-      return { contagem: null, erro: e && e.message ? e.message : String(e) };
+      return { contagem: null, tabela: null, erro: e && e.message ? e.message : String(e) };
     }
   })();
 }
@@ -1457,50 +1921,993 @@ function clicarLinkRelatorioGeralNaPagina() {
   return true;
 }
 
-// Roda ja' na tela do Relatório Geral, apos uma consulta ter sido feita:
-// abre o menu "Exportar" da tabela de resultados (botao dropdown do
-// DataTables Buttons) e clica na opcao "Excel", disparando o download da
-// planilha que o proprio eproc gera. Autocontida, executada via
-// chrome.scripting.executeScript. Nunca lanca excecao: sempre resolve com
-// { ok, erro }.
-function exportarExcelNaPagina() {
+// Seleciona uma unidade (Órgão/Juízo) no Relatório Geral, sem rodar
+// nenhuma consulta - usado antes de ler as opcoes do campo "Localizador"
+// (que so' lista os localizadores da unidade escolhida depois dessa
+// selecao). Autocontida, executada via chrome.scripting.executeScript.
+function selecionarOrgaoJuizoRelatorioGeralNaPagina(valorOrgaoJuizo) {
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) return { ok: false, erro: 'Campo "Órgão/Juízo" (#selIdOrgaoJuizo) não encontrado nesta página.' };
+
+  let encontrouOpcao = false;
+  for (const opcao of select.options) {
+    const selecionada = opcao.value === valorOrgaoJuizo;
+    opcao.selected = selecionada;
+    if (selecionada) encontrouOpcao = true;
+  }
+  if (!encontrouOpcao) {
+    return { ok: false, erro: `Unidade "${valorOrgaoJuizo}" não encontrada no filtro Órgão/Juízo.` };
+  }
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return { ok: true, erro: null };
+}
+
+// Le' todas as opcoes disponiveis no campo "Localizador" do Relatório
+// Geral (widget Tagify) - so' funciona depois que um Órgão/Juízo foi
+// selecionado no outro filtro da tela, que e' quando esse campo passa a
+// listar os localizadores daquela unidade. Digitar uma string vazia no
+// campo (em vez de um texto de busca especifico, como
+// "selecionarTagify" faz) e' o que faz o dropdown mostrar a lista
+// completa de sugestoes em vez de um resultado filtrado. Autocontida,
+// executada via chrome.scripting.executeScript. Nunca lanca excecao:
+// sempre resolve com { opcoes, erro }.
+function listarLocalizadoresNoFiltroRelatorioGeralNaPagina() {
   function aguardar(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   return (async () => {
     try {
-      const botaoExportar = document.querySelector(
-        'a.btn-acoes-bloco.dropdown-toggle[aria-controls="tblProcessoLista"]'
-      );
-      if (!botaoExportar) {
-        throw new Error('Botão "Exportar" não encontrado nesta página.');
+      const inputSpan = document.querySelector('span.tagify__input[aria-label="Localizador"]');
+      if (!inputSpan) {
+        return {
+          opcoes: [],
+          erro: 'Campo "Localizador" não encontrado nesta página (selecione um Órgão/Juízo primeiro).',
+        };
       }
-      botaoExportar.click();
 
-      let botaoExcel = null;
+      // O Tagify comeca vazio - nenhuma sugestao carregada, nem mesmo
+      // digitando um texto de busca - ate' que o botao "Listar todos"
+      // (id="selLocalizadorPrincipal-listAll", companion do <select
+      // id="selLocalizadorPrincipal"> por baixo do Tagify) seja clicado.
+      // Sem esse clique o dropdown fica sempre vazio.
+      const botaoListarTodos = document.getElementById("selLocalizadorPrincipal-listAll");
+      if (botaoListarTodos) {
+        botaoListarTodos.click();
+        await aguardar(300);
+      }
+
+      inputSpan.focus();
+      inputSpan.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "" }));
+
+      let itens = [];
       for (let tentativa = 0; tentativa < 25; tentativa += 1) {
         await aguardar(200);
-        botaoExcel =
-          document.querySelector(
-            'a.buttons-excel.buttons-html5[aria-controls="tblProcessoLista"]'
-          ) ||
-          Array.from(document.querySelectorAll("a.dt-button.dropdown-item")).find(
-            (el) => (el.textContent || "").trim() === "Excel"
-          );
-        if (botaoExcel) break;
+        itens = Array.from(document.querySelectorAll(".tagify__dropdown__item"));
+        if (itens.length > 0) break;
       }
 
-      if (!botaoExcel) {
-        throw new Error('Opção "Excel" não encontrada no menu de exportação.');
+      if (itens.length === 0) {
+        return { opcoes: [], erro: 'Nenhum localizador encontrado no campo "Localizador" (dropdown vazio).' };
       }
 
-      botaoExcel.click();
-      return { ok: true, erro: null };
+      // O eproc costuma mostrar o total de processos junto do nome no
+      // proprio item do dropdown (ex.: "GABINETE (42)") - quando isso
+      // acontece, nao e' preciso abrir uma aba e rodar uma consulta a
+      // mais so' para descobrir esse numero: ele ja' vem pronto aqui.
+      // "contagem" fica null quando o texto nao tem esse sufixo (ex.:
+      // eproc mudou o formato, ou esse item em especifico nao tem o
+      // numero) - nesse caso quem chama decide se consulta por fora.
+      // "texto" continua sendo o texto completo do item (com o numero,
+      // se houver) - e' o que "selecionarTagify" usa para digitar e
+      // reencontrar esse mesmo item depois, entao nao pode mudar; "nome"
+      // e' so' o rotulo sem o numero, para exibir no relatório.
+      const opcoes = itens.map((el) => {
+        const textoCompleto = (el.textContent || "").trim();
+        const valorAttr = el.getAttribute("value");
+        const matchContagem = textoCompleto.match(/\((\d+)\)\s*$/);
+        return {
+          valor: valorAttr || textoCompleto,
+          texto: textoCompleto,
+          nome: matchContagem ? textoCompleto.slice(0, matchContagem.index).trim() : textoCompleto,
+          contagem: matchContagem ? Number(matchContagem[1]) : null,
+        };
+      });
+
+      return { opcoes, erro: null };
     } catch (e) {
-      return { ok: false, erro: e && e.message ? e.message : String(e) };
+      return { opcoes: [], erro: e && e.message ? e.message : String(e) };
     }
   })();
+}
+
+// Busca a lista completa de localizadores da unidade direto pelo mesmo
+// endpoint JSON que o proprio widget "Listar todos" chama por baixo dos
+// panos (confirmado inspecionando a aba de Rede do navegador:
+// "acao=relatorio_geral/listar_localizador_orgao&acao_origem=
+// relatorio_geral_listar&hash=..."), em vez de clicar no botao e ler o
+// dropdown do Tagify depois - um unico fetch, sem esperar nenhuma
+// animacao/render de dropdown. O "hash" e' um token por pagina/sessao;
+// primeiro tenta achar a URL exata desse endpoint (com o hash certo) em
+// algum <script> da propria pagina (e' de la' que o Tagify pega essa URL
+// para montar sua propria chamada), e so' cai para reaproveitar o hash
+// da URL da pagina atual se essa busca no HTML nao encontrar nada.
+//
+// Importante: esse endpoint devolve so' os NOMES dos localizadores
+// (IdLocalizadorOrgao/SigLocalizador/DesLocalizador) - nao inclui o total
+// de processos de cada um. Por isso "contagem" aqui sempre vem null; o
+// total continua vindo de uma consulta por localizador (ver
+// "consultarLocalizadoresUnidadeViaRelatorioGeral"), ja' que esse numero
+// depende da combinacao de filtros da consulta, nao e' um dado fixo do
+// localizador em si.
+function buscarLocalizadoresViaFetchNaPagina() {
+  return (async () => {
+    try {
+      // Normaliza as formas mais comuns de escapar essa URL dentro do
+      // HTML antes de procurar por ela: barra escapada de string JSON
+      // embutida num <script> ("\/"), unicode escape do "&" ("&")
+      // e entidade HTML do "&" ("&amp;") - sem isso, a URL exata que o
+      // Tagify usa (com o "hash" certo) pode nao bater com nenhuma das
+      // duas regras de busca abaixo, mesmo estando la' no HTML.
+      const htmlPagina = (document.documentElement ? document.documentElement.innerHTML : "")
+        .replace(/\\\//g, "/")
+        .replace(/\\u0026/gi, "&")
+        .replace(/&amp;/g, "&");
+
+      const matchUrl = htmlPagina.match(
+        /(controlador\.php\?acao=relatorio_geral(?:%2F|\/)listar_localizador_orgao[^"'\\]*)/i
+      );
+
+      let url;
+      if (matchUrl) {
+        url = matchUrl[1];
+      } else {
+        const matchHashPagina = window.location.href.match(/[?&]hash=([a-f0-9]+)/i);
+        if (!matchHashPagina) {
+          return {
+            opcoes: [],
+            erro: 'Não foi possível localizar a URL (nem o parâmetro "hash") do endpoint de localizadores nesta página.',
+          };
+        }
+        url = `controlador.php?acao=relatorio_geral/listar_localizador_orgao&acao_origem=relatorio_geral_listar&hash=${matchHashPagina[1]}`;
+      }
+
+      const urlAbsoluta = new URL(url, window.location.href).toString();
+      const controladorAbort = new AbortController();
+      const idTimeoutAbort = setTimeout(() => controladorAbort.abort(), 10000);
+      let resposta;
+      try {
+        resposta = await fetch(urlAbsoluta, { credentials: "same-origin", signal: controladorAbort.signal });
+      } catch (e) {
+        if (e && e.name === "AbortError") {
+          return { opcoes: [], erro: "Tempo esgotado (10s) buscando localizadores nesta página." };
+        }
+        throw e;
+      } finally {
+        clearTimeout(idTimeoutAbort);
+      }
+      if (!resposta.ok) {
+        return { opcoes: [], erro: `Falha ao buscar localizadores (HTTP ${resposta.status}).` };
+      }
+
+      const dados = await resposta.json();
+      if (!Array.isArray(dados)) {
+        return { opcoes: [], erro: "Resposta inesperada ao buscar localizadores (não é uma lista)." };
+      }
+
+      const opcoes = dados.map((item) => {
+        const nome = item.DesLocalizador || item.SigLocalizador || String(item.IdLocalizadorOrgao);
+        return {
+          valor: nome,
+          texto: nome,
+          nome,
+          idLocalizadorOrgao: item.IdLocalizadorOrgao,
+          contagem: null,
+        };
+      });
+
+      return { opcoes, erro: null };
+    } catch (e) {
+      return { opcoes: [], erro: e && e.message ? e.message : String(e) };
+    }
+  })();
+}
+
+// Abre uma aba oculta, navega ate' o Relatório Geral, seleciona a
+// unidade pedida e le' as opcoes disponiveis no campo "Localizador" -
+// usado pelo Relatório Gerencial da Unidade antes de consultar o total
+// de processos de cada um (uma consulta por localizador, cada uma na
+// sua propria aba). Tenta primeiro o fetch direto do endpoint JSON
+// (mais rapido e confiavel); so' cai para a simulacao antiga via Tagify
+// ("Listar todos" + ler o dropdown) se o fetch nao encontrar nada.
+async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJuizo) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioGeralNaPagina,
+    });
+
+    if (!linkEncontrado) {
+      return {
+        opcoes: [],
+        erro:
+          'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // "valorOrgaoJuizo" nulo (perfil MAGISTRADO/GESTÃO DA UNIDADE, já
+    // restrito à própria unidade - ver "exportarRelatorioUnidadeAtual")
+    // pula essa seleção: a tela já mostra os localizadores da unidade
+    // habilitada sozinha, e tentar selecionar "null" no filtro não bate
+    // com nenhuma <option> (todo value é sempre string).
+    if (valorOrgaoJuizo) {
+      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+        args: [valorOrgaoJuizo],
+      });
+
+      if (!resultadoSelecao || !resultadoSelecao.ok) {
+        return {
+          opcoes: [],
+          erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo.",
+        };
+      }
+    }
+
+    // Da' um tempo para o campo "Localizador" (Tagify) atualizar sua
+    // lista de sugestoes apos a troca de unidade.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const [{ result: resultadoFetch } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: buscarLocalizadoresViaFetchNaPagina,
+    });
+
+    if (resultadoFetch && resultadoFetch.opcoes && resultadoFetch.opcoes.length > 0) {
+      return resultadoFetch;
+    }
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: listarLocalizadoresNoFiltroRelatorioGeralNaPagina,
+    });
+
+    return (
+      result || {
+        opcoes: [],
+        erro: (resultadoFetch && resultadoFetch.erro) || "Sem resultado ao ler as opções do campo Localizador.",
+      }
+    );
+  } catch (e) {
+    return { opcoes: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Le', SEM CONSULTAR nada, as opcoes de um grupo especifico do filtro
+// "Situação" (#selStatusProcesso, value no formato "status;codigo;grupo" -
+// o mesmo grupo usado por "selecionarGrupoSituacao"). Usada so' para
+// descobrir a lista antes de dividi-la em blocos e consultar em paralelo
+// (ver "abrirAbaEConsultarSituacoesGrupo"). Autocontida, executada via
+// chrome.scripting.executeScript.
+function listarSituacoesDoGrupoNaPagina(grupo) {
+  const select = document.getElementById("selStatusProcesso");
+  if (!select) {
+    return { opcoes: [], erro: 'Campo "Situação" (#selStatusProcesso) não encontrado nesta página.' };
+  }
+  const sufixo = `;${grupo}`;
+  const opcoes = Array.from(select.options)
+    .filter((opcao) => (opcao.value || "").endsWith(sufixo))
+    .map((opcao) => ({ valor: opcao.value, texto: (opcao.textContent || "").replace(/\s+/g, " ").trim() }));
+  if (opcoes.length === 0) {
+    return { opcoes: [], erro: `Nenhuma opção de situação do grupo "${grupo}" encontrada na lista.` };
+  }
+  return { opcoes, erro: null };
+}
+
+// Abre uma aba oculta, navega ate' o Relatório Geral, seleciona a unidade
+// pedida e le' (sem consultar) as opcoes do grupo indicado do filtro
+// "Situação".
+async function abrirAbaEListarSituacoesDoGrupo(urlBase, valorOrgaoJuizo, grupo) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioGeralNaPagina,
+    });
+    if (!linkEncontrado) {
+      return {
+        opcoes: [],
+        erro:
+          'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Mesma regra das demais consultas: "valorOrgaoJuizo" nulo (perfil já
+    // restrito à própria unidade - ver "exportarRelatorioUnidadeAtual")
+    // pula a seleção em vez de tentar bater "null" com alguma <option>.
+    if (valorOrgaoJuizo) {
+      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+        args: [valorOrgaoJuizo],
+      });
+      if (!resultadoSelecao || !resultadoSelecao.ok) {
+        return {
+          opcoes: [],
+          erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo.",
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: listarSituacoesDoGrupoNaPagina,
+      args: [grupo],
+    });
+    return result || { opcoes: [], erro: "Sem resultado ao listar as situações do grupo." };
+  } catch (e) {
+    return { opcoes: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Roda, para CADA uma das opcoes recebidas (ja' definidas de fora - um
+// BLOCO de um grupo maior, nao o grupo inteiro), uma consulta separada
+// (so' troca a Situação e clica Consultar de novo - nenhum campo Tagify
+// envolvido, entao reaproveita a MESMA aba/pagina para todas as consultas
+// do bloco, sem o custo de abrir uma aba nova por item). Usada para
+// detalhar o total de suspensos/sobrestados por situação especifica
+// (quantos estao em "SUSPENSAO", quantos em "SOBRESTADO CONVENIO", etc.)
+// em vez de so' um numero agregado do grupo inteiro - varios blocos rodam
+// em ABAS SEPARADAS e em PARALELO (ver "abrirAbaEConsultarSituacoesGrupo"),
+// cada um cuidando so' da sua fatia da lista completa. Autocontida,
+// executada via chrome.scripting.executeScript. Nunca lanca excecao: cada
+// item devolve seu proprio "erro" se algo falhar, sem interromper os
+// demais itens do mesmo bloco.
+function consultarSituacoesEspecificasNaPagina(opcoesDoBloco) {
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function extrairContagem(texto) {
+    const m = (texto || "").match(/\((\d+)\)/);
+    return m ? Number(m[1]) : null;
+  }
+
+  function selecionarSituacaoEspecifica(valorOpcaoSituacao) {
+    const select = document.getElementById("selStatusProcesso");
+    let encontrou = false;
+    for (const opcao of select.options) {
+      const selecionada = opcao.value === valorOpcaoSituacao;
+      opcao.selected = selecionada;
+      if (selecionada) encontrou = true;
+    }
+    if (encontrou) select.dispatchEvent(new Event("change", { bubbles: true }));
+    return encontrou;
+  }
+
+  // Antes esperava a badge de contagem MUDAR DE TEXTO para considerar a
+  // consulta concluida, com um fallback de ate' 2s (8 tentativas de
+  // 250ms) para o caso do texto ficar igual ao anterior - o que e' o
+  // caso COMUM aqui, ja' que a maioria das ~40 situações do grupo tem 0
+  // processos: toda vez que duas situações seguidas resultavam em "(0)",
+  // o item pagava os 2s inteiros do fallback antes de seguir pra
+  // proxima, mesmo a consulta real tendo terminado bem antes. Trocado
+  // pelo proprio evento "draw.dt" do DataTable (a mesma tecnica ja' usada
+  // em "extrairLinhasTblProcessoLista" pra' esperar a tabela redesenhar) -
+  // dispara assim que a tabela termina de atualizar, independente do
+  // texto da contagem ter mudado ou nao, e' bem mais rapido no caso comum
+  // e continua correto no caso raro de duas contagens iguais seguidas.
+  // So' cai para o polling antigo (mais lento, mas ja' testado) se por
+  // algum motivo o jQuery/DataTable nao estiver disponivel nesta pagina.
+  async function clicarConsultarELer() {
+    const botaoConsultar = document.querySelector('button.btnConsultar[form="frmProcessoLista"]');
+    if (!botaoConsultar) throw new Error('Botão "Consultar" não encontrado nesta página.');
+
+    const temDataTable =
+      typeof jQuery !== "undefined" && jQuery.fn && jQuery.fn.DataTable && jQuery.fn.DataTable.isDataTable("#tblProcessoLista");
+
+    if (temDataTable) {
+      const tabelaEl = jQuery("#tblProcessoLista");
+      const promessaRedesenho = new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true)));
+      botaoConsultar.click();
+      const desenhou = await Promise.race([promessaRedesenho, aguardar(10000).then(() => false)]);
+      const badge = document.getElementById("tblProcessoLista_info-badge");
+      if (!desenhou || !badge) throw new Error("Tempo esgotado esperando o resultado da consulta.");
+      return extrairContagem(badge.textContent);
+    }
+
+    const badgeAntes = document.getElementById("tblProcessoLista_info-badge");
+    const textoAntes = badgeAntes ? badgeAntes.textContent : null;
+
+    botaoConsultar.click();
+
+    for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+      await aguardar(250);
+      const badge = document.getElementById("tblProcessoLista_info-badge");
+      const textoAtual = badge ? badge.textContent : null;
+      const elementoProcessando = document.getElementById("tblProcessoLista_processing");
+      const estaProcessando =
+        elementoProcessando && getComputedStyle(elementoProcessando).display !== "none";
+
+      if (badge && !estaProcessando && textoAtual !== textoAntes) {
+        return extrairContagem(textoAtual);
+      }
+      if (badge && !estaProcessando && tentativa > 8) {
+        return extrairContagem(textoAtual);
+      }
+    }
+    throw new Error("Tempo esgotado esperando o resultado da consulta.");
+  }
+
+  return (async () => {
+    const select = document.getElementById("selStatusProcesso");
+    if (!select) {
+      return { itens: [], erro: 'Campo "Situação" (#selStatusProcesso) não encontrado nesta página.' };
+    }
+
+    // Orcamento de tempo INTERNO a este bloco (verificado ENTRE um item e
+    // outro): garante que, mesmo se a consulta estiver lenta, o que ja' foi
+    // apurado ate' aqui e' devolvido em vez de perdido por completo. Sem
+    // isso, um timeout externo (ver "abrirAbaEConsultarSituacoesEspecificas")
+    // teria que abandonar esta chamada inteira e descartar TODO o progresso
+    // do bloco - mesmo os itens que ja' tinham sido consultados com sucesso
+    // antes do estouro.
+    const ORCAMENTO_BLOCO_MS = 60000;
+    const inicioBloco = Date.now();
+
+    const itens = [];
+    let parcial = false;
+    for (const opcao of opcoesDoBloco) {
+      if (Date.now() - inicioBloco > ORCAMENTO_BLOCO_MS) {
+        parcial = true;
+        break;
+      }
+      try {
+        const encontrou = selecionarSituacaoEspecifica(opcao.valor);
+        if (!encontrou) {
+          itens.push({ valor: opcao.valor, texto: opcao.texto, contagem: null, erro: "Opção não encontrada." });
+          continue;
+        }
+        await aguardar(150);
+        const contagem = await clicarConsultarELer();
+        itens.push({ valor: opcao.valor, texto: opcao.texto, contagem, erro: null });
+      } catch (e) {
+        itens.push({
+          valor: opcao.valor,
+          texto: opcao.texto,
+          contagem: null,
+          erro: e && e.message ? e.message : String(e),
+        });
+      }
+    }
+
+    return {
+      itens,
+      erro: null,
+      parcial,
+      motivoParcial: parcial
+        ? `Tempo limite (${ORCAMENTO_BLOCO_MS / 1000}s) atingido dentro do bloco - ${
+            opcoesDoBloco.length - itens.length
+          } de ${opcoesDoBloco.length} situação(ões) deste bloco não consultada(s).`
+        : null,
+    };
+  })();
+}
+
+// Abre uma aba oculta PROPRIA, navega ate' o Relatório Geral, seleciona a
+// unidade pedida e roda "consultarSituacoesEspecificasNaPagina" so' para o
+// bloco recebido - usada para poder chamar varias dessas em PARALELO
+// (Promise.all), uma aba por bloco. Tem seu proprio timeout: se essa aba
+// especifica travar, so' o bloco dela fica incompleto, sem afetar os
+// demais blocos que estao rodando ao mesmo tempo em outras abas.
+async function abrirAbaEConsultarSituacoesEspecificas(urlBase, valorOrgaoJuizo, opcoesDoBloco) {
+  // So' uma rede de seguranca para casos realmente travados (pagina que
+  // nunca recarrega, clique que nunca dispara nada): o orcamento de 60s
+  // DENTRO de "consultarSituacoesEspecificasNaPagina" e' quem normalmente
+  // decide quando parar, devolvendo o progresso parcial ja' apurado. Esse
+  // timeout aqui fica um pouco acima dele de proposito (raramente deve
+  // disparar) - se disparar mesmo assim, e' so' esse bloco especifico que
+  // sai vazio, sem afetar os demais blocos rodando em paralelo.
+  const TIMEOUT_BLOCO_MS = 75000;
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioGeralNaPagina,
+    });
+    if (!linkEncontrado) {
+      return {
+        itens: [],
+        erro:
+          'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Mesma regra das demais consultas: "valorOrgaoJuizo" nulo pula a
+    // seleção em vez de tentar bater "null" com alguma <option>.
+    if (valorOrgaoJuizo) {
+      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+        args: [valorOrgaoJuizo],
+      });
+      if (!resultadoSelecao || !resultadoSelecao.ok) {
+        return {
+          itens: [],
+          erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo.",
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    const [{ result } = {}] = await comTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        world: "MAIN",
+        func: consultarSituacoesEspecificasNaPagina,
+        args: [opcoesDoBloco],
+      }),
+      TIMEOUT_BLOCO_MS,
+      `Tempo esgotado (${TIMEOUT_BLOCO_MS / 1000}s) consultando um bloco de ${opcoesDoBloco.length} situação(ões).`
+    );
+
+    return result || { itens: [], erro: "Sem resultado ao consultar o bloco de situações." };
+  } catch (e) {
+    return { itens: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Divide uma lista em ate' "numBlocos" blocos (round-robin), descartando
+// blocos vazios - usado para repartir as ~40 opcoes de situação em (por
+// padrao) 5 fatias de ~8, uma por aba/consulta em paralelo.
+function dividirEmBlocos(lista, numBlocos) {
+  const total = Math.max(1, Math.min(numBlocos, lista.length));
+  const blocos = Array.from({ length: total }, () => []);
+  lista.forEach((item, indice) => {
+    blocos[indice % total].push(item);
+  });
+  return blocos.filter((bloco) => bloco.length > 0);
+}
+
+// Mesmo valor de LIMITE_ABAS_SIMULTANEAS: o detalhamento de suspensos e'
+// so' mais um consumidor do semaforo global de abas ocultas, entao pode
+// pedir ate' o maximo permitido de blocos/abas simultaneas sem estourar
+// o limite combinado com as demais consultas do relatório.
+const NUM_BLOCOS_PARALELOS_SITUACOES = LIMITE_ABAS_SIMULTANEAS;
+
+// Detalha todas as situações especificas de um grupo (ex.: cada variante
+// de suspensão/sobrestamento dentro do grupo "S") em PARALELO: primeiro
+// lista as opcoes do grupo (uma aba rapida, so' leitura), depois divide
+// em ate' NUM_BLOCOS_PARALELOS_SITUACOES blocos e consulta cada bloco
+// numa aba PROPRIA, todas ao mesmo tempo (Promise.all, respeitando o
+// semaforo global de abas ocultas) - em vez de uma unica aba consultando
+// as ~40 opcoes uma de cada vez. Cada bloco tem um orcamento interno de
+// 60s (verificado ENTRE um item e outro, preservando o que ja' foi
+// apurado) e um timeout externo de 75s como rede de seguranca; se algum
+// bloco nao terminar a tempo, o resultado sai "parcial" (com o que os
+// demais blocos conseguiram apurar), mas nunca trava a exportação - o
+// TOTAL de suspensos (consultado à parte, fora desta função) nunca é
+// afetado por
+// esse limite.
+async function abrirAbaEConsultarSituacoesGrupo(urlBase, valorOrgaoJuizo, grupo) {
+  const { opcoes, erro: erroListagem } = await abrirAbaEListarSituacoesDoGrupo(urlBase, valorOrgaoJuizo, grupo);
+  if (opcoes.length === 0) {
+    return { itens: [], erro: erroListagem || `Nenhuma opção de situação do grupo "${grupo}" encontrada.` };
+  }
+
+  const blocos = dividirEmBlocos(opcoes, NUM_BLOCOS_PARALELOS_SITUACOES);
+  const resultadosBlocos = await Promise.all(
+    blocos.map((bloco) => abrirAbaEConsultarSituacoesEspecificas(urlBase, valorOrgaoJuizo, bloco))
+  );
+
+  const itens = [];
+  const errosBlocos = [];
+  let itensEsperados = 0;
+  for (let i = 0; i < blocos.length; i += 1) {
+    itensEsperados += blocos[i].length;
+    const { itens: itensBloco, erro: erroBloco } = resultadosBlocos[i];
+    itens.push(...itensBloco);
+    if (erroBloco) errosBlocos.push(erroBloco);
+  }
+
+  const parcial = itens.length < itensEsperados || errosBlocos.length > 0;
+  return {
+    itens,
+    erro: null,
+    parcial,
+    motivoParcial: parcial
+      ? `Consulta em paralelo (${blocos.length} bloco(s) simultâneos) não concluiu a tempo - ${
+          itensEsperados - itens.length
+        } de ${itensEsperados} situação(ões) não consultada(s)${
+          errosBlocos.length > 0 ? ` (${errosBlocos.join(" | ")})` : ""
+        }.`
+      : null,
+  };
+}
+
+
+// ---- Relatório Geral da Corregedoria (panorama de todas as unidades) ----
+
+// Links de menu das duas telas panoramicas usadas nesse relatorio (acao=
+// confirmados no menu lateral do perfil CORREGEDORIA da pagina real de
+// Remessas em Aberto enviada pelo usuario).
+function clicarLinkSemMovimentacaoTodasVarasNaPagina() {
+  const link = document.querySelector('a[href*="acao=relatorio_sem_movimentacao_listar_geral"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+function clicarLinkAtuacaoJuizLeigoNaPagina() {
+  const link = document.querySelector('a[href*="acao=relatorio_atuacao_auxiliar_justica"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Extrator GENERICO de tabela de resultado, best-effort - usado nas duas
+// telas panoramicas ("Processos sem Movimentação N Dias (todas Varas)" e
+// "Relatório de Atuação Conciliador/Juiz Leigo"), das quais NAO temos
+// amostra HTML (diferente das demais telas desta extensao, calibradas
+// contra paginas reais). Estrategia defensiva, com log "[eproc]"
+// detalhado para calibrar depois com o HTML real se falhar:
+// 1. Se "diasPreencher" vier, tenta achar um campo de dias (input number
+//    ou id/name contendo "dias") e preenche.
+// 2. Clica num botao "Consultar" se existir (a tela pode ja' abrir
+//    consultada), esperando um tempo para o resultado carregar.
+// 3. Extrai a tabela: primeiro via API do DataTables (mesmo dual-path
+//    das Remessas em Aberto); senao, a maior tabela visivel com <th> e
+//    linhas de dados (.infraTable ou table generica).
+// Retorna { cabecalhos: [..], linhas: [[..]], erro } - colunas limitadas
+// as 8 primeiras para caber no PDF. Nunca lanca excecao.
+function extrairTabelaGenericaNaPagina(diasPreencher) {
+  const LIMITE_COLUNAS = 8;
+  const LIMITE_LINHAS = 400;
+
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function textoLimpo(el) {
+    return (el && el.textContent ? el.textContent : "").replace(/\s+/g, " ").trim();
+  }
+
+  function extrairDeDataTable() {
+    if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) return null;
+    const tabelas = Array.from(document.querySelectorAll("table")).filter((t) =>
+      jQuery.fn.DataTable.isDataTable(t)
+    );
+    if (tabelas.length === 0) return null;
+    const dt = jQuery(tabelas[0]).DataTable();
+    const cabecalhos = Array.from(tabelas[0].querySelectorAll("thead th"))
+      .map(textoLimpo)
+      .slice(0, LIMITE_COLUNAS);
+    // page.len(-1) mostra tudo; rows().data() pode conter objetos ou
+    // arrays dependendo da configuracao da tela - normaliza para texto.
+    try {
+      dt.page.len(-1).draw(false);
+    } catch (e) {
+      // paginacao pode nao existir - segue com o que estiver visivel
+    }
+    const div = document.createElement("div");
+    const linhas = dt
+      .rows({ search: "applied" })
+      .data()
+      .toArray()
+      .slice(0, LIMITE_LINHAS)
+      .map((linha) => {
+        const valores = Array.isArray(linha) ? linha : Object.values(linha);
+        return valores.slice(0, LIMITE_COLUNAS).map((v) => {
+          div.innerHTML = v == null ? "" : String(v);
+          return (div.textContent || "").replace(/\s+/g, " ").trim();
+        });
+      });
+    return { cabecalhos, linhas };
+  }
+
+  function extrairDeTabelaHtml() {
+    const candidatas = Array.from(document.querySelectorAll("table.infraTable, table.eproc-table, table"))
+      .map((t) => ({ tabela: t, linhas: t.querySelectorAll("tbody tr, tr").length }))
+      .filter((c) => c.linhas > 1)
+      .sort((a, b) => b.linhas - a.linhas);
+    if (candidatas.length === 0) return null;
+    const tabela = candidatas[0].tabela;
+
+    const ths = Array.from(tabela.querySelectorAll("th"));
+    const cabecalhos = ths.map(textoLimpo).filter(Boolean).slice(0, LIMITE_COLUNAS);
+
+    const linhas = Array.from(tabela.querySelectorAll("tr"))
+      .filter((tr) => tr.querySelectorAll("td").length > 0)
+      .slice(0, LIMITE_LINHAS)
+      .map((tr) =>
+        Array.from(tr.querySelectorAll("td"))
+          .slice(0, LIMITE_COLUNAS)
+          .map(textoLimpo)
+      );
+    if (linhas.length === 0) return null;
+    return { cabecalhos, linhas };
+  }
+
+  return (async () => {
+    try {
+      if (diasPreencher != null) {
+        const candidatos = Array.from(
+          document.querySelectorAll('input[type="number"], input[id*="ias" i], input[name*="ias" i]')
+        );
+        const campoDias = candidatos.find((el) => /dia/i.test(el.id + " " + el.name));
+        const alvo = campoDias || candidatos[0];
+        if (alvo) {
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+          nativeSetter.call(alvo, String(diasPreencher));
+          alvo.dispatchEvent(new Event("input", { bubbles: true }));
+          alvo.dispatchEvent(new Event("change", { bubbles: true }));
+          console.log("[eproc]", "Campo de dias preenchido:", alvo.id || alvo.name);
+        } else {
+          console.warn("[eproc]", "Nenhum campo de dias encontrado nesta tela - seguindo sem preencher.");
+        }
+      }
+
+      const botaoConsultar = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]')).find(
+        (el) => /consultar/i.test(el.textContent || el.value || "")
+      );
+      if (botaoConsultar) {
+        console.log("[eproc]", "Clicando em Consultar...");
+        botaoConsultar.click();
+        // A consulta pode ser AJAX ou recarregar a pagina; espera um
+        // tempo generoso e segue - se recarregar, este script morre e o
+        // chamador retenta a extracao numa nova chamada.
+        await aguardar(4000);
+      } else {
+        console.log("[eproc]", "Nenhum botão Consultar encontrado - a tela pode já abrir consultada.");
+      }
+
+      const resultado = extrairDeDataTable() || extrairDeTabelaHtml();
+      if (!resultado || resultado.linhas.length === 0) {
+        console.warn("[eproc]", "Nenhuma tabela de resultado encontrada. Título da página:", document.title);
+        return {
+          cabecalhos: [],
+          linhas: [],
+          erro: "Nenhuma tabela de resultado encontrada nesta tela (envie o HTML da página para calibrar a extração).",
+        };
+      }
+      console.log("[eproc]", "Tabela extraída:", resultado.linhas.length, "linha(s),", resultado.cabecalhos.length, "coluna(s).");
+      return { cabecalhos: resultado.cabecalhos, linhas: resultado.linhas, erro: null };
+    } catch (e) {
+      return { cabecalhos: [], linhas: [], erro: e && e.message ? e.message : String(e) };
+    }
+  })();
+}
+
+// Abre uma aba oculta, clica no link de menu indicado, espera carregar e
+// roda o extrator generico de tabela. Se a primeira extracao falhar por
+// navegacao no meio (o Consultar de algumas telas recarrega a pagina,
+// matando o script injetado), tenta extrair de novo na pagina ja'
+// consultada.
+async function abrirAbaEExtrairTabelaRelatorio(urlBase, funcClicarLink, nomeRelatorio, diasPreencher) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: funcClicarLink,
+    });
+
+    if (!linkEncontrado) {
+      return {
+        cabecalhos: [],
+        linhas: [],
+        erro: `Link "${nomeRelatorio}" não encontrado no menu lateral. Abra uma página do eproc com o menu lateral e tente novamente.`,
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    let resultado = null;
+    try {
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        world: "MAIN",
+        func: extrairTabelaGenericaNaPagina,
+        args: [diasPreencher != null ? diasPreencher : null],
+      });
+      resultado = result;
+    } catch (e) {
+      console.warn("[eproc]", nomeRelatorio, "- primeira extração interrompida (provável recarregamento):", String(e));
+    }
+
+    if (!resultado || (resultado.erro && resultado.linhas.length === 0)) {
+      // Retentativa na pagina ja' consultada/recarregada, sem preencher
+      // dias de novo (o filtro persiste no formulário reenviado).
+      await aguardarCarregamentoAba(aba.id).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        world: "MAIN",
+        func: extrairTabelaGenericaNaPagina,
+        args: [null],
+      });
+      if (result && result.linhas.length > 0) resultado = result;
+      else if (!resultado) resultado = result;
+    }
+
+    return resultado || { cabecalhos: [], linhas: [], erro: "Sem resultado ao ler a tabela do relatório." };
+  } catch (e) {
+    return { cabecalhos: [], linhas: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Monta um PDF-tabela a partir de cabecalhos/linhas dinamicos (colunas
+// descobertas em tempo de execucao, diferente das tabelas fixas de
+// Localizadores/Remessas): distribui a largura util igualmente entre as
+// colunas e converte cada linha (array) num objeto para o formato que
+// "construirPdfTabela" espera.
+function construirPdfTabelaDinamica(cabecalhos, linhas, tituloDocumento) {
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const num = Math.max(1, cabecalhos.length);
+  const colunas = cabecalhos.map((titulo, i) => ({
+    titulo: titulo || `Coluna ${i + 1}`,
+    largura: larguraUtil / num,
+    campo: `c${i}`,
+  }));
+  const itens = linhas.map((linha) => {
+    const item = {};
+    linha.forEach((valor, i) => {
+      if (i < num) item[`c${i}`] = valor;
+    });
+    return item;
+  });
+  return construirPdfTabela(itens, colunas, tituloDocumento);
+}
+
+// Orquestra o Relatório Geral da Corregedoria (panorama de TODAS as
+// unidades - nao exige unidade escolhida, diferente do Relatório da
+// Unidade): extrai as duas telas panoramicas e gera um unico PDF com
+// capa institucional + as duas tabelas.
+async function exportarRelatorioPanoramico(aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  notificar(`Extraindo processos sem movimentação há mais de ${DIAS_PANORAMA_SEM_MOVIMENTACAO} dias (todas as varas)...`);
+  const semMov = await abrirAbaEExtrairTabelaRelatorio(
+    abaAtual.url,
+    clicarLinkSemMovimentacaoTodasVarasNaPagina,
+    "Processos sem Movimentação N Dias (todas Varas)",
+    DIAS_PANORAMA_SEM_MOVIMENTACAO
+  );
+
+  notificar("Extraindo o Relatório de Atuação Conciliador/Juiz Leigo...");
+  const atuacao = await abrirAbaEExtrairTabelaRelatorio(
+    abaAtual.url,
+    clicarLinkAtuacaoJuizLeigoNaPagina,
+    "Relatório de Atuação Conciliador/Juiz Leigo",
+    null
+  );
+
+  if (semMov.linhas.length === 0 && atuacao.linhas.length === 0) {
+    throw new Error(
+      `Nenhum dado extraído. Sem movimentação: ${semMov.erro || "vazio"}. Atuação: ${atuacao.erro || "vazio"}.`
+    );
+  }
+
+  notificar("Gerando PDF...");
+  const dataInformacao = new Date().toLocaleString("pt-BR");
+
+  const secoesResumo = [
+    {
+      titulo: "CONTEÚDO DESTE RELATÓRIO",
+      linhas: [
+        {
+          rotulo: `Processos sem movimentação há mais de ${DIAS_PANORAMA_SEM_MOVIMENTACAO} dias (todas as varas)`,
+          valor: semMov.linhas.length,
+        },
+        { rotulo: "Atuação Conciliador/Juiz Leigo (linhas)", valor: atuacao.linhas.length },
+      ],
+    },
+  ];
+  const avisos = [];
+  if (semMov.erro) avisos.push(`Sem movimentação (todas as varas): ${semMov.erro}`);
+  if (atuacao.erro) avisos.push(`Atuação Conciliador/Juiz Leigo: ${atuacao.erro}`);
+
+  const bytesCapa = await construirCapaRelatorioGerencial(
+    "Todas as unidades",
+    dataInformacao,
+    secoesResumo,
+    avisos
+  );
+  const pdfFinal = await PDFDocument.create();
+  const pdfCapa = await PDFDocument.load(bytesCapa);
+  const paginasCapa = await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices());
+  paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
+
+  if (semMov.linhas.length > 0) {
+    const bytes = await construirPdfTabelaDinamica(
+      semMov.cabecalhos,
+      semMov.linhas,
+      `Processos sem movimentação há mais de ${DIAS_PANORAMA_SEM_MOVIMENTACAO} dias (todas as varas) — ${semMov.linhas.length} linha(s)`
+    );
+    const pdf = await PDFDocument.load(bytes);
+    const paginas = await pdfFinal.copyPages(pdf, pdf.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  if (atuacao.linhas.length > 0) {
+    const bytes = await construirPdfTabelaDinamica(
+      atuacao.cabecalhos,
+      atuacao.linhas,
+      `Atuação Conciliador/Juiz Leigo — ${atuacao.linhas.length} linha(s)`
+    );
+    const pdf = await PDFDocument.load(bytes);
+    const paginas = await pdfFinal.copyPages(pdf, pdf.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  const bytesFinais = await pdfFinal.save();
+  const nomeArquivo = `eproc/relatorio_geral_corregedoria_${new Date().toISOString().slice(0, 10)}.pdf`;
+  await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytesFinais));
+
+  notificar("Finalizando...");
+  return {
+    totalSemMovimentacao: semMov.linhas.length,
+    totalAtuacao: atuacao.linhas.length,
+  };
 }
 
 // Abre uma aba oculta nova, navega ate' o Relatório Geral e roda UMA
@@ -1510,6 +2917,7 @@ function exportarExcelNaPagina() {
 async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1534,6 +2942,7 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
 
     const [{ result } = {}] = await chrome.scripting.executeScript({
       target: { tabId: aba.id },
+      world: "MAIN",
       func: consultarUmaVezNaPagina,
       args: [parametros],
     });
@@ -1545,221 +2954,2031 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
-async function gerarRelatorioGeral(aoProgredir) {
+// Le', na tela do Relatório Geral, todas as opcoes do filtro
+// "Órgão/Juízo" (select#selIdOrgaoJuizo) - visualmente um dropdown do
+// bootstrap-select (o botao com texto "Selecione" e o menu que abre ao
+// clicar), mas o bootstrap-select so' e' uma casca visual em cima do
+// <select> nativo original, que continua existindo no DOM (so' fica
+// escondido) com as mesmas <option> - por isso a leitura e' direto no
+// <select>, sem precisar simular nenhum clique/abertura do dropdown
+// visual. Autocontida, executada via chrome.scripting.executeScript.
+function lerUnidadesRelatorioGeralNaPagina() {
+  const select = document.getElementById("selIdOrgaoJuizo");
+  if (!select) {
+    return { unidades: [], erro: 'Campo "Órgão/Juízo" (#selIdOrgaoJuizo) não encontrado nesta página.' };
+  }
+  const unidades = Array.from(select.options)
+    .filter((opcao) => opcao.value && opcao.value !== "null")
+    .map((opcao) => ({
+      valor: opcao.value,
+      texto: (opcao.textContent || opcao.getAttribute("title") || "").trim(),
+    }));
+  return { unidades, erro: null };
+}
+
+// Navega a aba ATUAL (visivel) ate' o Relatório Geral e le' as unidades disponiveis no filtro
+// "Órgão/Juízo" dessa tela - usado pelo botao "Relatório Gerencial da
+// Unidade" (so' aparece no painel quando o perfil ativo e'
+// "CORREGEDORIA"). Por enquanto so' lista as unidades num dropdown no
+// painel; nenhuma consulta/relatorio adicional e' disparado a partir
+// delas ainda.
+async function listarUnidadesRelatorioGeral(aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
   };
+
+  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!aba || !aba.id) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  notificar("Abrindo o Relatório Geral...");
+  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: clicarLinkRelatorioGeralNaPagina,
+  });
+
+  if (!linkEncontrado) {
+    throw new Error(
+      'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
+    );
+  }
+
+  await aguardarCarregamentoAba(aba.id);
+  // Pequena espera extra para os scripts da pagina (bootstrap-select
+  // etc.) terminarem de inicializar apos o carregamento.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  notificar("Lendo as unidades disponíveis...");
+  const [{ result } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: lerUnidadesRelatorioGeralNaPagina,
+  });
+
+  if (!result || result.erro) {
+    throw new Error((result && result.erro) || "Não foi possível ler as unidades disponíveis.");
+  }
+
+  notificar("Finalizando...");
+  return { unidades: result.unidades };
+}
+
+// Dias de atraso usados no Relatório Gerencial da Unidade (diferente do
+// DIAS_LIMITE_ATRASO de 30 dias usado no relatorio "rapido" do painel -
+// aqui o pedido foi especificamente "aguardando há mais de 90 dias").
+const DIAS_LIMITE_ATRASO_UNIDADE = 90;
+
+// Dias sem movimentação usados no panorama de todas as varas (Relatório
+// Geral da Corregedoria).
+const DIAS_PANORAMA_SEM_MOVIMENTACAO = 90;
+
+// Consulta total/urgentes/+90 dias de uma situacao (despacho ou
+// sentenca) filtrada por uma unidade especifica - reaproveita
+// "abrirAbaEConsultarUmaVez"/"consultarUmaVezNaPagina" (mesmas funcoes
+// do relatorio rapido do painel), so' que com "valorOrgaoJuizo" preenchido
+// e o limite de dias em 90 em vez de 30. "Não urgentes" e' calculado
+// aqui mesmo (total - urgentes) para nao precisar de mais uma consulta -
+// nao ha' filtro de "não urgente" na tela do eproc.
+async function consultarBlocoUnidade(urlBase, valorOrgaoJuizo, nomeSituacao, valorSituacao, notificar) {
+  const bloco = { total: null, urgentes: null, naoUrgentes: null, mais90Dias: null, erros: [] };
+
+  // As 3 consultas sao independentes entre si (cada uma abre sua propria
+  // aba oculta) - rodam em PARALELO via Promise.all em vez de uma de cada
+  // vez, respeitando o semaforo global de abas ocultas (LIMITE_ABAS_SIMULTANEAS).
+  notificar(`Consultando ${nomeSituacao}: total, urgentes e atraso...`);
+  const [rTotal, rUrgentes, rAtraso] = await Promise.all([
+    abrirAbaEConsultarUmaVez(urlBase, { valorSituacao, urgente: false, diasSituacao: null, valorOrgaoJuizo }),
+    abrirAbaEConsultarUmaVez(urlBase, { valorSituacao, urgente: true, diasSituacao: null, valorOrgaoJuizo }),
+    abrirAbaEConsultarUmaVez(urlBase, {
+      valorSituacao,
+      urgente: false,
+      diasSituacao: DIAS_LIMITE_ATRASO_UNIDADE,
+      valorOrgaoJuizo,
+    }),
+  ]);
+
+  bloco.total = rTotal.contagem;
+  if (rTotal.erro) bloco.erros.push(`total: ${rTotal.erro}`);
+
+  bloco.urgentes = rUrgentes.contagem;
+  if (rUrgentes.erro) bloco.erros.push(`urgentes: ${rUrgentes.erro}`);
+
+  if (bloco.total != null && bloco.urgentes != null) {
+    bloco.naoUrgentes = Math.max(0, bloco.total - bloco.urgentes);
+  }
+
+  bloco.mais90Dias = rAtraso.contagem;
+  if (rAtraso.erro) bloco.erros.push(`+${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${rAtraso.erro}`);
+
+  return bloco;
+}
+
+
+// ---- Remessas aos juízes leigos (tela "Relatório de remessas em aberto") ----
+
+// Link de menu confirmado no HTML real da tela (menu lateral > Relatórios
+// > "Relatório de remessas em aberto"). Autocontida, executada via
+// chrome.scripting.executeScript.
+function clicarLinkRemessasJuizesLeigosNaPagina() {
+  const link = document.querySelector('a[href*="acao=relatorio_remessas_em_aberto/listar"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Seleciona o órgão julgador no filtro "Órgão Julgador" (#IdOrgaoSecretaria)
+// dessa tela - um <select> simples por baixo do bootstrap-select, mesmo
+// mecanismo ja' usado em "selecionarOrgaoJuizoRelatorioGeralNaPagina".
+function selecionarOrgaoRemessasJuizesLeigosNaPagina(valorOrgao) {
+  const select = document.getElementById("IdOrgaoSecretaria");
+  if (!select) {
+    return { ok: false, erro: 'Campo "Órgão Julgador" (#IdOrgaoSecretaria) não encontrado nesta página.' };
+  }
+
+  let encontrouOpcao = false;
+  for (const opcao of select.options) {
+    const selecionada = opcao.value === valorOrgao;
+    opcao.selected = selecionada;
+    if (selecionada) encontrouOpcao = true;
+  }
+  if (!encontrouOpcao) {
+    return { ok: false, erro: `Órgão "${valorOrgao}" não encontrado no filtro Órgão Julgador.` };
+  }
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return { ok: true, erro: null };
+}
+
+// Clica no botão "Consultar" do formulário de filtro (form="frmFiltroRemessasEmAberto").
+function clicarConsultarRemessasJuizesLeigosNaPagina() {
+  const botao =
+    document.querySelector('button[onclick*="submeterFrmFiltroRemessasEmAberto"]') ||
+    Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]')).find((el) =>
+      /consultar/i.test(el.textContent || el.value || "")
+    );
+  if (!botao) return false;
+  botao.click();
+  return true;
+}
+
+// Le' a tabela "#tbl_remessas_em_aberto" (DataTables), com as colunas
+// pedidas (Nome do Juiz Leigo, Número do Processo, Classe Processual,
+// Data Remessa, Dias da Remessa), casando pelo texto do cabecalho para
+// nao depender da ordem exata das colunas. Le' direto do DOM ja'
+// renderizado (apos "page.len(-1).draw(false)" mostrar todas as linhas),
+// em vez da API "rows().data()" - essa devolveria o objeto bruto da linha
+// (com campos como "LinkProcesso" que nao interessam aqui), enquanto o
+// DOM ja' traz exatamente o texto formatado que aparece na tela (ex.: "5
+// Dia(s)"). Best-effort, nunca lanca excecao.
+//
+// Processos com prioridade legal (idoso, doente grave, etc.) aparecem na
+// celula de Classe Processual com um <label style="color:red;..."> extra
+// junto da classe (confirmado no HTML real da tela) - ex.:
+// "PROCEDIMENTO DO JUIZADO ESPECIAL CÍVEL<br><label ...>Idoso</label>".
+// O motivo (texto do <label>) e' extraido separadamente do texto da
+// classe (clonando a celula e removendo o <label> antes de ler o
+// textContent), para poder destacar o processo no PDF sem misturar o
+// motivo dentro do nome da classe.
+async function extrairLinhasRemessasJuizesLeigosNaPagina() {
+  const LIMITE_LINHAS = 1000;
+
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  function textoLimpo(el) {
+    return (el && el.textContent ? el.textContent : "").replace(/\s+/g, " ").trim();
+  }
+
+  try {
+    if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
+      return { linhas: [], erro: "jQuery DataTables não disponível nesta página." };
+    }
+    const tabelaEl = jQuery("#tbl_remessas_em_aberto");
+    if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tbl_remessas_em_aberto")) {
+      return { linhas: [], erro: 'Tabela "#tbl_remessas_em_aberto" não encontrada ou ainda não inicializada.' };
+    }
+
+    const dt = tabelaEl.DataTable();
+    const aguardarRedesenho = () =>
+      Promise.race([
+        new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true))),
+        aguardar(8000).then(() => false),
+      ]);
+    const promessaMostrarTudo = aguardarRedesenho();
+    dt.page.len(-1).draw(false);
+    await promessaMostrarTudo;
+
+    const tabelaDom = document.getElementById("tbl_remessas_em_aberto");
+    const cabecalhos = Array.from(tabelaDom.querySelectorAll("thead th")).map(textoLimpo);
+    const idxJuiz = cabecalhos.findIndex((h) => /juiz/i.test(h));
+    const idxProcesso = cabecalhos.findIndex((h) => /processo/i.test(h));
+    const idxClasse = cabecalhos.findIndex((h) => /classe/i.test(h));
+    const idxData = cabecalhos.findIndex((h) => /data remessa/i.test(h));
+    const idxDias = cabecalhos.findIndex((h) => /dias/i.test(h));
+
+    // Quando a consulta nao encontra nenhum processo, o DataTables desenha
+    // uma unica linha "vazia" (classe "dataTables_empty", 1 <td> so' com
+    // colspan cobrindo todas as colunas e o texto "Nenhum registro
+    // encontrado") em vez de simplesmente nao ter <tr> nenhum no <tbody>.
+    // Um filtro de "tem pelo menos 1 <td>" deixava essa linha passar como
+    // se fosse um processo de verdade (virava um "juiz" chamado "Nenhum
+    // registro encontrado" com 1 processo) - por isso o relatório mostrava
+    // ao mesmo tempo "Nenhum registro encontrado" E "Total: 1
+    // processo(s)", uma contradição. Exigir o mesmo numero de <td> que de
+    // colunas no cabecalho descarta essa linha "vazia" (que so' tem 1).
+    const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
+      (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
+    );
+
+    const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) => {
+      const celulas = Array.from(tr.querySelectorAll("td"));
+      const valor = (idx) => (idx >= 0 && celulas[idx] ? textoLimpo(celulas[idx]) : "");
+      const diasTexto = valor(idxDias);
+      const diasNumero = parseInt((diasTexto.match(/\d+/) || [])[0], 10);
+
+      let classe = "";
+      let prioridade = null;
+      if (idxClasse >= 0 && celulas[idxClasse]) {
+        const celulaClasse = celulas[idxClasse].cloneNode(true);
+        const labelEl = celulaClasse.querySelector("label");
+        if (labelEl) {
+          prioridade = textoLimpo(labelEl) || null;
+          labelEl.remove();
+        }
+        classe = textoLimpo(celulaClasse);
+      }
+
+      return {
+        juiz: valor(idxJuiz),
+        processo: valor(idxProcesso),
+        classe,
+        prioridade,
+        dataRemessa: valor(idxData),
+        diasRemessa: diasTexto,
+        diasRemessaNumero: Number.isNaN(diasNumero) ? 0 : diasNumero,
+      };
+    });
+
+    return { linhas, erro: null };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Orquestra a consulta de remessas aos juízes leigos de uma unidade: abre
+// uma aba oculta, clica no link de menu, seleciona o órgão julgador,
+// consulta e extrai a tabela de resultado - mesmo padrao de aba
+// oculta/timeout ja' usado nas demais consultas do relatório gerencial.
+// Nunca lanca excecao: sempre resolve com { linhas, erro }.
+async function consultarRemessasJuizesLeigosUmaVez(urlBase, valorUnidade) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRemessasJuizesLeigosNaPagina,
+    });
+    if (!linkEncontrado) {
+      return {
+        linhas: [],
+        erro: 'Link "Relatório de remessas em aberto" não encontrado no menu lateral desta página.',
+      };
+    }
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    // Se uma unidade especifica foi pedida (Relatório para Correição da
+    // Corregedoria, que enxerga TODAS as unidades), seleciona ela no
+    // filtro "Órgão Julgador" - sem isso a consulta traria remessas de
+    // TODAS as unidades misturadas. Quando "valorUnidade" e' nulo (perfil
+    // MAGISTRADO/GESTÃO DA UNIDADE já restrito à própria unidade - ver
+    // "exportarRelatorioUnidadeAtual"), pula essa selecao e deixa a
+    // propria tela aplicar sozinha o filtro do perfil logado - selecionar
+    // um valor null aqui nao bateria com nenhuma <option> (todo value e'
+    // sempre string) e faria essa secao falhar por engano, mesmo com
+    // remessas de verdade esperando na tela.
+    if (valorUnidade) {
+      const [{ result: selecaoOrgao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoRemessasJuizesLeigosNaPagina,
+        args: [valorUnidade],
+      });
+      if (!selecaoOrgao || !selecaoOrgao.ok) {
+        return { linhas: [], erro: (selecaoOrgao && selecaoOrgao.erro) || 'Falha ao selecionar o "Órgão Julgador".' };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarConsultarRemessasJuizesLeigosNaPagina,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      world: "MAIN",
+      func: extrairLinhasRemessasJuizesLeigosNaPagina,
+    });
+    return result || { linhas: [], erro: "Sem resultado ao ler a tabela de remessas aos juízes leigos." };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// ---- Mandados em aberto (só no "Gestão da Unidade (alternativo)") ----
+//
+// Tela "Relatório de Mandados Distribuídos" (menu lateral), acessada via
+// `acao=mandados/relatorio_secretaria/consultar`. O filtro "Situação do
+// mandado" (`#selStatusMandado`, um bootstrap-select multi-seleção sobre
+// um `<select multiple>` nativo) tem 5 opções: "Aguardando cumprimento",
+// "Aguardando distribuição", "Aguardando redistribuição", "Devolvido" e
+// "Não Remetido" - a extensão marca TODAS, EXCETO "Devolvido" (o pedido é
+// "mandados em aberto", ou seja, ainda não devolvidos). Mesma técnica de
+// marcar `option.selected` + disparar "change" já usada em
+// "selecionarGrupoSituacao"/"selecionarOrgaoRemessasJuizesLeigosNaPagina"
+// - o bootstrap-select por cima se atualiza sozinho a partir do
+// `<select>` nativo.
+function clicarLinkMandadosNaPagina() {
+  const link = document.querySelector('a[href*="acao=mandados/relatorio_secretaria/consultar&"]');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+function selecionarStatusMandadosEmAbertoNaPagina() {
+  const select = document.getElementById("selStatusMandado");
+  if (!select) {
+    return { ok: false, erro: 'Campo "Situação do mandado" (#selStatusMandado) não encontrado nesta página.' };
+  }
+
+  let alguma = false;
+  for (const opcao of select.options) {
+    const selecionada = (opcao.textContent || "").trim().toLowerCase() !== "devolvido";
+    opcao.selected = selecionada;
+    if (selecionada) alguma = true;
+  }
+  if (!alguma) {
+    return { ok: false, erro: 'Nenhuma opção (além de "Devolvido") encontrada no filtro "Situação do mandado".' };
+  }
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return { ok: true, erro: null };
+}
+
+// Clica no botão "Pesquisar" (`#btnPesquisar`) da barra de comandos
+// superior dessa tela.
+function clicarPesquisarMandadosNaPagina() {
+  const botao = document.getElementById("btnPesquisar");
+  if (!botao) return false;
+  botao.click();
+  return true;
+}
+
+// Le' a tabela "#tblMandadoSecretaria" (DataTables via AJAX, mesma
+// técnica de "extrairLinhasRemessasJuizesLeigosNaPagina": mostrar tudo
+// com "page.len(-1).draw(false)", esperar o evento "draw.dt" e ler as
+// células já renderizadas do DOM). Colunas pedidas: Número do Processo,
+// Tipo de Ato (coluna real da tela: "Atos"), Data da Remessa (coluna
+// real: "Data Remessa" - regex ancorada em "remessa" para não casar com
+// a coluna vizinha "Data Juntada") e Situação (ex.: "Aguardando
+// cumprimento", "Devolvido - Cumprido" quando já tem subtipo).
+// Best-effort, nunca lança exceção.
+async function extrairLinhasMandadosNaPagina() {
+  const LIMITE_LINHAS = 2000;
+
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  function textoLimpo(el) {
+    return (el && el.textContent ? el.textContent : "").replace(/\s+/g, " ").trim();
+  }
+
+  try {
+    if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
+      return { linhas: [], erro: "jQuery DataTables não disponível nesta página." };
+    }
+    const tabelaEl = jQuery("#tblMandadoSecretaria");
+    if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tblMandadoSecretaria")) {
+      return { linhas: [], erro: 'Tabela "#tblMandadoSecretaria" não encontrada ou ainda não inicializada.' };
+    }
+
+    const dt = tabelaEl.DataTable();
+    const aguardarRedesenho = () =>
+      Promise.race([
+        new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true))),
+        aguardar(8000).then(() => false),
+      ]);
+    const promessaMostrarTudo = aguardarRedesenho();
+    dt.page.len(-1).draw(false);
+    await promessaMostrarTudo;
+
+    const tabelaDom = document.getElementById("tblMandadoSecretaria");
+    const cabecalhos = Array.from(tabelaDom.querySelectorAll("thead th")).map(textoLimpo);
+    const idxProcesso = cabecalhos.findIndex((h) => /processo/i.test(h));
+    const idxAto = cabecalhos.findIndex((h) => /^atos?$/i.test(h));
+    const idxSituacao = cabecalhos.findIndex((h) => /situa/i.test(h));
+    const idxDataRemessa = cabecalhos.findIndex((h) => /remessa/i.test(h));
+
+    // Mesmo filtro de linha "vazia" do DataTables (ver comentário em
+    // "extrairLinhasRemessasJuizesLeigosNaPagina") - quando a consulta não
+    // acha nada, uma única linha com 1 <td> (colspan cobrindo tudo) e o
+    // texto "Nenhum registro encontrado" aparece no lugar de nenhum <tr>.
+    const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
+      (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
+    );
+
+    // Quando a situação é "Aguardando cumprimento" E já tem um oficial de
+    // justiça designado, o valor da célula vem como "Aguardando
+    // cumprimento - NOME DO OFICIAL" (confirmado no HTML real da tela) -
+    // o nome entra numa coluna própria "Responsável", em vez de ficar
+    // colado dentro do texto da Situação. Sem oficial designado ainda, a
+    // célula só tem o texto "Aguardando cumprimento" (sem o "-"). Outras
+    // situações que também usam "-" como separador (ex.: "Devolvido -
+    // Cumprido") NÃO são tocadas aqui - esse "-" ali separa um SUBTIPO da
+    // devolução, não um nome de responsável.
+    function separarResponsavelAguardandoCumprimento(situacaoBruta) {
+      const texto = (situacaoBruta || "").trim();
+      const prefixo = "Aguardando cumprimento";
+      if (texto.toLowerCase() === prefixo.toLowerCase()) {
+        return { situacao: texto, responsavel: "" };
+      }
+      const m = texto.match(/^Aguardando cumprimento\s*-\s*(.+)$/i);
+      if (m) {
+        return { situacao: prefixo, responsavel: m[1].trim() };
+      }
+      return { situacao: texto, responsavel: "" };
+    }
+
+    const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) => {
+      const celulas = Array.from(tr.querySelectorAll("td"));
+      const valor = (idx) => (idx >= 0 && celulas[idx] ? textoLimpo(celulas[idx]) : "");
+      const { situacao, responsavel } = separarResponsavelAguardandoCumprimento(valor(idxSituacao));
+      return {
+        processo: valor(idxProcesso),
+        tipoAto: valor(idxAto),
+        dataRemessa: valor(idxDataRemessa),
+        situacao,
+        responsavel,
+      };
+    });
+
+    return { linhas, erro: null };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Orquestra a consulta de mandados em aberto: abre uma aba oculta, clica
+// no link de menu, marca o filtro "Situação do mandado" (tudo, exceto
+// "Devolvido"), clica em "Pesquisar" e extrai a tabela de resultado -
+// mesmo padrão das demais consultas do Relatório da Unidade. Sem seletor
+// de unidade nenhum (essa seção só roda no "Gestão da Unidade
+// (alternativo)", perfil já restrito à própria unidade). Nunca lança
+// exceção: sempre resolve com { linhas, erro }.
+async function consultarMandadosAbertosUmaVez(urlBase) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkMandadosNaPagina,
+    });
+    if (!linkEncontrado) {
+      return {
+        linhas: [],
+        erro:
+          'Link "Relatório de Mandados Distribuídos" não encontrado no menu lateral desta página. Abra uma página do eproc com o menu lateral e tente novamente.',
+      };
+    }
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const [{ result: resultadoStatus } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: selecionarStatusMandadosEmAbertoNaPagina,
+    });
+    if (!resultadoStatus || !resultadoStatus.ok) {
+      return {
+        linhas: [],
+        erro: (resultadoStatus && resultadoStatus.erro) || 'Falha ao selecionar o filtro "Situação do mandado".',
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarPesquisarMandadosNaPagina,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      world: "MAIN",
+      func: extrairLinhasMandadosNaPagina,
+    });
+    return result || { linhas: [], erro: "Sem resultado ao ler a tabela de mandados em aberto." };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Monta a página (A4 retrato) com a relação discriminada dos mandados em
+// aberto: Número do Processo, Tipo de Ato, Data da Remessa e Situação -
+// mesmo gerador de tabela curada das demais relações deste relatório.
+// "linhas" já vem ordenada (mais antiga para a mais nova - ver
+// "exportarRelatorioGerencialUnidade") - essa função só desenha, não
+// reordena.
+async function construirPdfMandadosAbertos(linhas, nomeUnidade) {
+  const itens = linhas.map((l) => ({
+    processo: l.processo,
+    tipoAto: l.tipoAto,
+    dataRemessa: l.dataRemessa,
+    situacao: l.situacao,
+    responsavel: l.responsavel,
+  }));
+
+  const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+  const colunas = [
+    { titulo: "Número do Processo", largura: larguraUtil * 0.22, campo: "processo" },
+    { titulo: "Tipo de Ato", largura: larguraUtil * 0.16, campo: "tipoAto" },
+    { titulo: "Data da Remessa", largura: larguraUtil * 0.14, campo: "dataRemessa" },
+    { titulo: "Situação", largura: larguraUtil * 0.24, campo: "situacao" },
+    { titulo: "Responsável", largura: larguraUtil * 0.24, campo: "responsavel" },
+  ];
+
+  return construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Mandados em aberto da unidade "${nomeUnidade}" — ${itens.length} mandado(s), do mais antigo ao mais novo`
+  );
+}
+
+const REMESSAS_TAMANHO_FONTE = 8.5;
+const REMESSAS_ALTURA_LINHA = REMESSAS_TAMANHO_FONTE * 1.35;
+
+// Monta o PDF (A4 RETRATO, diferente das demais tabelas desta extensao -
+// que usam pagina virada) do relatório de remessas aos juízes leigos:
+// total geral no topo, depois um bloco por juiz leigo (subtitulo com o
+// nome + total daquele juiz, seguido da tabela com todos os processos
+// dele, ordenados do mais antigo para o mais novo - maior quantidade de
+// dias em remessa primeiro). Processos com prioridade legal (campo
+// "prioridade" preenchido, vindo do <label> da celula de Classe
+// Processual) tem o numero do processo desenhado em vermelho, com o
+// motivo entre parenteses logo depois.
+async function construirPdfRemessasJuizesLeigos(linhas, nomeUnidade) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  const colunas = [
+    { titulo: "Juiz Leigo", largura: larguraUtil * 0.18, campo: "juiz" },
+    { titulo: "Número do Processo", largura: larguraUtil * 0.25, campo: "processo" },
+    { titulo: "Classe Processual", largura: larguraUtil * 0.25, campo: "classe" },
+    { titulo: "Data Remessa", largura: larguraUtil * 0.16, campo: "dataRemessa" },
+    { titulo: "Dias Remessa", largura: larguraUtil * 0.16, campo: "diasRemessa" },
+  ];
+
+  let pagina = null;
+  let y = 0;
+  let indiceLinhaZebra = 0;
+
+  function novaPagina() {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+  }
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina();
+    }
+  }
+
+  function desenharCabecalhoColunas() {
+    const alturaFaixa = REMESSAS_ALTURA_LINHA * 1.7;
+    garantirEspaco(alturaFaixa + REMESSAS_ALTURA_LINHA * 2);
+    pagina.drawRectangle({ x: margem, y: y - alturaFaixa, width: larguraUtil, height: alturaFaixa, color: COR_PRIMARIA_ESCURA });
+    let x = margem + 4;
+    for (const coluna of colunas) {
+      pagina.drawText(sanitizarTextoPdf(coluna.titulo), {
+        x,
+        y: y - alturaFaixa + alturaFaixa * 0.32,
+        size: REMESSAS_TAMANHO_FONTE,
+        font: fonteNegrito,
+        color: COR_BRANCO,
+      });
+      x += coluna.largura;
+    }
+    y -= alturaFaixa + 10;
+    indiceLinhaZebra = 0;
+  }
+
+  novaPagina();
+
+  const tituloRemessas = quebrarLinhas(
+    `Remessas aos juízes leigos da unidade "${sanitizarTextoPdf(nomeUnidade)}"`,
+    fonteNegrito,
+    13,
+    larguraUtil
+  );
+  for (const linhaTitulo of tituloRemessas) {
+    pagina.drawText(linhaTitulo, {
+      x: margem,
+      y,
+      size: 13,
+      font: fonteNegrito,
+      color: COR_PRIMARIA_ESCURA,
+    });
+    y -= 17;
+  }
+  y -= 3;
+  pagina.drawText(`Total geral: ${linhas.length} processo(s)`, {
+    x: margem,
+    y,
+    size: 10,
+    font: fonteNegrito,
+    color: COR_CINZA_TEXTO,
+  });
+  y -= 16;
+  if (linhas.some((l) => l.prioridade)) {
+    pagina.drawText("Em vermelho: processos com prioridade legal (motivo entre parênteses).", {
+      x: margem,
+      y,
+      size: 8,
+      font: fonteNormal,
+      color: COR_ALERTA_VERMELHO,
+    });
+    y -= 14;
+  }
+  y -= 8;
+
+  const porJuiz = new Map();
+  for (const linha of linhas) {
+    const chave = linha.juiz || "(sem nome)";
+    if (!porJuiz.has(chave)) porJuiz.set(chave, []);
+    porJuiz.get(chave).push(linha);
+  }
+  const grupos = Array.from(porJuiz.entries())
+    .map(([juiz, itens]) => ({
+      juiz,
+      itens: [...itens].sort((a, b) => (b.diasRemessaNumero || 0) - (a.diasRemessaNumero || 0)),
+    }))
+    .sort((a, b) => b.itens.length - a.itens.length || a.juiz.localeCompare(b.juiz, "pt-BR"));
+
+  for (const grupo of grupos) {
+    garantirEspaco(120);
+    pagina.drawText(`${sanitizarTextoPdf(grupo.juiz)} — Total: ${grupo.itens.length} processo(s)`, {
+      x: margem,
+      y,
+      size: 10.5,
+      font: fonteNegrito,
+      color: COR_PRIMARIA,
+    });
+    y -= REMESSAS_ALTURA_LINHA * 1.8;
+
+    desenharCabecalhoColunas();
+
+    for (const item of grupo.itens) {
+      const valoresLinha = {
+        juiz: item.juiz,
+        processo: item.prioridade ? `${item.processo} (${item.prioridade})` : item.processo,
+        classe: item.classe || "",
+        dataRemessa: item.dataRemessa,
+        diasRemessa: item.diasRemessa,
+      };
+      const linhasPorColuna = colunas.map((coluna) =>
+        quebrarLinhas(sanitizarTextoPdf(String(valoresLinha[coluna.campo] ?? "")), fonteNormal, REMESSAS_TAMANHO_FONTE, coluna.largura - 4)
+      );
+      const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
+      const alturaLinha = maxLinhas * REMESSAS_ALTURA_LINHA + REMESSAS_ALTURA_LINHA * FATOR_FOLGA_ALTURA_LINHA_TABELA;
+
+      if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
+        novaPagina();
+        desenharCabecalhoColunas();
+      }
+
+      desenharZebraLinhaTabela(pagina, {
+        x: margem,
+        y,
+        largura: larguraUtil,
+        alturaLinha,
+        alturaLinhaTexto: REMESSAS_ALTURA_LINHA,
+        indiceLinhaZebra,
+      });
+      indiceLinhaZebra += 1;
+
+      let x = margem + 4;
+      for (let i = 0; i < colunas.length; i += 1) {
+        const corColuna = colunas[i].campo === "processo" && item.prioridade ? COR_ALERTA_VERMELHO : COR_CINZA_TEXTO;
+        let yColuna = yInicialTextoColunaCentralizado(y, REMESSAS_ALTURA_LINHA, maxLinhas, linhasPorColuna[i].length);
+        for (const linhaTexto of linhasPorColuna[i]) {
+          try {
+            pagina.drawText(linhaTexto, { x, y: yColuna, size: REMESSAS_TAMANHO_FONTE, font: fonteNormal, color: corColuna });
+          } catch (e) {
+            // Ignora linha que a fonte padrao nao consiga desenhar.
+          }
+          yColuna -= REMESSAS_ALTURA_LINHA;
+        }
+        x += colunas[i].largura;
+      }
+      y -= alturaLinha;
+    }
+
+    y -= REMESSAS_ALTURA_LINHA * 0.8;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+
+  return pdf.save();
+}
+
+// Acha o indice de uma coluna pelo texto do cabecalho (regex, case
+// insensitive) - devolve -1 se nao encontrar, para o chamador decidir o
+// que fazer (campo vazio) em vez de estourar.
+function indiceColunaPorCabecalho(cabecalhos, regex) {
+  return cabecalhos.findIndex((h) => regex.test(h));
+}
+
+// Converte um texto de data (dd/mm/aaaa, com ou sem hora) num numero
+// ordenavel (timestamp) - usado para classificar processos do mais
+// antigo para o mais novo pela Data de Autuação. Texto sem uma data
+// reconhecivel vira 0 (fica no inicio da ordenacao, mas nunca quebra).
+function paraDataOrdenavel(texto) {
+  const m = (texto || "").match(/(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/);
+  if (!m) return 0;
+  const [, dia, mes, ano, hora = "00", minuto = "00", segundo = "00"] = m;
+  const data = new Date(`${ano}-${mes}-${dia}T${hora}:${minuto}:${segundo}`);
+  const tempo = data.getTime();
+  return Number.isNaN(tempo) ? 0 : tempo;
+}
+
+// Monta o PDF (A4 RETRATO) da relação de processos ativos: so' os 5
+// campos pedidos (Nº do Processo, Data da Autuação, Situação, Classe e
+// Último Evento - o "#tblProcessoLista" real traz mais colunas, como
+// Sigilo e Localizador, que ficam de fora aqui), ordenados pela Data de
+// Autuação do mais antigo para o mais novo. Casa cada campo pelo texto
+// do cabecalho (nao pela posicao), para nao depender da ordem exata das
+// colunas na tela.
+// Gerador generico de PDF (A4 RETRATO) para uma "relação de processos"
+// curada: recebe os ITENS ja' prontos (um objeto por linha, com as
+// chaves batendo com "campo" de cada coluna) e as definicoes de coluna
+// (titulo + largura em pontos), desenha titulo + tabela com cabecalho
+// repetido/zebrado, igual as demais tabelas desta extensao - reaproveitado
+// por "construirPdfProcessosAtivos" e "construirPdfSuspensos" para nao
+// duplicar a logica de desenho.
+async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+  const TAMANHO_FONTE = 8.5;
+  const ALTURA_LINHA = TAMANHO_FONTE * 1.35;
+
+  let pagina = null;
+  let y = 0;
+  let indiceLinhaZebra = 0;
+
+  function novaPagina() {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+  }
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina();
+    }
+  }
+
+  function desenharCabecalhoColunas() {
+    const alturaFaixa = ALTURA_LINHA * 1.7;
+    garantirEspaco(alturaFaixa + ALTURA_LINHA * 2);
+    pagina.drawRectangle({ x: margem, y: y - alturaFaixa, width: larguraUtil, height: alturaFaixa, color: COR_PRIMARIA_ESCURA });
+    let x = margem + 4;
+    for (const coluna of colunas) {
+      pagina.drawText(sanitizarTextoPdf(coluna.titulo), {
+        x,
+        y: y - alturaFaixa + alturaFaixa * 0.32,
+        size: TAMANHO_FONTE,
+        font: fonteNegrito,
+        color: COR_BRANCO,
+      });
+      x += coluna.largura;
+    }
+    y -= alturaFaixa + 10;
+    indiceLinhaZebra = 0;
+  }
+
+  novaPagina();
+
+  const linhasTitulo = quebrarLinhas(sanitizarTextoPdf(tituloDocumento), fonteNegrito, 13, larguraUtil);
+  for (const linhaTitulo of linhasTitulo) {
+    pagina.drawText(linhaTitulo, { x: margem, y, size: 13, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+    y -= 17;
+  }
+  y -= 8;
+
+  desenharCabecalhoColunas();
+
+  for (const item of itens) {
+    const linhasPorColuna = colunas.map((coluna) =>
+      quebrarLinhas(sanitizarTextoPdf(String(item[coluna.campo] ?? "")), fonteNormal, TAMANHO_FONTE, coluna.largura - 4)
+    );
+    const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
+    const alturaLinha = maxLinhas * ALTURA_LINHA + ALTURA_LINHA * FATOR_FOLGA_ALTURA_LINHA_TABELA;
+
+    if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
+      novaPagina();
+      desenharCabecalhoColunas();
+    }
+
+    desenharZebraLinhaTabela(pagina, {
+      x: margem,
+      y,
+      largura: larguraUtil,
+      alturaLinha,
+      alturaLinhaTexto: ALTURA_LINHA,
+      indiceLinhaZebra,
+    });
+    indiceLinhaZebra += 1;
+
+    let x = margem + 4;
+    for (let i = 0; i < colunas.length; i += 1) {
+      // Coluna pode definir uma cor propria por VALOR (ex.: "Situação" no
+      // relatório de processos ativos, uma cor diferente por valor
+      // distinto) - cai para a cor cinza padrao quando a coluna nao
+      // define nada.
+      const corColuna = colunas[i].cor ? colunas[i].cor(item[colunas[i].campo]) : COR_CINZA_TEXTO;
+      let yColuna = yInicialTextoColunaCentralizado(y, ALTURA_LINHA, maxLinhas, linhasPorColuna[i].length);
+      for (const linhaTexto of linhasPorColuna[i]) {
+        try {
+          pagina.drawText(linhaTexto, { x, y: yColuna, size: TAMANHO_FONTE, font: fonteNormal, color: corColuna });
+        } catch (e) {
+          // Ignora linha que a fonte padrao nao consiga desenhar.
+        }
+        yColuna -= ALTURA_LINHA;
+      }
+      x += colunas[i].largura;
+    }
+    y -= alturaLinha;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+
+  return pdf.save();
+}
+
+// Monta o PDF (A4 RETRATO) da relação de processos ativos: so' os 5
+// campos pedidos (Nº do Processo, Data da Autuação, Situação, Classe e
+// Último Evento - o "#tblProcessoLista" real traz mais colunas, como
+// Sigilo e Localizador, que ficam de fora aqui), ordenados pela Data de
+// Autuação do mais antigo para o mais novo. Casa cada campo pelo texto
+// do cabecalho (nao pela posicao), para nao depender da ordem exata das
+// colunas na tela.
+// Algumas situações do eproc tem um nome longo/tecnico que ocupa muito
+// espaço na coluna "Situação" da tabela - trocadas por uma abreviação
+// mais compacta, mantendo o sentido (ambas continuam representando
+// "concluso para despacho/sentença", so' que num rotulo mais curto).
+const ABREVIACOES_SITUACAO = {
+  "MOVIMENTO-AGUARDA DESPACHO": "Cls. Despacho",
+  "MOVIMENTO-AGUARDA SENTENÇA": "Cls. Sentença",
+};
+function abreviarSituacao(situacao) {
+  return ABREVIACOES_SITUACAO[situacao] || situacao;
+}
+
+// Paleta de cores usada para colorir cada valor DISTINTO da coluna
+// "Situação" na relação de processos ativos - facilita bater o olho e
+// identificar rapidamente processos na mesma situação, mesmo com a
+// tabela ordenada por Data de Autuação (então situações iguais nem
+// sempre ficam em linhas vizinhas). Cores escolhidas por contraste em
+// fundo branco/zebrado e por serem distintas das cores institucionais
+// já usadas em outros elementos do PDF (azul primário, vermelho de
+// alerta) - repete ciclicamente se houver mais valores distintos do que
+// cores.
+const PALETA_CORES_SITUACAO = [
+  rgb(0.15, 0.35, 0.75), // azul
+  rgb(0.6, 0.1, 0.5), // roxo
+  rgb(0.0, 0.45, 0.35), // verde-azulado
+  rgb(0.75, 0.45, 0.0), // laranja
+  rgb(0.55, 0.0, 0.15), // vinho
+  rgb(0.35, 0.35, 0.0), // oliva
+  rgb(0.0, 0.4, 0.6), // ciano escuro
+  rgb(0.45, 0.25, 0.65), // violeta
+];
+
+// Monta um mapa "valor -> cor", uma cor por valor DISTINTO encontrado,
+// na ordem em que aparecem pela primeira vez na lista (determinístico -
+// a mesma lista de valores sempre gera o mesmo mapa de cores).
+function mapaCoresPorValor(valores) {
+  const mapa = new Map();
+  for (const valor of valores) {
+    if (!mapa.has(valor)) {
+      mapa.set(valor, PALETA_CORES_SITUACAO[mapa.size % PALETA_CORES_SITUACAO.length]);
+    }
+  }
+  return mapa;
+}
+
+async function construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes) {
+  const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
+  const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxClasse = indiceColunaPorCabecalho(tabela.cabecalhos, /classe/i);
+  const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
+  const idxDataHora = indiceColunaPorCabecalho(tabela.cabecalhos, /data\s*\/?\s*hora/i);
+  const idxAutor = indiceColunaPorCabecalho(tabela.cabecalhos, /^autor$/i);
+  const idxReu = indiceColunaPorCabecalho(tabela.cabecalhos, /^r[eé]u$/i);
+
+  const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
+  // Celulas com mais de uma parte no mesmo polo (litisconsorcio) chegam
+  // aqui juntadas com " | " (ver "textoCelula" em
+  // "extrairLinhasTblProcessoLista") - devolve cada nome separado, sem
+  // entradas vazias.
+  const nomesDe = (linha, idx) =>
+    valorDe(linha, idx)
+      .split("|")
+      .map((nome) => nome.trim())
+      .filter(Boolean);
+
+  // Marca "(Urgente)" na Situação quando o processo esta' concluso para
+  // despacho/sentença E tem "Petição Urgente" marcada (dado que não vem
+  // na tabela de processos em si - so' se sabe via consulta separada,
+  // filtrando por esse campo; "processosUrgentes" traz os números já
+  // identificados dessa forma). So' se aplica as duas situações
+  // abreviadas abaixo, que são justamente as que tem esse filtro de
+  // urgência disponível no eproc.
+  const situacaoComUrgencia = (situacaoAbreviada, processo) => {
+    const ehConcluso = situacaoAbreviada === "Cls. Despacho" || situacaoAbreviada === "Cls. Sentença";
+    if (ehConcluso && processosUrgentes && processosUrgentes.has(processo)) {
+      return `${situacaoAbreviada} (Urgente)`;
+    }
+    return situacaoAbreviada;
+  };
+
+  const itens = tabela.linhas
+    .map((linha) => {
+      const autuacao = valorDe(linha, idxAutuacao);
+      const processo = valorDe(linha, idxProcesso);
+      return {
+        processo,
+        autuacao,
+        situacao: situacaoComUrgencia(abreviarSituacao(valorDe(linha, idxSituacao)), processo),
+        classe: valorDe(linha, idxClasse),
+        ultimoEvento: valorDe(linha, idxEvento),
+        dataHora: valorDe(linha, idxDataHora),
+        autores: nomesDe(linha, idxAutor),
+        reus: nomesDe(linha, idxReu),
+        autuacaoOrdenavel: paraDataOrdenavel(autuacao),
+      };
+    })
+    .sort((a, b) => a.autuacaoOrdenavel - b.autuacaoOrdenavel);
+
+  const coresPorSituacao = mapaCoresPorValor(itens.map((item) => item.situacao));
+
+  const colunas = [
+    { titulo: "Nº do Processo", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.22, campo: "processo" },
+    { titulo: "Data da Autuação", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.15, campo: "autuacao" },
+    {
+      titulo: "Situação",
+      largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16,
+      campo: "situacao",
+      cor: (valor) => coresPorSituacao.get(valor) || COR_CINZA_TEXTO,
+    },
+    { titulo: "Classe", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.15, campo: "classe" },
+    { titulo: "Último Evento", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "ultimoEvento" },
+    { titulo: "Data/Hora", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "dataHora" },
+  ];
+
+  const bytesTabela = await construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Processos ativos da unidade "${nomeUnidade}" — ${itens.length} processo(s), do mais antigo ao mais novo`
+  );
+
+  // Grafico de distribuicao por classe processual e ranking de maiores
+  // demandantes/demandados, anexados como pagina(s) extra no FINAL da
+  // relacao de processos ativos - reaproveitam os mesmos "itens" ja'
+  // extraidos (campos "classe"/"autores"/"reus"), sem nenhuma consulta a
+  // mais.
+  const bytesGrafico = await construirPdfGraficoClassesAtivos(itens, nomeUnidade);
+  const bytesRanking = await construirPdfRankingPartes(itens, nomeUnidade);
+  const pdfFinal = await PDFDocument.load(bytesTabela);
+  for (const bytesExtra of [bytesGrafico, bytesRanking]) {
+    const pdfExtra = await PDFDocument.load(bytesExtra);
+    const paginasExtra = await pdfFinal.copyPages(pdfExtra, pdfExtra.getPageIndices());
+    paginasExtra.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+  return pdfFinal.save();
+}
+
+// Grafico de barras horizontais com a distribuicao das classes
+// processuais entre os processos ativos: as 15 classes mais frequentes,
+// cada uma com a fracao percentual sobre o total da unidade, e o
+// restante agrupado em "Outros" (quando houver mais de 15 classes
+// distintas) - da' uma visao rapida do perfil da vara sem precisar somar
+// nada manualmente na tabela linha a linha.
+async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  let pagina = null;
+  let y = 0;
+
+  function novaPagina(comTitulo) {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+    if (comTitulo) {
+      const linhasTitulo = quebrarLinhas(
+        sanitizarTextoPdf(`Distribuição por classe processual — unidade "${nomeUnidade}"`),
+        fonteNegrito,
+        13,
+        larguraUtil
+      );
+      for (const linhaTitulo of linhasTitulo) {
+        pagina.drawText(linhaTitulo, { x: margem, y, size: 13, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+        y -= 17;
+      }
+      pagina.drawText(`${itens.length} processo(s) no total`, {
+        x: margem,
+        y,
+        size: 9.5,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
+      });
+      y -= 22;
+    }
+  }
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina(false);
+    }
+  }
+
+  novaPagina(true);
+
+  // Uniformiza em MAIÚSCULAS antes de agrupar - sem isso, a mesma classe
+  // escrita com capitalização diferente entre processos (ex.:
+  // "Procedimento Comum Cível" vs "PROCEDIMENTO COMUM CÍVEL") virava duas
+  // fatias separadas no gráfico em vez de uma só.
+  const contagemPorClasse = new Map();
+  for (const item of itens) {
+    const chave = (item.classe || "").trim().toLocaleUpperCase("pt-BR") || "(SEM CLASSE)";
+    contagemPorClasse.set(chave, (contagemPorClasse.get(chave) || 0) + 1);
+  }
+  const ordenado = Array.from(contagemPorClasse.entries())
+    .map(([classe, contagem]) => ({ classe, contagem }))
+    .sort((a, b) => b.contagem - a.contagem);
+
+  const top15 = ordenado.slice(0, 15);
+  const totalOutros = ordenado.slice(15).reduce((soma, item) => soma + item.contagem, 0);
+  const dados = [...top15];
+  if (totalOutros > 0) dados.push({ classe: "OUTROS", contagem: totalOutros });
+
+  const total = itens.length || 1;
+  const maiorContagem = Math.max(...dados.map((d) => d.contagem), 1);
+
+  const larguraRotulo = 200;
+  const larguraPercentual = 90;
+  const larguraMaxBarra = larguraUtil - larguraRotulo - larguraPercentual;
+  const alturaBarra = 14;
+  const tamanhoFonte = 8.5;
+
+  for (const item of dados) {
+    const linhasRotulo = quebrarLinhas(sanitizarTextoPdf(item.classe), fonteNormal, tamanhoFonte, larguraRotulo - 6);
+    const alturaLinha = Math.max(alturaBarra, linhasRotulo.length * 10) + 8;
+    garantirEspaco(alturaLinha);
+
+    let yRotulo = y - 9;
+    for (const linha of linhasRotulo) {
+      pagina.drawText(linha, { x: margem, y: yRotulo, size: tamanhoFonte, font: fonteNormal, color: COR_CINZA_TEXTO });
+      yRotulo -= 10;
+    }
+
+    const percentual = (item.contagem / total) * 100;
+    const larguraBarra = Math.max(2, (item.contagem / maiorContagem) * larguraMaxBarra);
+    pagina.drawRectangle({
+      x: margem + larguraRotulo,
+      y: y - alturaBarra,
+      width: larguraBarra,
+      height: alturaBarra - 3,
+      color: item.classe === "Outros" ? COR_CINZA_BORDA : COR_PRIMARIA,
+    });
+
+    pagina.drawText(`${percentual.toFixed(1)}% (${item.contagem})`, {
+      x: margem + larguraRotulo + larguraBarra + 6,
+      y: y - 9,
+      size: tamanhoFonte,
+      font: fonteNegrito,
+      color: COR_PRIMARIA_ESCURA,
+    });
+
+    y -= alturaLinha;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+  return pdf.save();
+}
+
+// Conta em quantos processos DISTINTOS cada parte aparece no campo
+// informado ("autores" ou "reus") - usa um Set por processo pra' uma
+// mesma parte listada duas vezes na mesma celula (raro, mas possivel) so'
+// contar 1 vez naquele processo. Devolve as 15 partes com mais
+// processos, ordenadas por total (desempate alfabetico).
+function contarPartes(itens, campo) {
+  const contagem = new Map();
+  for (const item of itens) {
+    const nomesUnicos = new Set(item[campo] || []);
+    for (const nome of nomesUnicos) {
+      contagem.set(nome, (contagem.get(nome) || 0) + 1);
+    }
+  }
+  return Array.from(contagem.entries())
+    .map(([nome, total]) => ({ nome, total }))
+    .sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome, "pt-BR"))
+    .slice(0, 15);
+}
+
+// Ranking dos 15 maiores demandantes (polo ativo) e 15 maiores
+// demandados (polo passivo) entre os processos ativos da unidade -
+// reaproveita os nomes ja' extraidos das colunas Autor/Réu do Relatório
+// Geral (ver "textoCelula" em "extrairLinhasTblProcessoLista").
+async function construirPdfRankingPartes(itens, nomeUnidade) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+  const larguraContagem = 80;
+
+  let pagina = null;
+  let y = 0;
+
+  function novaPagina(titulo) {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+    if (titulo) {
+      const linhasTitulo = quebrarLinhas(sanitizarTextoPdf(titulo), fonteNegrito, 13, larguraUtil);
+      for (const linhaTitulo of linhasTitulo) {
+        pagina.drawText(linhaTitulo, { x: margem, y, size: 13, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+        y -= 17;
+      }
+      y -= 8;
+    }
+  }
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina(null);
+    }
+  }
+
+  function desenharRanking(subtitulo, ranking) {
+    garantirEspaco(30);
+    pagina.drawText(subtitulo, { x: margem, y, size: 11, font: fonteNegrito, color: COR_PRIMARIA });
+    y -= 18;
+
+    if (ranking.length === 0) {
+      pagina.drawText("Nenhuma parte identificada nesta relação.", {
+        x: margem,
+        y,
+        size: 9.5,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
+      });
+      y -= 18;
+      return;
+    }
+
+    ranking.forEach((item, indice) => {
+      const linhasNome = quebrarLinhas(
+        sanitizarTextoPdf(`${indice + 1}. ${item.nome}`),
+        fonteNormal,
+        9.5,
+        larguraUtil - larguraContagem
+      );
+      const alturaLinha = Math.max(linhasNome.length * 12, 12) + 4;
+      garantirEspaco(alturaLinha);
+
+      let yLinha = y - 9;
+      linhasNome.forEach((linha) => {
+        pagina.drawText(linha, { x: margem, y: yLinha, size: 9.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+        yLinha -= 12;
+      });
+      pagina.drawText(`${item.total} processo(s)`, {
+        x: margem + larguraUtil - larguraContagem,
+        y: y - 9,
+        size: 9.5,
+        font: fonteNegrito,
+        color: COR_PRIMARIA_ESCURA,
+      });
+
+      y -= alturaLinha;
+    });
+    y -= 12;
+  }
+
+  novaPagina(`Maiores demandantes e demandados — unidade "${nomeUnidade}"`);
+  desenharRanking("15 maiores demandantes (polo ativo)", contarPartes(itens, "autores"));
+  desenharRanking("15 maiores demandados (polo passivo)", contarPartes(itens, "reus"));
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+  return pdf.save();
+}
+
+// Monta o PDF (A4 RETRATO) da relação de suspensos/sobrestados: so' os 4
+// campos pedidos (Nº do Processo, Data da Autuação, Situação e
+// Localizador - a tabela real do "#tblProcessoLista" traz mais colunas,
+// como Sigilo e Classe, que ficam de fora aqui). Mesma tecnica de casar
+// pelo texto do cabecalho usada em "construirPdfProcessosAtivos".
+// Localizador pode ter mais de um valor no mesmo processo (mesma tecnica
+// de "textoCelula" em "extrairLinhasTblProcessoLista" - varios
+// "<span class='d-block'>" na mesma celula, juntados aqui com " | " -
+// quando existem). Mas a coluna Localizador tambem traz, na frente de
+// CADA nome, um icone (glifo fora da faixa Latin-1) sem nenhum "|" entre
+// eles - "td.textContent" nesse caso gruda tudo numa string so' (o icone
+// vira "?" depois da sanitizacao, um "?" por localizador, sem quebra de
+// linha nenhuma). Por isso o split abaixo separa tanto por "|" quanto por
+// qualquer sequencia de caracteres fora de Latin-1 (o icone em si) - cada
+// pedaco resultante vira uma LINHA própria na tabela (em vez de ficar
+// tudo colado numa linha só) e os valores exatamente "?" (ou vazios, que
+// sobram quando o icone abre a celula) são descartados por completo, em
+// vez de aparecerem como um "?" solto sem significado.
+// "comMarcador" (usado na relação de processos paralisados) prefixa cada
+// nome com "- " quando ha' mais de um - com so' um Localizador, o
+// marcador não acrescenta nada útil, entao fica de fora nesse caso.
+function formatarLocalizadores(valorBruto, comMarcador) {
+  const nomes = (valorBruto || "")
+    .split(/\||[^\x00-\xFF]+/)
+    .map((nome) => nome.trim())
+    .filter((nome) => nome && nome !== "?");
+  if (comMarcador && nomes.length > 1) {
+    return nomes.map((nome) => `- ${nome}`).join("\n");
+  }
+  return nomes.join("\n");
+}
+
+async function construirPdfSuspensos(tabela, nomeUnidade) {
+  const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
+  const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
+  const idxDataHora = indiceColunaPorCabecalho(tabela.cabecalhos, /data\s*\/?\s*hora/i);
+
+  const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
+  const itens = tabela.linhas.map((linha) => ({
+    processo: valorDe(linha, idxProcesso),
+    autuacao: valorDe(linha, idxAutuacao),
+    situacao: valorDe(linha, idxSituacao),
+    localizador: formatarLocalizadores(valorDe(linha, idxLocalizador)),
+    dataHora: valorDe(linha, idxDataHora),
+  }));
+
+  const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+  const colunas = [
+    { titulo: "Nº do Processo", largura: larguraUtil * 0.24, campo: "processo" },
+    { titulo: "Data da Autuação", largura: larguraUtil * 0.15, campo: "autuacao" },
+    { titulo: "Situação", largura: larguraUtil * 0.22, campo: "situacao" },
+    { titulo: "Localizador", largura: larguraUtil * 0.22, campo: "localizador" },
+    { titulo: "Data/Hora", largura: larguraUtil * 0.17, campo: "dataHora" },
+  ];
+
+  return construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Suspensos/sobrestados da unidade "${nomeUnidade}" — ${itens.length} processo(s)`
+  );
+}
+
+// Relação de processos paralisados (a partir de "DIAS_MINIMO_PARALISADOS"
+// dias sem movimentação, numa única tabela - sem separar por faixa como o
+// demonstrativo de 30/90/120 dias): Nº do Processo, Situação, Classe,
+// Localizador(es) e Último Evento/Data - ordenados do processo mais
+// paralisado (Data/Hora do último evento mais ANTIGA) para o menos
+// paralisado.
+async function construirPdfProcessosParalisados(tabela, nomeUnidade) {
+  const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxClasse = indiceColunaPorCabecalho(tabela.cabecalhos, /classe/i);
+  const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
+  const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
+  const idxDataHora = indiceColunaPorCabecalho(tabela.cabecalhos, /data\s*\/?\s*hora/i);
+
+  const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
+  const itens = tabela.linhas
+    .map((linha) => {
+      const dataHora = valorDe(linha, idxDataHora);
+      return {
+        processo: valorDe(linha, idxProcesso),
+        situacao: valorDe(linha, idxSituacao),
+        classe: valorDe(linha, idxClasse),
+        localizador: formatarLocalizadores(valorDe(linha, idxLocalizador), true),
+        ultimoEvento: valorDe(linha, idxEvento),
+        dataHora,
+        dataHoraOrdenavel: paraDataOrdenavel(dataHora),
+      };
+    })
+    // Data/Hora mais antiga primeiro - quanto mais antigo o último
+    // evento, mais tempo o processo está parado (mais paralisado).
+    .sort((a, b) => a.dataHoraOrdenavel - b.dataHoraOrdenavel);
+
+  const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+  const colunas = [
+    { titulo: "Nº do Processo", largura: larguraUtil * 0.22, campo: "processo" },
+    { titulo: "Situação", largura: larguraUtil * 0.18, campo: "situacao" },
+    { titulo: "Classe", largura: larguraUtil * 0.18, campo: "classe" },
+    { titulo: "Localizador", largura: larguraUtil * 0.2, campo: "localizador" },
+    { titulo: "Último Evento", largura: larguraUtil * 0.12, campo: "ultimoEvento" },
+    { titulo: "Data/Hora", largura: larguraUtil * 0.1, campo: "dataHora" },
+  ];
+
+  return construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Processos paralisados da unidade "${nomeUnidade}" — a partir de ${DIAS_MINIMO_PARALISADOS} dias sem ` +
+      `movimentação — ${itens.length} processo(s)`
+  );
+}
+
+// Le' os nomes dos Localizadores de uma unidade - DIFERENTE do resto do
+// painel (que usa a tela "Localizadores do Órgão"): aqui a extracao e'
+// feita direto no Relatório Geral, ja' que e' onde o campo "Localizador"
+// (Tagify) fica disponivel apos escolher um Órgão/Juízo (necessario para
+// listar os localizadores de QUALQUER unidade, nao so' a do perfil
+// logado - "Localizadores do Órgão" só mostra os da unidade habilitada
+// no momento).
+//
+// NAO traz o total de processos de cada um: obter esse numero exigiria
+// uma consulta a parte por localizador (uma aba nova cada), o que ficava
+// lento demais para unidades com muitos localizadores, e nao existe (até
+// onde verificamos) nenhum endpoint que devolva os totais de todos de
+// uma vez so' para uma unidade arbitraria. Por ora, quem precisar do
+// total por localizador de uma unidade especifica precisa se habilitar
+// nela e usar a ferramenta "Localizadores do Órgão" do painel - o
+// relatório ja' avisa isso (ver "avisos" em
+// "exportarRelatorioGerencialUnidade").
+async function consultarLocalizadoresUnidadeViaRelatorioGeral(urlBase, valorOrgaoJuizo, notificar) {
+  notificar("Lendo os localizadores disponíveis no Relatório Geral...");
+  const { opcoes, erro: erroListagem } = await abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJuizo);
+
+  if (opcoes.length === 0) {
+    return {
+      localizadores: [],
+      erro: erroListagem || 'Nenhum localizador encontrado no campo "Localizador" do Relatório Geral.',
+    };
+  }
+
+  const localizadores = opcoes.map((opcao) => ({ nome: opcao.nome }));
+  return { localizadores, erro: erroListagem || null };
+}
+
+// Orquestra o Relatório Gerencial da Unidade: navega a aba atual ate' o
+// Relatório Geral, roda as consultas de despacho/sentenca e de processos
+// sem movimentação filtradas pela unidade escolhida (reaproveitando as
+// mesmas funcoes do relatorio rapido do painel), consulta o total de
+// processos de cada Localizador dessa unidade (via campo "Localizador"
+// do proprio Relatório Geral) e gera tudo num unico PDF.
+// Um item por checkbox do painel ("Personalizar relatório") - todos
+// habilitados por padrao (compatibilidade com quem chamava a funcao sem
+// passar "opcoes" nenhuma). Desmarcar um item pula tanto a(s) consulta(s)
+// dele quanto o trecho correspondente no PDF, ao inves de so' esconder a
+// secao depois de consultar tudo mesmo assim - o ganho e' pular as
+// consultas lentas dos itens que o usuario nao quer, nao so' o espaço no
+// PDF.
+const OPCOES_RELATORIO_UNIDADE_PADRAO = {
+  processosAtivos: true,
+  suspensos: true,
+  conclusosDecisao: true,
+  conclusosSentenca: true,
+  semMovimentacao: true,
+  // Default "false" de propósito: mandados em aberto só existe no cartão
+  // "Gestão da Unidade (alternativo)" (popup.js nunca envia essa opção a
+  // partir do cartão Corregedoria, então ela sempre cai nesse padrão lá).
+  mandados: false,
+  paralisados: true,
+  remessasJuizesLeigos: true,
+  regrasAutomacao: true,
+  localizadores: true,
+};
+
+// "valorUnidade" pode ser nulo de proposito: quando vem do cartão
+// "Gestão da Unidade (alternativo)" (ver "exportarRelatorioUnidadeAtual"
+// abaixo), o perfil logado já está restrito à própria unidade no eproc,
+// então nenhuma das consultas internas precisa (nem deve) selecionar
+// nenhum Órgão/Juízo - cada uma delas já pula essa seleção sozinha
+// quando recebe um valor falso. Exigir uma unidade aqui é
+// responsabilidade de quem chama com a intenção de PERMITIR escolher
+// (o painel da Corregedoria já confere isso antes de enviar a mensagem,
+// via "exigirUnidadeSelecionada" em popup.js).
+async function exportarRelatorioGerencialUnidade(
+  valorUnidade,
+  nomeUnidade,
+  opcoes,
+  aoProgredir,
+  tituloRelatorio = "Relatório para Correição"
+) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const opcoesFinais = { ...OPCOES_RELATORIO_UNIDADE_PADRAO, ...(opcoes || {}) };
+
+  if (!Object.values(opcoesFinais).some(Boolean)) {
+    throw new Error("Selecione ao menos um item do relatório antes de exportar.");
+  }
 
   const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!abaAtual || !abaAtual.url) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
 
-  async function consultarBloco(nomeSituacao, valorSituacao) {
-    const bloco = { total: null, urgentes: null, mais30Dias: null, erros: [] };
+  const blocoVazio = () => ({ total: null, urgentes: null, naoUrgentes: null, mais90Dias: null, erros: [] });
 
-    notificar(`Consultando ${nomeSituacao}: total...`);
-    let r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      valorSituacao,
+  // A ordem das consultas abaixo segue a ordem em que as seções aparecem
+  // no relatório final (e nos checkboxes do painel): processos ativos,
+  // suspensos/sobrestados, conclusos (decisão/sentença), sem
+  // movimentação, remessas aos juízes leigos e, por último, localizadores.
+
+  // Relação de processos ativos: todos os grupos macro do filtro
+  // "Situação" EXCETO BAIXADO e SUSPENSÃO (e os respectivos subitens) -
+  // em vez de deixar o campo em branco, o que contava TODO processo da
+  // unidade (inclusive suspensos/sobrestados e baixados) como se fosse
+  // "ativo". "extrairTabela" pede pra' ler as linhas reais do resultado
+  // (nao so' o total).
+  const processosAtivos = { total: null, tabela: null, erros: [] };
+  if (opcoesFinais.processosAtivos) {
+    notificar("Consultando a relação de processos ativos...");
+    const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+      gruposSituacaoExcluir: ["B", "S"],
       urgente: false,
       diasSituacao: null,
+      valorOrgaoJuizo: valorUnidade,
+      extrairTabela: true,
     });
-    bloco.total = r.contagem;
-    if (r.erro) bloco.erros.push(`total: ${r.erro}`);
-
-    notificar(`Consultando ${nomeSituacao}: urgentes...`);
-    r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      valorSituacao,
-      urgente: true,
-      diasSituacao: null,
-    });
-    bloco.urgentes = r.contagem;
-    if (r.erro) bloco.erros.push(`urgentes: ${r.erro}`);
-
-    notificar(`Consultando ${nomeSituacao}: há mais de ${DIAS_LIMITE_ATRASO} dias...`);
-    r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-      valorSituacao,
-      urgente: false,
-      diasSituacao: DIAS_LIMITE_ATRASO,
-    });
-    bloco.mais30Dias = r.contagem;
-    if (r.erro) bloco.erros.push(`+${DIAS_LIMITE_ATRASO} dias: ${r.erro}`);
-
-    return bloco;
+    processosAtivos.total = r.contagem;
+    processosAtivos.tabela = r.tabela;
+    if (r.erro) processosAtivos.erros.push(r.erro);
+    if (r.tabela && r.tabela.erro) processosAtivos.erros.push(r.tabela.erro);
   }
 
-  const despacho = await consultarBloco("MOVIMENTO-AGUARDA DESPACHO", VALOR_SITUACAO_AGUARDA_DESPACHO);
-  const sentenca = await consultarBloco("MOVIMENTO-AGUARDA SENTENÇA", VALOR_SITUACAO_AGUARDA_SENTENCA);
+  // Números dos processos conclusos para despacho/sentença com "Petição
+  // Urgente" marcada - o eproc so' permite FILTRAR por esse campo (não
+  // aparece como coluna na tabela em si), entao e' preciso uma consulta a
+  // mais por situação so' pra' descobrir QUAIS processos tem o campo
+  // marcado; usado depois pra' destacar "(Urgente)" ao lado de "Cls.
+  // Despacho"/"Cls. Sentença" na relação de processos ativos.
+  let processosUrgentes = new Set();
+  if (opcoesFinais.processosAtivos) {
+    notificar("Consultando processos urgentes (concluso para despacho/sentença)...");
+    const [rDespachoUrgente, rSentencaUrgente] = await Promise.all([
+      abrirAbaEConsultarUmaVez(abaAtual.url, {
+        valorSituacao: VALOR_SITUACAO_AGUARDA_DESPACHO,
+        urgente: true,
+        diasSituacao: null,
+        valorOrgaoJuizo: valorUnidade,
+        extrairTabela: true,
+      }),
+      abrirAbaEConsultarUmaVez(abaAtual.url, {
+        valorSituacao: VALOR_SITUACAO_AGUARDA_SENTENCA,
+        urgente: true,
+        diasSituacao: null,
+        valorOrgaoJuizo: valorUnidade,
+        extrairTabela: true,
+      }),
+    ]);
+    for (const r of [rDespachoUrgente, rSentencaUrgente]) {
+      if (!r.tabela || !r.tabela.linhas) continue;
+      const idxProcessoUrgente = indiceColunaPorCabecalho(r.tabela.cabecalhos, /processo/i);
+      if (idxProcessoUrgente < 0) continue;
+      for (const linha of r.tabela.linhas) {
+        const numero = linha[idxProcessoUrgente];
+        if (numero) processosUrgentes.add(numero);
+      }
+    }
+  }
+
+  // Suspensos/sobrestados: grupo "S" inteiro do filtro Situação (todas
+  // as ~40 variantes de suspensão/sobrestamento de uma vez).
+  const suspensos = { total: null, mais90Dias: null, detalhamento: [], tabela: null, erros: [], avisoDetalhamentoParcial: null };
+  if (opcoesFinais.suspensos) {
+    notificar("Consultando suspensos/sobrestados: total e relação de processos...");
+    {
+      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+        grupoSituacao: "S",
+        urgente: false,
+        diasSituacao: null,
+        valorOrgaoJuizo: valorUnidade,
+        extrairTabela: true,
+      });
+      suspensos.total = r.contagem;
+      suspensos.tabela = r.tabela;
+      if (r.erro) suspensos.erros.push(`total: ${r.erro}`);
+      if (r.tabela && r.tabela.erro) suspensos.erros.push(`relação de processos: ${r.tabela.erro}`);
+    }
+    notificar(`Consultando suspensos/sobrestados: há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias...`);
+    {
+      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+        grupoSituacao: "S",
+        urgente: false,
+        diasSituacao: DIAS_LIMITE_ATRASO_UNIDADE,
+        valorOrgaoJuizo: valorUnidade,
+      });
+      suspensos.mais90Dias = r.contagem;
+      if (r.erro) suspensos.erros.push(`+${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${r.erro}`);
+    }
+    notificar("Consultando suspensos/sobrestados: detalhamento por situação específica...");
+    {
+      const { itens, erro, parcial, motivoParcial } = await abrirAbaEConsultarSituacoesGrupo(abaAtual.url, valorUnidade, "S");
+      // So' entram na capa as situações com pelo menos 1 processo - listar
+      // as dezenas de variantes zeradas so' faria o relatório mais dificil
+      // de ler, sem nenhuma informação a mais.
+      suspensos.detalhamento = itens
+        .filter((item) => (item.contagem || 0) > 0)
+        .sort((a, b) => (b.contagem || 0) - (a.contagem || 0));
+      if (erro) suspensos.erros.push(`Detalhamento por situação: ${erro}`);
+      // Diferente dos "erros" (que aparecem destacados como falha), isso
+      // e' so' uma nota discreta: o TOTAL de suspensos continua correto
+      // (veio de uma consulta separada, à parte) - so' o detalhamento por
+      // situação especifica ficou incompleto por demorar demais.
+      if (parcial) {
+        suspensos.avisoDetalhamentoParcial =
+          motivoParcial ||
+          "O detalhamento por situação específica não foi concluído a tempo - apenas o total de suspensos foi informado.";
+      }
+    }
+  }
+
+  // Despacho e sentença sao blocos independentes entre si (cada um com
+  // suas proprias 3 consultas, ja' paralelizadas dentro de
+  // "consultarBlocoUnidade") - rodam em paralelo um com o outro tambem,
+  // sempre respeitando o semaforo global de abas ocultas.
+  notificar("Consultando conclusos para decisão e para sentença...");
+  const [despacho, sentenca] = await Promise.all([
+    opcoesFinais.conclusosDecisao
+      ? consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para decisão", VALOR_SITUACAO_AGUARDA_DESPACHO, notificar)
+      : Promise.resolve(blocoVazio()),
+    opcoesFinais.conclusosSentenca
+      ? consultarBlocoUnidade(abaAtual.url, valorUnidade, "conclusos para sentença", VALOR_SITUACAO_AGUARDA_SENTENCA, notificar)
+      : Promise.resolve(blocoVazio()),
+  ]);
 
   const semMovimentacao = { erros: [] };
-  for (const dias of FAIXAS_DIAS_SEM_MOVIMENTACAO) {
-    notificar(`Consultando processos sem movimentação há mais de ${dias} dias...`);
+  if (opcoesFinais.semMovimentacao) {
+    notificar("Consultando processos sem movimentação (30/90/120 dias)...");
+    // As 3 faixas de dias sao consultas independentes - em paralelo em
+    // vez de uma de cada vez.
+    const resultadosPorFaixa = await Promise.all(
+      FAIXAS_DIAS_SEM_MOVIMENTACAO.map((dias) =>
+        abrirAbaEConsultarUmaVez(abaAtual.url, {
+          valorSituacao: null,
+          urgente: false,
+          diasSituacao: null,
+          diasSemMovimentacao: dias,
+          valorOrgaoJuizo: valorUnidade,
+        })
+      )
+    );
+    FAIXAS_DIAS_SEM_MOVIMENTACAO.forEach((dias, indice) => {
+      const r = resultadosPorFaixa[indice];
+      semMovimentacao[`dias${dias}`] = r.contagem;
+      if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
+    });
+  }
+
+  // Mandados em aberto: só existe no cartão "Gestão da Unidade
+  // (alternativo)" (ver comentário em "OPCOES_RELATORIO_UNIDADE_PADRAO").
+  const mandados = { linhas: [], erros: [] };
+  if (opcoesFinais.mandados) {
+    notificar("Consultando mandados em aberto...");
+    const r = await consultarMandadosAbertosUmaVez(abaAtual.url);
+    // Do mandado parado ha' mais tempo (Data da Remessa mais antiga) para
+    // o mais recente - mesmo sentido de "mais antigo primeiro" usado nas
+    // demais relações deste relatório (processos ativos, paralisados).
+    mandados.linhas = (r.linhas || [])
+      .slice()
+      .sort((a, b) => paraDataOrdenavel(a.dataRemessa) - paraDataOrdenavel(b.dataRemessa));
+    if (r.erro) mandados.erros.push(r.erro);
+  }
+
+  // Relação de processos paralisados (a partir de 31 dias sem
+  // movimentação, numa única tabela - sem separar por 30/90/120 dias como
+  // o resumo acima, que e' só a contagem). "extrairTabela" pede pra' ler
+  // as linhas reais do resultado (nao so' o total), igual a' relação de
+  // processos ativos.
+  const processosParalisados = { total: null, tabela: null, erros: [] };
+  if (opcoesFinais.paralisados) {
+    notificar("Consultando processos paralisados (a partir de 31 dias sem movimentação)...");
     const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
       valorSituacao: null,
       urgente: false,
       diasSituacao: null,
-      diasSemMovimentacao: dias,
+      diasSemMovimentacao: DIAS_MINIMO_PARALISADOS,
+      valorOrgaoJuizo: valorUnidade,
+      extrairTabela: true,
     });
-    semMovimentacao[`dias${dias}`] = r.contagem;
-    if (r.erro) semMovimentacao.erros.push(`${dias} dias: ${r.erro}`);
+    processosParalisados.total = r.contagem;
+    processosParalisados.tabela = r.tabela;
+    if (r.erro) processosParalisados.erros.push(r.erro);
+    if (r.tabela && r.tabela.erro) processosParalisados.erros.push(r.tabela.erro);
   }
+
+  // Remessas aos juízes leigos: tela própria (menu "Relatórios" >
+  // "Relatório de remessas em aberto"), filtrada pelo mesmo órgão
+  // julgador da unidade escolhida.
+  const remessasJuizesLeigos = { linhas: [], erros: [] };
+  if (opcoesFinais.remessasJuizesLeigos) {
+    notificar("Consultando remessas aos juízes leigos...");
+    const r = await consultarRemessasJuizesLeigosUmaVez(abaAtual.url, valorUnidade);
+    remessasJuizesLeigos.linhas = r.linhas || [];
+    if (r.erro) remessasJuizesLeigos.erros.push(r.erro);
+  }
+
+  // Regras de Automação: a tela "Automatizar Tramitação Processual" NAO
+  // tem o mesmo seletor "Órgão/Juízo" do Relatório Geral - tem um filtro
+  // próprio "ÓRGÃO" (`#selOrgao`), só visível/obrigatório para o perfil
+  // CORREGEDORIA (que enxerga todas as unidades). Quando uma unidade foi
+  // escolhida (valorUnidade truthy), passamos o nome dela para
+  // "abrirAbaEListarRegrasAutomacao" selecionar esse filtro e clicar em
+  // "Pesquisar" antes de ler a tabela - sem isso a tela simplesmente não
+  // lista regra nenhuma (era essa a causa real do "retorna zero" para o
+  // perfil Corregedoria). Já para quem está logado direto numa unidade
+  // (perfil MAGISTRADO/GESTÃO DA UNIDADE, valorUnidade nulo), esse filtro
+  // não aparece na tela - a extensão nem tenta selecioná-lo.
+  const regrasAutomacao = { regras: [], erros: [] };
+  if (opcoesFinais.regrasAutomacao) {
+    notificar("Consultando regras de automação ativas...");
+    const r = await abrirAbaEListarRegrasAutomacao(abaAtual.url, valorUnidade ? nomeUnidade : null);
+    regrasAutomacao.regras = r.regras || [];
+    if (r.erro) regrasAutomacao.erros.push(r.erro);
+    if (!r.erro && regrasAutomacao.regras.length === 0 && r.totalRegrasNaPagina > 0) {
+      regrasAutomacao.erros.push(
+        `${r.totalRegrasNaPagina} regra(s) encontrada(s) na tela, mas nenhuma está com o switch "Ativa" ligado.`
+      );
+    }
+  }
+
+  let localizadoresOrdenados = [];
+  let erroLocalizadores = null;
+  if (opcoesFinais.localizadores) {
+    if (valorUnidade) {
+      // Corregedoria: a unidade e' ESCOLHIDA num dropdown (pode ser
+      // qualquer uma), e o Relatório Geral so' devolve o NOME de cada
+      // localizador (sem total de processos - ver comentario em
+      // "consultarLocalizadoresUnidadeViaRelatorioGeral") - so' resta a
+      // ordem alfabetica. Descarta valores exatamente "?" (localizador
+      // expirado/inconsistente do proprio eproc) - sem significado nenhum
+      // para quem le' o relatório.
+      const resultado = await consultarLocalizadoresUnidadeViaRelatorioGeral(abaAtual.url, valorUnidade, notificar);
+      localizadoresOrdenados = resultado.localizadores
+        .filter((l) => (l.nome || "").trim() !== "?")
+        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+      erroLocalizadores = resultado.erro;
+    } else {
+      // Gestão da Unidade (alternativo): sem unidade escolhida, a unidade
+      // e' sempre a habilitada no momento - a mesma restrição que já
+      // existe para "Localizadores do Órgão" (não permite escolher outra
+      // unidade), então dá para reaproveitar essa tela em vez do campo
+      // "Localizador" do Relatório Geral, e ela traz o TOTAL de processos
+      // de cada localizador (coisa que o Relatório Geral não oferece).
+      // Mostra TODOS os localizadores, mesmo os com 0 processos (ao
+      // contrário do fluxo de navegação "Busca específica", que só lista
+      // os com pelo menos 1) - aqui o interesse é o panorama completo da
+      // unidade, não "para onde navegar". Ordenados do maior para o
+      // menor total de processos.
+      notificar("Consultando localizadores da unidade (com total de processos)...");
+      const resultado = await abrirAbaEColetarLocalizadores(abaAtual.url);
+      localizadoresOrdenados = resultado.itens
+        .filter((l) => (l.nome || "").trim() !== "?")
+        .map((l) => ({ nome: l.nome, totalProcessos: l.totalProcessos }))
+        .sort((a, b) => b.totalProcessos - a.totalProcessos || a.nome.localeCompare(b.nome, "pt-BR"));
+      erroLocalizadores = resultado.erro;
+    }
+  }
+
+  notificar("Gerando PDF...");
+
+  const dataInformacao = new Date().toLocaleString("pt-BR");
+  // O excesso de prazo (suspensos +90 dias / conclusos +90 dias) nao
+  // entra mais como uma linha propria no resumo - vira um complemento
+  // entre parenteses junto do Total (ex.: "Total 21 (5 suspensos há mais
+  // de 90 dias)"), ja' que e' so' um recorte do proprio total, nao um
+  // numero independente.
+  // Sem parenteses quando o total e' 0 (nao ha' processo nenhum, entao o
+  // recorte de excesso de prazo nao acrescenta informação nenhuma) ou
+  // quando o excesso e' desconhecido (erro na consulta); com total > 0 e
+  // excesso 0, escreve "nenhum" em vez de "0" (mais natural que "0 há
+  // mais de 90 dias").
+  const totalComExcesso = (total, excesso, sufixo) => {
+    const totalTexto = total == null ? "?" : String(total);
+    if (excesso == null || !total) return totalTexto;
+    const excessoTexto = excesso === 0 ? "nenhum" : String(excesso);
+    return `${totalTexto} (${excessoTexto} ${sufixo})`;
+  };
+  const linhasBloco = (bloco) => [
+    { rotulo: "Urgentes", valor: bloco.urgentes == null ? "?" : bloco.urgentes },
+    { rotulo: "Não urgentes", valor: bloco.naoUrgentes == null ? "?" : bloco.naoUrgentes },
+    {
+      rotulo: "Total",
+      valor: totalComExcesso(bloco.total, bloco.mais90Dias, `há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`),
+    },
+  ];
+
+  // So' entram no PDF as seções que o usuario marcou - nao so' esconder o
+  // resultado de uma consulta que rodou mesmo assim (essa ja' nem rodou,
+  // ver os "if (opcoesFinais.xxx)" acima). Ordem: processos ativos,
+  // suspensos, conclusos (decisão/sentença), sem movimentação e remessas
+  // aos juízes leigos - a mesma ordem dos checkboxes no painel.
+  // Localizadores fica de fora daqui: sua lista de nomes é desenhada em
+  // páginas próprias, no final do PDF (ver "construirPaginaListaLocalizadores").
+  const secoesResumo = [];
+  if (opcoesFinais.processosAtivos) {
+    secoesResumo.push({
+      titulo: "PROCESSOS ATIVOS",
+      linhas: [{ rotulo: "Total", valor: processosAtivos.total == null ? "?" : processosAtivos.total }],
+    });
+  }
+  if (opcoesFinais.suspensos) {
+    secoesResumo.push({
+      titulo: "SUSPENSOS / SOBRESTADOS",
+      linhas: [
+        ...(suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem })),
+        {
+          rotulo: "Total",
+          valor: totalComExcesso(suspensos.total, suspensos.mais90Dias, `há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`),
+        },
+      ],
+    });
+  }
+  if (opcoesFinais.conclusosDecisao) {
+    secoesResumo.push({ titulo: "CONCLUSOS PARA DECISÃO", linhas: linhasBloco(despacho) });
+  }
+  if (opcoesFinais.conclusosSentenca) {
+    secoesResumo.push({ titulo: "CONCLUSOS PARA SENTENÇA", linhas: linhasBloco(sentenca) });
+  }
+  if (opcoesFinais.semMovimentacao) {
+    secoesResumo.push({
+      titulo: "PROCESSOS SEM MOVIMENTAÇÃO",
+      linhas: [
+        { rotulo: "Há mais de 30 dias", valor: semMovimentacao.dias30 == null ? "?" : semMovimentacao.dias30 },
+        { rotulo: "Há mais de 90 dias", valor: semMovimentacao.dias90 == null ? "?" : semMovimentacao.dias90 },
+        { rotulo: "Há mais de 120 dias", valor: semMovimentacao.dias120 == null ? "?" : semMovimentacao.dias120 },
+      ],
+    });
+  }
+  if (opcoesFinais.mandados) {
+    // Resumo dos resultados: contagem por Situação (ex.: "Aguardando
+    // cumprimento", "Aguardando distribuição"...), da mais frequente para
+    // a menos frequente, com o Total sempre por último (mesmo padrão de
+    // Suspensos/Conclusos, acima). Um segundo bloco, só quando há pelo
+    // menos um mandado com oficial já designado (ver
+    // "separarResponsavelAguardandoCumprimento"), soma quantos mandados
+    // "Aguardando cumprimento" cada oficial tem.
+    const contagemPorSituacao = new Map();
+    const contagemPorOficial = new Map();
+    for (const m of mandados.linhas) {
+      contagemPorSituacao.set(m.situacao, (contagemPorSituacao.get(m.situacao) || 0) + 1);
+      if (m.responsavel) {
+        contagemPorOficial.set(m.responsavel, (contagemPorOficial.get(m.responsavel) || 0) + 1);
+      }
+    }
+    const linhasSituacao = Array.from(contagemPorSituacao.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([situacao, contagem]) => ({ rotulo: situacao || "(sem situação)", valor: contagem }));
+    linhasSituacao.push({ rotulo: "Total", valor: mandados.linhas.length });
+    secoesResumo.push({ titulo: "MANDADOS EM ABERTO", linhas: linhasSituacao });
+
+    if (contagemPorOficial.size > 0) {
+      const linhasOficial = Array.from(contagemPorOficial.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([nome, contagem]) => ({ rotulo: nome, valor: contagem }));
+      secoesResumo.push({ titulo: "MANDADOS POR OFICIAL", linhas: linhasOficial });
+    }
+  }
+  if (opcoesFinais.paralisados) {
+    secoesResumo.push({
+      titulo: "PROCESSOS PARALISADOS",
+      linhas: [
+        {
+          rotulo: `A partir de ${DIAS_MINIMO_PARALISADOS} dias`,
+          valor: processosParalisados.total == null ? "?" : processosParalisados.total,
+        },
+      ],
+    });
+  }
+  if (opcoesFinais.remessasJuizesLeigos) {
+    secoesResumo.push({
+      titulo: "REMESSAS AOS JUÍZES LEIGOS",
+      linhas: [{ rotulo: "Total de processos em remessa", valor: remessasJuizesLeigos.linhas.length }],
+    });
+  }
+  if (opcoesFinais.regrasAutomacao) {
+    secoesResumo.push({
+      titulo: "REGRAS DE AUTOMAÇÃO",
+      linhas: [{ rotulo: "Total de regras ativas", valor: regrasAutomacao.regras.length }],
+    });
+  }
+
+  const avisos = [];
+  if (opcoesFinais.processosAtivos && processosAtivos.erros.length > 0) {
+    avisos.push(`Processos ativos: ${processosAtivos.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.suspensos && suspensos.erros.length > 0) {
+    avisos.push(`Suspensos/sobrestados: ${suspensos.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.suspensos && suspensos.avisoDetalhamentoParcial) {
+    avisos.push(`Suspensos/sobrestados: ${suspensos.avisoDetalhamentoParcial}`);
+  }
+  if (opcoesFinais.conclusosDecisao && despacho.erros.length > 0) {
+    avisos.push(`Conclusos para decisão: ${despacho.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.conclusosSentenca && sentenca.erros.length > 0) {
+    avisos.push(`Conclusos para sentença: ${sentenca.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.semMovimentacao && semMovimentacao.erros.length > 0) {
+    avisos.push(`Processos sem movimentação: ${semMovimentacao.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.mandados && mandados.erros.length > 0) {
+    avisos.push(`Mandados em aberto: ${mandados.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.paralisados && processosParalisados.erros.length > 0) {
+    avisos.push(`Processos paralisados: ${processosParalisados.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.erros.length > 0) {
+    avisos.push(`Remessas aos juízes leigos: ${remessasJuizesLeigos.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.regrasAutomacao && regrasAutomacao.erros.length > 0) {
+    avisos.push(`Regras de automação: ${regrasAutomacao.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
+
+  const bytesCapa = await construirCapaRelatorioGerencial(
+    nomeUnidade,
+    dataInformacao,
+    secoesResumo,
+    avisos,
+    tituloRelatorio
+  );
+  const pdfCapa = await PDFDocument.load(bytesCapa);
+  const pdfFinal = await PDFDocument.create();
+  const paginasCapa = await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices());
+  paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
+
+  // Tabelas com a "relação de processos" propriamente dita (linhas reais
+  // do resultado, nao so' o total) - anexadas como paginas extras, uma
+  // tabela por secao, so' quando a extracao encontrou alguma linha
+  // (best-effort: ver "extrairLinhasTblProcessoLista"; se falhar, o
+  // aviso correspondente ja' foi acrescentado acima e a secao so' fica
+  // de fora, sem quebrar o resto do relatório). Mesma ordem das seções
+  // acima: ativos, suspensos e, por fim, remessas aos juízes leigos.
+  if (opcoesFinais.processosAtivos && processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
+    const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade, processosUrgentes);
+    const pdfTabela = await PDFDocument.load(bytesTabela);
+    const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+  if (opcoesFinais.suspensos && suspensos.tabela && suspensos.tabela.linhas.length > 0) {
+    const bytesTabela = await construirPdfSuspensos(suspensos.tabela, nomeUnidade);
+    const pdfTabela = await PDFDocument.load(bytesTabela);
+    const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+  if (opcoesFinais.mandados && mandados.linhas.length > 0) {
+    const bytesMandados = await construirPdfMandadosAbertos(mandados.linhas, nomeUnidade);
+    const pdfMandados = await PDFDocument.load(bytesMandados);
+    const paginas = await pdfFinal.copyPages(pdfMandados, pdfMandados.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+  if (
+    opcoesFinais.paralisados &&
+    processosParalisados.tabela &&
+    processosParalisados.tabela.linhas.length > 0
+  ) {
+    const bytesTabela = await construirPdfProcessosParalisados(processosParalisados.tabela, nomeUnidade);
+    const pdfTabela = await PDFDocument.load(bytesTabela);
+    const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0) {
+    const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
+    const pdfRemessas = await PDFDocument.load(bytesRemessas);
+    const paginas = await pdfFinal.copyPages(pdfRemessas, pdfRemessas.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  // Regras de Automação: um "cartão" por regra ativa (fluxograma +
+  // detalhamento), igual ao PDF avulso gerado pelo cartão "Regras de
+  // Automação" da Gestão da Unidade - entra ANTES de Localizadores (ver
+  // comentário acima sobre essa seção refletir a unidade habilitada, não
+  // necessariamente a escolhida para o restante deste relatório).
+  if (opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
+    const bytesRegras = await construirPdfRegras(regrasAutomacao.regras, nomeUnidade);
+    const pdfRegras = await PDFDocument.load(bytesRegras);
+    const paginas = await pdfFinal.copyPages(pdfRegras, pdfRegras.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  // Localizadores: lista de nomes (Corregedoria, sem total de processos -
+  // ver aviso acima) ou nome + total de processos (Gestão da Unidade
+  // (alternativo), ordenados do maior para o menor total), em páginas
+  // próprias no final do PDF, depois de todas as demais seções (inclusive
+  // as tabelas de remessas aos juízes leigos).
+  if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
+    const bytesLocalizadores = await construirPaginaListaLocalizadores(nomeUnidade, localizadoresOrdenados);
+    const pdfLocalizadores = await PDFDocument.load(bytesLocalizadores);
+    const paginas = await pdfFinal.copyPages(pdfLocalizadores, pdfLocalizadores.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  const bytesFinais = await pdfFinal.save();
+  const nomeArquivo = `eproc/Relatório_${sanitizarNomeArquivo(nomeUnidade)}.pdf`;
+  await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytesFinais));
 
   notificar("Finalizando...");
-  return { despacho, sentenca, semMovimentacao };
+  return {
+    unidade: nomeUnidade,
+    totalLocalizadores: localizadoresOrdenados.length,
+  };
 }
 
-// Atalho: navega a aba ATUAL (visivel) direto para a tela do Relatório
-// Geral, sem consultar nada - so' um jeito rapido de chegar la'
-// manualmente.
-async function abrirTelaRelatorioGeral() {
-  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!aba || !aba.id) {
+// Reaproveita INTEIRAMENTE "exportarRelatorioGerencialUnidade" (mesmas
+// consultas, mesmas seções, mesmo PDF final) para o cartão experimental
+// "Gestão da Unidade (alternativo)": em vez de escolher uma unidade num
+// dropdown (fluxo da Corregedoria, que enxerga TODAS as unidades e por
+// isso precisa perguntar qual), aqui o perfil logado (MAGISTRADO/GESTÃO
+// DA UNIDADE) já está restrito à sua própria unidade no eproc - passar
+// "valorUnidade" nulo faz "consultarUmaVezNaPagina" pular a seleção de
+// Órgão/Juízo (ver o "if (parametros.valorOrgaoJuizo)" logo no início
+// dela) e simplesmente usar o filtro que a própria tela do Relatório
+// Geral já aplica sozinha para esse perfil - mesmo comportamento que o
+// "relatório rápido" do cartão "Gestão da Unidade" já usa há tempos
+// (também nunca seleciona Órgão/Juízo nenhum).
+async function exportarRelatorioUnidadeAtual(opcoes, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.id || !abaAtual.url) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
 
-  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: clicarLinkRelatorioGeralNaPagina,
-  });
-
-  if (!linkEncontrado) {
-    throw new Error(
-      'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
-    );
-  }
-}
-
-// Traduz os identificadores usados no painel para os parametros que
-// "consultarUmaVezNaPagina" entende. Duas categorias de relatorio:
-// - "situacao" (padrao): situacao "despacho"/"sentenca" + filtro
-//   "total"/"urgentes"/"mais30Dias".
-// - "semMovimentacao": demonstrativo de processos parados, sem situacao
-//   nenhuma selecionada; filtro e' a quantidade de dias ("30"/"90"/"120").
-function resolverParametrosConsulta(categoria, situacao, filtro) {
-  if (categoria === "semMovimentacao") {
-    return {
-      valorSituacao: null,
-      urgente: false,
-      diasSituacao: null,
-      diasSemMovimentacao: Number(filtro),
-    };
+  // So' para dar um nome ao PDF/capa - nunca usado para filtrar nenhuma
+  // consulta (essas seguem o que a própria tela do eproc já aplica
+  // sozinha para o perfil logado). Best-effort: se o content script não
+  // responder por qualquer motivo, cai num rótulo genérico em vez de
+  // travar o relatório inteiro por causa so' do nome.
+  let nomeUnidade = "Unidade atual";
+  try {
+    const perfilInfo = await chrome.tabs.sendMessage(abaAtual.id, { tipo: "LER_PERFIL_ATUAL" });
+    if (perfilInfo && perfilInfo.unidadeNome) nomeUnidade = perfilInfo.unidadeNome;
+  } catch (e) {
+    // Sem resposta do content script (ex.: aba fora do eproc) - segue com o rótulo genérico.
   }
 
-  const valorSituacao =
-    situacao === "sentenca" ? VALOR_SITUACAO_AGUARDA_SENTENCA : VALOR_SITUACAO_AGUARDA_DESPACHO;
-
-  if (filtro === "urgentes") {
-    return { valorSituacao, urgente: true, diasSituacao: null };
-  }
-  if (filtro === "mais30Dias") {
-    return { valorSituacao, urgente: false, diasSituacao: DIAS_LIMITE_ATRASO };
-  }
-  return { valorSituacao, urgente: false, diasSituacao: null };
-}
-
-// Nome amigavel do arquivo Excel exportado, baseado na categoria/situacao/
-// filtro escolhidos, para o download sair identificado (em vez do nome
-// generico que o DataTables Buttons usa por padrao).
-function nomeArquivoRelatorio(categoria, situacao, filtro) {
-  if (categoria === "semMovimentacao") {
-    return `relatorio_sem_movimentacao_${filtro}dias`;
-  }
-  const nomeSituacao = situacao === "sentenca" ? "sentenca" : "despacho";
-  const nomeFiltro =
-    filtro === "urgentes" ? "urgentes" : filtro === "mais30Dias" ? "mais30dias" : "total";
-  return `relatorio_${nomeSituacao}_${nomeFiltro}`;
-}
-
-// Renomeia o PROXIMO download que comecar (dentro de um prazo curto) para
-// "eproc/<nomeArquivo><extensao original>", preservando a extensao que o
-// eproc gerou (normalmente .xlsx). Usado logo antes de disparar a
-// exportacao Excel, ja que o nome que o DataTables Buttons da ao arquivo
-// nao identifica qual relatorio/filtro gerou aquela planilha.
-function aguardarERenomearProximoDownload(nomeArquivo) {
-  return new Promise((resolve) => {
-    let finalizado = false;
-    const finalizar = (sucesso) => {
-      if (finalizado) return;
-      finalizado = true;
-      chrome.downloads.onDeterminingFilename.removeListener(listener);
-      resolve(sucesso);
-    };
-    const timeoutId = setTimeout(() => finalizar(false), 15000);
-    function listener(downloadItem, suggest) {
-      clearTimeout(timeoutId);
-      const extensaoOriginal = (downloadItem.filename.match(/\.[^.]+$/) || [".xlsx"])[0];
-      suggest({ filename: `eproc/${nomeArquivo}${extensaoOriginal}` });
-      finalizar(true);
-    }
-    chrome.downloads.onDeterminingFilename.addListener(listener);
-  });
-}
-
-// Clicando num numero do relatorio (ex.: "Conclusos para despacho: 11"):
-// abre uma aba NOVA (em primeiro plano, para o usuario poder acompanhar),
-// navega ate' o Relatório Geral e deixa ele ja' consultado com o mesmo
-// filtro daquele numero, para o usuario conferir a lista de processos por
-// tras dele - opcionalmente exportando a planilha Excel tambem. A aba
-// ATUAL/principal (de onde o clique partiu) nunca e' navegada nem
-// alterada: so' serve para saber a URL base do eproc a reabrir na aba
-// nova. Essa aba nova permanece aberta ao final (nao e' fechada), ja que
-// o objetivo e' mostrar o resultado (ou o download) para o usuario.
-async function abrirRelatorioPreenchido(categoria, situacao, filtro, exportarExcel) {
-  const parametros = resolverParametrosConsulta(categoria, situacao, filtro);
-
-  const [abaOrigem] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!abaOrigem || !abaOrigem.url) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
-  }
-
-  const aba = await chrome.tabs.create({ url: abaOrigem.url, active: true });
-  await aguardarCarregamentoAba(aba.id);
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
-  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: clicarLinkRelatorioGeralNaPagina,
-  });
-
-  if (!linkEncontrado) {
-    throw new Error(
-      'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral (ex.: a tela de um processo) e tente novamente.'
-    );
-  }
-
-  await aguardarCarregamentoAba(aba.id);
-  // Pequena espera extra para os scripts da pagina (bootstrap-select,
-  // tagify etc.) terminarem de inicializar apos o carregamento.
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
-  const [{ result } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: consultarUmaVezNaPagina,
-    args: [parametros],
-  });
-
-  if (result && result.erro) {
-    throw new Error(result.erro);
-  }
-
-  if (exportarExcel) {
-    const nomeArquivo = nomeArquivoRelatorio(categoria, situacao, filtro);
-    const promessaRenomeio = aguardarERenomearProximoDownload(nomeArquivo);
-
-    const [{ result: resultadoExcel } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: exportarExcelNaPagina,
-    });
-
-    if (resultadoExcel && resultadoExcel.erro) {
-      throw new Error(resultadoExcel.erro);
-    }
-
-    await promessaRenomeio;
-  }
+  return exportarRelatorioGerencialUnidade(null, nomeUnidade, opcoes, notificar, "Relatório da Unidade");
 }
 
 // ---- Localizadores do Órgão (exportar em PDF/Excel) ----
@@ -1886,6 +5105,10 @@ function raspaerProcessosDoLocalizadorNaPagina() {
     const numeroProcesso = (linkProcesso ? linkProcesso.textContent : celulas[1].textContent || "")
       .replace(/\s+/g, " ")
       .trim();
+    // "linkProcesso.href" (e nao getAttribute) para pegar a URL ja'
+    // absoluta (com sessao/hash inclusos), pronta para abrir numa aba
+    // oculta sem depender de nenhum contexto de navegacao adicional.
+    const url = linkProcesso ? linkProcesso.href : "";
 
     const spanClasse = celulas[2].querySelector(".span-classe-judicial-contraste");
     const classe = (spanClasse ? spanClasse.textContent : celulas[2].textContent || "")
@@ -1894,7 +5117,7 @@ function raspaerProcessosDoLocalizadorNaPagina() {
 
     const inclusao = (celulas[7].textContent || "").replace(/\s+/g, " ").trim();
 
-    itens.push({ numeroProcesso, classe, inclusao });
+    itens.push({ numeroProcesso, classe, inclusao, url });
   }
 
   const caption = tabela.querySelector("caption");
@@ -2092,6 +5315,7 @@ async function coletarTodasPaginasInfraTable(tabId, funcRaspar) {
 async function abrirAbaEColetarLocalizadores(urlBase) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -2119,6 +5343,7 @@ async function abrirAbaEColetarLocalizadores(urlBase) {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -2131,6 +5356,7 @@ async function abrirAbaEColetarLocalizadores(urlBase) {
 async function abrirAbaEColetarProcessosDoLocalizador(urlProcessos) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlProcessos, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -2142,6 +5368,7 @@ async function abrirAbaEColetarProcessosDoLocalizador(urlProcessos) {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -2155,43 +5382,144 @@ const PDF_LOCALIZADORES_MARGEM = 36;
 const PDF_LOCALIZADORES_TAMANHO_FONTE = 9;
 const PDF_LOCALIZADORES_ALTURA_LINHA = PDF_LOCALIZADORES_TAMANHO_FONTE * 1.35;
 
+// Altura reservada no topo de cada pagina para o cabecalho institucional
+// (barra colorida + "TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ" + "Sistema
+// eProc" + linha separadora) e no rodape para o numero da pagina - o
+// conteudo de cada pagina (titulo, tabela) comeca/termina respeitando
+// essas faixas, em vez de usar a altura da folha inteira.
+const PDF_ALTURA_CABECALHO_INSTITUCIONAL = 40;
+const PDF_ALTURA_RODAPE = 22;
+
+// Desenha o cabecalho institucional (barra + TJPR + eProc + linha) no
+// topo de uma pagina - reaproveitado em toda pagina de todo PDF gerado
+// pela extensao (tabelas de Localizadores/Processos/Remessas e o resumo
+// do Relatório Gerencial da Unidade), para dar uma identidade visual
+// unica e profissional em vez de paginas so' com texto corrido.
+function desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem) {
+  const alturaPagina = pagina.getHeight();
+
+  pagina.drawRectangle({
+    x: 0,
+    y: alturaPagina - 6,
+    width: largura,
+    height: 6,
+    color: COR_PRIMARIA,
+  });
+
+  pagina.drawText("TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ", {
+    x: margem,
+    y: alturaPagina - 20,
+    size: 10,
+    font: fonteNegrito,
+    color: COR_PRIMARIA_ESCURA,
+  });
+  pagina.drawText("Sistema eProc", {
+    x: margem,
+    y: alturaPagina - 32,
+    size: 8,
+    font: fonteNormal,
+    color: COR_CINZA_TEXTO,
+  });
+
+  pagina.drawLine({
+    start: { x: margem, y: alturaPagina - 38 },
+    end: { x: largura - margem, y: alturaPagina - 38 },
+    thickness: 0.75,
+    color: COR_CINZA_BORDA,
+  });
+}
+
+// Desenha o rodape (linha + "eProc/TJPR" + numero da pagina) - chamado
+// so' no final, depois de todas as paginas prontas, ja' que o total de
+// paginas so' e' conhecido nesse momento.
+function desenharRodapePaginas(pdf, fonteNormal, largura, margem) {
+  const paginas = pdf.getPages();
+  paginas.forEach((pagina, indice) => {
+    const y = PDF_ALTURA_RODAPE - 10;
+    pagina.drawLine({
+      start: { x: margem, y: PDF_ALTURA_RODAPE },
+      end: { x: largura - margem, y: PDF_ALTURA_RODAPE },
+      thickness: 0.5,
+      color: COR_CINZA_BORDA,
+    });
+    // So' a paginacao no rodape (sem texto de identificacao da extensao) -
+    // centralizada, ja' que nao ha' mais nenhum outro texto disputando a
+    // faixa com ela.
+    const textoPagina = `Página ${indice + 1} de ${paginas.length}`;
+    const larguraTexto = fonteNormal.widthOfTextAtSize(textoPagina, 7);
+    pagina.drawText(textoPagina, {
+      x: (largura - larguraTexto) / 2,
+      y,
+      size: 7,
+      font: fonteNormal,
+      color: COR_CINZA_TEXTO,
+    });
+  });
+}
+
 // Gerador generico de PDF-tabela reaproveitado tanto pelos Localizadores
-// do Órgão quanto pelos Processos por Localizador: recebe as colunas ja'
-// com a largura em pontos (nao fracao) para poder ser reaproveitado com
-// qualquer numero/tamanho de colunas.
+// do Órgão quanto pelos Processos por Localizador e Remessas em Aberto:
+// recebe as colunas ja' com a largura em pontos (nao fracao) para poder
+// ser reaproveitado com qualquer numero/tamanho de colunas.
 async function construirPdfTabela(itens, colunas, tituloDocumento) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
   const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
 
+  const larguraPagina = PDF_LOCALIZADORES_LARGURA_PAGINA;
+  const margem = PDF_LOCALIZADORES_MARGEM;
+  const alturaLinhaCabecalhoColunas = PDF_LOCALIZADORES_ALTURA_LINHA * 1.7;
+
   let pagina = null;
   let y = 0;
+  let indiceLinhaZebra = 0;
 
   function desenharCabecalhoColunas() {
-    let x = PDF_LOCALIZADORES_MARGEM;
+    const alturaFaixa = alturaLinhaCabecalhoColunas;
+    pagina.drawRectangle({
+      x: margem,
+      y: y - alturaFaixa,
+      width: larguraPagina - margem * 2,
+      height: alturaFaixa,
+      color: COR_PRIMARIA_ESCURA,
+    });
+    let x = margem + 4;
     for (const coluna of colunas) {
       pagina.drawText(sanitizarTextoPdf(coluna.titulo), {
         x,
-        y,
+        y: y - alturaFaixa + alturaFaixa * 0.32,
         size: PDF_LOCALIZADORES_TAMANHO_FONTE,
         font: fonteNegrito,
+        color: COR_BRANCO,
       });
       x += coluna.largura;
     }
-    y -= PDF_LOCALIZADORES_ALTURA_LINHA * 1.6;
+    // Gap extra apos a faixa do cabecalho, para a primeira linha de
+    // dados nunca encostar/sobrepor visualmente na faixa colorida - o
+    // "y" das linhas e' a BASELINE do texto, e os ascendentes sobem
+    // ~7pt acima dela na fonte de 9pt, entao o gap precisa ser maior
+    // que isso.
+    y -= alturaFaixa + 11;
+    indiceLinhaZebra = 0;
   }
 
   function novaPagina(comTitulo) {
     pagina = pdf.addPage([PDF_LOCALIZADORES_LARGURA_PAGINA, PDF_LOCALIZADORES_ALTURA_PAGINA]);
-    y = PDF_LOCALIZADORES_ALTURA_PAGINA - PDF_LOCALIZADORES_MARGEM;
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, larguraPagina, margem);
+    y = PDF_LOCALIZADORES_ALTURA_PAGINA - PDF_ALTURA_CABECALHO_INSTITUCIONAL - PDF_LOCALIZADORES_MARGEM;
     if (comTitulo) {
-      pagina.drawText(sanitizarTextoPdf(tituloDocumento), {
-        x: PDF_LOCALIZADORES_MARGEM,
-        y,
-        size: 13,
-        font: fonteNegrito,
-      });
-      y -= PDF_LOCALIZADORES_ALTURA_LINHA * 2.2;
+      const linhasTitulo = quebrarLinhas(sanitizarTextoPdf(tituloDocumento), fonteNegrito, 13, larguraPagina - margem * 2);
+      for (const linhaTitulo of linhasTitulo) {
+        pagina.drawText(linhaTitulo, {
+          x: margem,
+          y,
+          size: 13,
+          font: fonteNegrito,
+          color: COR_PRIMARIA_ESCURA,
+        });
+        y -= 17;
+      }
+      y -= PDF_LOCALIZADORES_ALTURA_LINHA * 2.2 - 17;
     }
     desenharCabecalhoColunas();
   }
@@ -2203,17 +5531,28 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
       quebrarLinhas(sanitizarTextoPdf(String(item[coluna.campo] ?? "")), fonteNormal, PDF_LOCALIZADORES_TAMANHO_FONTE, coluna.largura - 4)
     );
     const maxLinhas = Math.max(1, ...linhasPorColuna.map((l) => l.length));
+    const alturaLinha = maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA + PDF_LOCALIZADORES_ALTURA_LINHA * FATOR_FOLGA_ALTURA_LINHA_TABELA;
 
-    if (y - maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA < PDF_LOCALIZADORES_MARGEM) {
+    if (y - alturaLinha < PDF_ALTURA_RODAPE + PDF_LOCALIZADORES_MARGEM) {
       novaPagina(false);
     }
 
-    let x = PDF_LOCALIZADORES_MARGEM;
+    desenharZebraLinhaTabela(pagina, {
+      x: margem,
+      y,
+      largura: larguraPagina - margem * 2,
+      alturaLinha,
+      alturaLinhaTexto: PDF_LOCALIZADORES_ALTURA_LINHA,
+      indiceLinhaZebra,
+    });
+    indiceLinhaZebra += 1;
+
+    let x = margem + 4;
     for (let i = 0; i < colunas.length; i += 1) {
-      let yColuna = y;
+      let yColuna = yInicialTextoColunaCentralizado(y, PDF_LOCALIZADORES_ALTURA_LINHA, maxLinhas, linhasPorColuna[i].length);
       for (const linha of linhasPorColuna[i]) {
         try {
-          pagina.drawText(linha, { x, y: yColuna, size: PDF_LOCALIZADORES_TAMANHO_FONTE, font: fonteNormal });
+          pagina.drawText(linha, { x, y: yColuna, size: PDF_LOCALIZADORES_TAMANHO_FONTE, font: fonteNormal, color: COR_CINZA_TEXTO });
         } catch (e) {
           // Ignora linha que a fonte padrao nao consiga desenhar.
         }
@@ -2221,20 +5560,12 @@ async function construirPdfTabela(itens, colunas, tituloDocumento) {
       }
       x += colunas[i].largura;
     }
-    y -= maxLinhas * PDF_LOCALIZADORES_ALTURA_LINHA + PDF_LOCALIZADORES_ALTURA_LINHA * 0.4;
+    y -= alturaLinha;
   }
 
-  return pdf.save();
-}
+  desenharRodapePaginas(pdf, fonteNormal, larguraPagina, margem);
 
-function construirPdfLocalizadores(itens, tituloDocumento) {
-  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
-  const colunas = [
-    { titulo: "Localizador", largura: larguraUtil * 0.26, campo: "nome" },
-    { titulo: "Descrição", largura: larguraUtil * 0.58, campo: "descricao" },
-    { titulo: "Total de processos", largura: larguraUtil * 0.16, campo: "totalProcessos" },
-  ];
-  return construirPdfTabela(itens, colunas, tituloDocumento);
+  return pdf.save();
 }
 
 function construirPdfProcessosLocalizador(itens, tituloDocumento) {
@@ -2245,6 +5576,263 @@ function construirPdfProcessosLocalizador(itens, tituloDocumento) {
     { titulo: "Inclusão no localizador", largura: larguraUtil * 0.2, campo: "inclusao" },
   ];
   return construirPdfTabela(itens, colunas, tituloDocumento);
+}
+
+// Desenha uma "secao" do resumo do Relatório Gerencial da Unidade: uma
+// barra de titulo (fundo escuro, texto branco) seguida de linhas
+// rotulo/valor (rotulo a esquerda em cinza, valor em negrito e destacado
+// a direita), com faixas zebradas - mesma linguagem visual das tabelas
+// de Localizadores/Processos/Remessas, so' que no formato rotulo-valor
+// em vez de colunas. Devolve o "y" seguinte, apos a secao.
+function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, largura, titulo, linhas) {
+  let y = yInicial;
+  const alturaCabecalho = 18;
+
+  pagina.drawRectangle({ x, y: y - alturaCabecalho, width: largura, height: alturaCabecalho, color: COR_PRIMARIA_ESCURA });
+  pagina.drawText(sanitizarTextoPdf(titulo), {
+    x: x + 6,
+    y: y - alturaCabecalho + 5,
+    size: 10,
+    font: fonteNegrito,
+    color: COR_BRANCO,
+  });
+  y -= alturaCabecalho;
+
+  const alturaLinha = 16;
+  linhas.forEach((linha, indice) => {
+    if (indice % 2 === 1) {
+      pagina.drawRectangle({ x, y: y - alturaLinha, width: largura, height: alturaLinha, color: COR_CINZA_CLARO });
+    }
+    pagina.drawText(sanitizarTextoPdf(linha.rotulo), {
+      x: x + 6,
+      y: y - alturaLinha + 5,
+      size: 9.5,
+      font: fonteNormal,
+      color: COR_CINZA_TEXTO,
+    });
+    const textoValor = sanitizarTextoPdf(String(linha.valor));
+    const larguraValor = fonteNegrito.widthOfTextAtSize(textoValor, 9.5);
+    pagina.drawText(textoValor, {
+      x: x + largura - 6 - larguraValor,
+      y: y - alturaLinha + 5,
+      size: 9.5,
+      font: fonteNegrito,
+      color: COR_PRIMARIA_ESCURA,
+    });
+    y -= alturaLinha;
+  });
+
+  pagina.drawRectangle({ x, y, width: largura, height: 0.75, color: COR_CINZA_BORDA });
+  return y - 16;
+}
+
+// Monta a capa/resumo do Relatório Gerencial da Unidade: cabecalho
+// institucional, titulo, unidade/data e uma secao por bloco de dados
+// (conclusos para decisão/sentença, sem movimentação, remessas em
+// aberto), cada uma no formato rotulo/valor. Avisos (falhas parciais em
+// alguma consulta) entram no final, em texto simples. Devolve um PDF a
+// parte (bytes), depois copiado para dentro do PDF final junto com as
+// tabelas de Localizadores/Remessas - mesmo padrao ja' usado para
+// combinar os PDFs de cada secao num unico arquivo.
+async function construirCapaRelatorioGerencial(
+  nomeUnidade,
+  dataInformacao,
+  secoes,
+  avisos,
+  titulo = "Relatório para Correição"
+) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  function novaPagina() {
+    const pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    return { pagina, y: altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem };
+  }
+
+  let { pagina, y } = novaPagina();
+
+  const larguraTitulo = fonteNegrito.widthOfTextAtSize(titulo, 18);
+  pagina.drawText(titulo, {
+    x: margem + Math.max(0, (larguraUtil - larguraTitulo) / 2),
+    y,
+    size: 18,
+    font: fonteNegrito,
+    color: COR_PRIMARIA_ESCURA,
+  });
+  y -= 24;
+  const linhasUnidade = quebrarLinhas(`Unidade: ${sanitizarTextoPdf(nomeUnidade)}`, fonteNegrito, 11, larguraUtil);
+  for (const linhaUnidade of linhasUnidade) {
+    pagina.drawText(linhaUnidade, {
+      x: margem,
+      y,
+      size: 11,
+      font: fonteNegrito,
+      color: COR_CINZA_TEXTO,
+    });
+    y -= 15;
+  }
+  pagina.drawText(`Data da informação: ${dataInformacao}`, {
+    x: margem,
+    y,
+    size: 9.5,
+    font: fonteNormal,
+    color: COR_CINZA_TEXTO,
+  });
+  y -= 22;
+
+  for (const secao of secoes) {
+    const alturaEstimada = 18 + secao.linhas.length * 16 + 16;
+    if (y - alturaEstimada < PDF_ALTURA_RODAPE + margem) {
+      ({ pagina, y } = novaPagina());
+    }
+    y = desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, margem, y, larguraUtil, secao.titulo, secao.linhas);
+  }
+
+  if (avisos.length > 0) {
+    if (y - 14 * (avisos.length + 1) < PDF_ALTURA_RODAPE + margem) {
+      ({ pagina, y } = novaPagina());
+    }
+    pagina.drawText("Avisos", { x: margem, y, size: 10, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+    y -= 14;
+    for (const aviso of avisos) {
+      const linhasAviso = quebrarLinhas(sanitizarTextoPdf(aviso), fonteNormal, 8.5, larguraUtil);
+      for (const linhaAviso of linhasAviso) {
+        pagina.drawText(linhaAviso, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+        y -= 11;
+      }
+    }
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+
+  return pdf.save();
+}
+
+// Paginas proprias (portrait) com a lista de Localizadores - extraida da
+// capa (que hoje termina em "PROCESSOS SEM MOVIMENTAÇÃO"/"REMESSAS AOS
+// JUÍZES LEIGOS") para poder ficar sempre por ultimo no PDF, depois de
+// todas as demais seções e tabelas, conforme a ordem pedida para o
+// Relatório da Unidade. Cada item de "localizadores" e' um objeto
+// "{ nome, totalProcessos? }" - quando "totalProcessos" existe (Gestão da
+// Unidade (alternativo), via "Localizadores do Órgão"), a linha mostra
+// "Nome — N processo(s))" e o subtítulo de limitação não é desenhado (a
+// limitação não existe mais); quando não existe (Corregedoria, via
+// Relatório Geral), mostra só o nome e mantém o subtítulo explicando que
+// o total não está disponível nesse fluxo.
+async function construirPaginaListaLocalizadores(nomeUnidade, localizadores) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  function novaPagina() {
+    const pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    return { pagina, y: altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem };
+  }
+
+  let { pagina, y } = novaPagina();
+
+  const tituloLocalizadores = `Localizadores da unidade "${sanitizarTextoPdf(nomeUnidade)}" (${localizadores.length})`;
+  const linhasTitulo = quebrarLinhas(tituloLocalizadores, fonteNegrito, 12, larguraUtil);
+  for (const linhaTitulo of linhasTitulo) {
+    if (y - 16 < PDF_ALTURA_RODAPE + margem) {
+      ({ pagina, y } = novaPagina());
+    }
+    pagina.drawText(linhaTitulo, {
+      x: margem,
+      y,
+      size: 12,
+      font: fonteNegrito,
+      color: COR_PRIMARIA_ESCURA,
+    });
+    y -= 16;
+  }
+  y -= 2;
+
+  // O total de processos so' esta' disponivel quando a lista vem da tela
+  // "Localizadores do Órgão" (Gestão da Unidade (alternativo)) - nesse
+  // caso a limitação abaixo não existe mais, então o subtítulo não é
+  // desenhado.
+  const temContagem = localizadores.length > 0 && localizadores[0].totalProcessos != null;
+
+  if (!temContagem) {
+    // Subtitulo discreto (sem destaque, fonte pequena e cinza) explicando a
+    // limitação desta lista - antes ficava misturado na seção "Avisos" no
+    // início do relatório; agora fica junto da própria seção que ele
+    // explica, sem chamar mais atenção do que o necessário.
+    const subtituloLocalizadores = quebrarLinhas(
+      "A lista abaixo traz só os nomes - por enquanto, a única forma de obter o total de processos de cada " +
+        'localizador é se habilitar na própria unidade e usar a ferramenta "Localizadores do Órgão" do painel.',
+      fonteNormal,
+      8.5,
+      larguraUtil
+    );
+    for (const linhaSubtitulo of subtituloLocalizadores) {
+      if (y - 12 < PDF_ALTURA_RODAPE + margem) {
+        ({ pagina, y } = novaPagina());
+      }
+      pagina.drawText(linhaSubtitulo, {
+        x: margem,
+        y,
+        size: 8.5,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
+      });
+      y -= 12;
+    }
+    y -= 6;
+  } else {
+    y -= 4;
+  }
+
+  const alturaLinha = 12;
+  // Um localizador por linha, com um marcador "-" e recuo pendurado
+  // (linhas de continuacao de um nome muito longo alinham embaixo do
+  // TEXTO, nao do marcador) - lista comprida em texto corrido virava
+  // um paragrafo unico dificil de escanear; um nome por linha e' bem
+  // mais facil de ler, mesmo custando mais altura de pagina. Ordem
+  // recebida do chamador (maior para menor total de processos, quando
+  // disponível, ou alfabética, quando não) - não reordena aqui.
+  const marcador = "-  ";
+  const larguraMarcador = fonteNormal.widthOfTextAtSize(marcador, 8.5);
+  const larguraTextoLocalizador = larguraUtil - larguraMarcador;
+
+  for (const item of localizadores) {
+    const texto = temContagem ? `${item.nome} — ${item.totalProcessos} processo(s)` : item.nome;
+    const linhasNome = quebrarLinhas(sanitizarTextoPdf(texto), fonteNormal, 8.5, larguraTextoLocalizador);
+    linhasNome.forEach((linhaTexto, indice) => {
+      if (y - alturaLinha < PDF_ALTURA_RODAPE + margem) {
+        ({ pagina, y } = novaPagina());
+      }
+      if (indice === 0) {
+        pagina.drawText("-", { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+      }
+      pagina.drawText(linhaTexto, {
+        x: margem + larguraMarcador,
+        y,
+        size: 8.5,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
+      });
+      y -= alturaLinha;
+    });
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+
+  return pdf.save();
 }
 
 // Planilha em formato "Excel XML Spreadsheet" (SpreadsheetML, o mesmo
@@ -2310,15 +5898,6 @@ ${linhasDados}
 `;
 }
 
-function construirExcelLocalizadores(itens) {
-  const colunas = [
-    { titulo: "Localizador", largura: 220, campo: "nome" },
-    { titulo: "Descrição", largura: 420, campo: "descricao" },
-    { titulo: "Total de processos", largura: 110, campo: "totalProcessos", tipo: "Number" },
-  ];
-  return construirExcelTabela("Localizadores", colunas, itens);
-}
-
 function construirExcelProcessosLocalizador(itens) {
   const colunas = [
     { titulo: "Número Processo", largura: 160, campo: "numeroProcesso" },
@@ -2328,55 +5907,13 @@ function construirExcelProcessosLocalizador(itens) {
   return construirExcelTabela("Processos", colunas, itens);
 }
 
-// Orquestra tudo: abre a aba oculta, coleta os localizadores de todas as
-// paginas e gera os formatos marcados (pdf/excel), baixando cada um.
-// Reporta progresso pelo mesmo callback usado no resto da extensao.
-async function exportarLocalizadores(formatos, aoProgredir) {
-  const notificar = (texto) => {
-    if (aoProgredir) aoProgredir(texto);
-  };
-
-  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!abaAtual || !abaAtual.url) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
-  }
-
-  notificar("Abrindo a tela de Localizadores do Órgão...");
-  const { itens, erro } = await abrirAbaEColetarLocalizadores(abaAtual.url);
-
-  if (itens.length === 0) {
-    throw new Error(erro || "Nenhum localizador encontrado.");
-  }
-
-  // Classificado por total de processos (do maior para o menor), para
-  // destacar de imediato os localizadores mais usados - vale tanto para
-  // o PDF quanto para a planilha.
-  const itensOrdenados = [...itens].sort((a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0));
-
-  const tituloDocumento = `Localizadores do Órgão — ${itensOrdenados.length} registro(s) — gerado em ${new Date().toLocaleString("pt-BR")}`;
-  const nomeBase = `eproc/localizadores_orgao_${new Date().toISOString().slice(0, 10)}`;
-
-  if (formatos.pdf) {
-    notificar("Gerando PDF...");
-    const bytes = await construirPdfLocalizadores(itensOrdenados, tituloDocumento);
-    await baixarUm(`${nomeBase}.pdf`, construirDataUrlBinario("application/pdf", bytes));
-  }
-
-  if (formatos.excel) {
-    notificar("Gerando planilha Excel...");
-    const xml = construirExcelLocalizadores(itensOrdenados);
-    await baixarUm(`${nomeBase}.xls`, construirDataUrl("application/vnd.ms-excel", xml));
-  }
-
-  notificar("Finalizando...");
-  return { total: itensOrdenados.length, erroColeta: erro };
-}
-
 // Reaproveita a mesma coleta multi-pagina de "Localizadores do Órgão"
 // (abrirAbaEColetarLocalizadores) para alimentar o dropdown de navegacao
 // rapida do painel: so' os localizadores com pelo menos 1 processo
-// atribuido (os outros nao tem link nenhum para navegar), ordenados por
-// nome para facilitar achar um especifico na lista.
+// atribuido (os outros nao tem link nenhum para navegar). Devolve na
+// ORDEM ORIGINAL da coleta (nao ordena por nome aqui) - quem decide se
+// ordena ou nao antes de exibir no dropdown e' o popup.js, respeitando a
+// configuracao "ordenarListas" (engrenagem do painel).
 async function listarLocalizadoresComProcessos(aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
@@ -2394,9 +5931,7 @@ async function listarLocalizadoresComProcessos(aoProgredir) {
     throw new Error(erro || "Nenhum localizador encontrado.");
   }
 
-  const comProcessos = itens
-    .filter((item) => item.totalProcessos > 0 && item.urlProcessos)
-    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  const comProcessos = itens.filter((item) => item.totalProcessos > 0 && item.urlProcessos);
 
   notificar("Finalizando...");
   return { localizadores: comProcessos, erroColeta: erro };
@@ -2466,6 +6001,121 @@ async function exportarProcessosDoLocalizador(nomeLocalizador, urlProcessos, for
   return { total: itensOrdenados.length, erroColeta: erro };
 }
 
+// Abre um processo numa aba oculta e pede ao content script (ja' injetado
+// automaticamente por ser controlador.php) a lista de documentos - mesma
+// mensagem "LISTAR_DOCUMENTOS" usada quando o usuario clica em "Detectar
+// documentos" com o processo aberto na aba ativa, so' que aqui a aba e'
+// controlada inteiramente pela extensao. Espera um pouco apos o
+// carregamento porque a tabela de eventos/documentos e' montada por
+// JavaScript da propria pagina do eproc, nao esta' pronta no instante
+// exato do "complete".
+async function abrirAbaEListarDocumentosDoProcesso(urlProcesso) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlProcesso, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_DOCUMENTOS" });
+    return {
+      numeroProcesso: (resposta && resposta.numeroProcesso) || "",
+      documentos: (resposta && resposta.documentos) || [],
+      movimentacao: (resposta && resposta.movimentacao) || [],
+      erro: null,
+    };
+  } catch (e) {
+    return { numeroProcesso: "", documentos: [], movimentacao: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Exportacao em lote: para cada processo da lista de UM localizador
+// (recebida do painel, ja' capturada durante a listagem de "Processos
+// por Localizador"), abre o processo numa aba oculta, coleta todos os
+// documentos e monta um PDF unico combinado (mesma logica de
+// "construirPdfUnico"/"processarFila", com movimentacao intercalada entre
+// os documentos). Ao contrario da exportacao "Arquivos individuais"/"PDF
+// unico" de um processo so' (que roda na aba ativa, ja' aberta pelo
+// usuario), aqui cada processo e' navegado pela propria extensao, um de
+// cada vez (nunca em paralelo, para nao sobrecarregar o eproc nem abrir
+// dezenas de abas ocultas simultaneas).
+//
+// Estrutura de pastas pedida: uma pasta por processo (nome = numero do
+// processo, direto dentro de "eproc/", igual as outras exportacoes de
+// processo desta extensao) e, dentro dela, um unico arquivo "Exportado -
+// <localizador>.pdf" - assim, ao exportar o mesmo processo por
+// localizadores diferentes, cada exportacao fica em seu proprio arquivo
+// dentro da mesma pasta do processo, sem sobrescrever a anterior.
+async function exportarDocumentosProcessosLocalizador(nomeLocalizador, urlProcessos, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  if (!urlProcessos) {
+    throw new Error("URL do localizador não informada.");
+  }
+
+  notificar(`Abrindo a lista de processos de "${nomeLocalizador}"...`);
+  const { itens, erro: erroColeta } = await abrirAbaEColetarProcessosDoLocalizador(urlProcessos);
+
+  if (itens.length === 0) {
+    throw new Error(erroColeta || "Nenhum processo encontrado para esse localizador.");
+  }
+
+  const nomeLocalizadorArquivo = sanitizarNomeArquivo(nomeLocalizador);
+  const total = itens.length;
+  const erros = [];
+  let concluidos = 0;
+
+  for (const item of itens) {
+    const numeroProcesso = item.numeroProcesso || `processo_${concluidos + 1}`;
+    notificar(`Processando processo ${concluidos + 1} de ${total}: ${numeroProcesso}...`);
+
+    if (!item.url) {
+      erros.push({ nome: numeroProcesso, mensagem: "Link do processo não encontrado na listagem." });
+      concluidos += 1;
+      continue;
+    }
+
+    try {
+      const { documentos, movimentacao, erro: erroAba } = await abrirAbaEListarDocumentosDoProcesso(item.url);
+
+      if (erroAba) {
+        erros.push({ nome: numeroProcesso, mensagem: erroAba });
+        concluidos += 1;
+        continue;
+      }
+      if (documentos.length === 0) {
+        erros.push({ nome: numeroProcesso, mensagem: "Nenhum documento encontrado neste processo." });
+        concluidos += 1;
+        continue;
+      }
+
+      const obterUrlResolvida = criarResolvedorUrlDocumento();
+      const bytesFinais = await montarBytesPdfUnico(documentos, obterUrlResolvida, movimentacao, (feitosDoc, totalDoc) => {
+        notificar(
+          `Processando processo ${concluidos + 1} de ${total}: ${numeroProcesso} (documento ${feitosDoc} de ${totalDoc})...`
+        );
+      });
+
+      const nomeArquivo = `eproc/${sanitizarNomeArquivo(numeroProcesso)}/Exportado - ${nomeLocalizadorArquivo}.pdf`;
+      await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytesFinais));
+    } catch (e) {
+      erros.push({ nome: numeroProcesso, mensagem: e && e.message ? e.message : String(e) });
+    }
+
+    concluidos += 1;
+  }
+
+  notificar("Finalizando...");
+  return { total, concluidos, erros, erroColeta };
+}
+
 // ---- Regras de Automação (exportar sem precisar estar na página) ----
 
 // O link para "Automatizar Localizadores do Órgão" (menu Localizadores >
@@ -2482,6 +6132,70 @@ function clicarLinkAutomatizarLocalizadoresNaPagina() {
   return true;
 }
 
+// So' para o perfil CORREGEDORIA: a tela "Automatizar Tramitação
+// Processual" traz um filtro obrigatório "ÓRGÃO" (`#selOrgao`) - sem
+// escolher uma unidade e clicar em "Pesquisar" (`#sbmPesquisar`), a
+// tabela nunca lista nenhuma regra, mesmo havendo regras cadastradas
+// (era essa a causa real do "retorna zero" para esse perfil - os demais
+// perfis (MAGISTRADO/GESTÃO DA UNIDADE) já ficam restritos a' própria
+// unidade sem esse filtro aparecer). O value de cada <option> desse
+// select (ex.: "100360|") NÃO é o mesmo value do "Órgão/Juízo" do
+// Relatório Geral (espaços de valores diferentes entre as duas telas) -
+// por isso a selecao aqui casa pelo TEXTO da unidade (nome extraído do
+// rótulo, já que cada opção termina com "- CODIGO (contagem)"), não pelo
+// value. Autocontida, executada via chrome.scripting.executeScript.
+function selecionarOrgaoRegrasAutomacaoNaPagina(nomeUnidade) {
+  const select = document.getElementById("selOrgao");
+  // Perfis sem esse filtro (MAGISTRADO/GESTÃO DA UNIDADE) simplesmente
+  // não tem esse campo na tela - segue sem selecionar nada.
+  if (!select) return { ok: true, selecionado: false };
+
+  function normalizarEspacos(texto) {
+    return (texto || "").replace(/\s+/g, " ").trim();
+  }
+
+  // Ex.: "Juizado Especial Cível e Juizado Especial da Fazenda Pública de
+  // Astorga  - AST1JE (1)" -> "Juizado Especial Cível e Juizado Especial
+  // da Fazenda Pública de Astorga". Ignora a contagem entre parênteses no
+  // final e tudo a partir do ULTIMO " - " (código/sigla da unidade nesta
+  // tela) - o eproc não é consistente na quantidade de espaços antes
+  // desse hífen (às vezes 1, às vezes 2), então casar pelo texto INTEIRO
+  // da opção (como antes) falhava sempre que aparecia esse espaço extra;
+  // extraindo só o nome (e comparando nome com nome) o espaçamento da
+  // sigla deixa de importar.
+  function nomeUnidadeDaOpcaoOrgao(textoOpcao) {
+    const semContagem = textoOpcao.replace(/\s*\(\d+\)\s*$/, "");
+    const m = semContagem.match(/^(.+)\s+-\s+([^-]*)$/);
+    return normalizarEspacos(m ? m[1] : semContagem);
+  }
+
+  const alvo = normalizarEspacos(nomeUnidade).toLowerCase();
+  if (!alvo) {
+    return { ok: false, erro: 'Nome da unidade não informado para selecionar o filtro "ÓRGÃO".' };
+  }
+
+  let encontrouOpcao = false;
+  for (const opcao of select.options) {
+    const textoOpcao = normalizarEspacos(opcao.textContent || "");
+    const nomeExtraido = nomeUnidadeDaOpcaoOrgao(textoOpcao).toLowerCase();
+    const selecionada = textoOpcao.toLowerCase() === alvo || nomeExtraido === alvo;
+    opcao.selected = selecionada;
+    if (selecionada) encontrouOpcao = true;
+  }
+  if (!encontrouOpcao) {
+    return {
+      ok: false,
+      erro: `Unidade "${nomeUnidade}" não encontrada no filtro "ÓRGÃO" da tela de Regras de Automação.`,
+    };
+  }
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+
+  const botaoPesquisar = document.getElementById("sbmPesquisar");
+  if (botaoPesquisar) botaoPesquisar.click();
+
+  return { ok: true, selecionado: true };
+}
+
 // Abre uma aba oculta a partir da URL da aba atual, navega ate' a tela
 // "Automatizar Tramitação Processual" e pede ao content script (ja'
 // injetado automaticamente nela, por ser controlador.php) a lista de
@@ -2489,9 +6203,10 @@ function clicarLinkAutomatizarLocalizadoresNaPagina() {
 // logica de raspagem ja' usada quando o usuario estava manualmente
 // nessa tela, so' que agora rodando numa aba que a propria extensao
 // controla, sem exigir navegacao manual.
-async function abrirAbaEListarRegrasAutomacao(urlBase) {
+async function abrirAbaEListarRegrasAutomacao(urlBase, nomeUnidade) {
   let aba;
   try {
+    await adquirirSlotDeAbaOculta();
     aba = await chrome.tabs.create({ url: urlBase, active: false });
     await aguardarCarregamentoAba(aba.id);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -2516,10 +6231,47 @@ async function abrirAbaEListarRegrasAutomacao(urlBase) {
     // carregamento (mesmo padrao usado no Relatório Geral).
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_REGRAS_AUTOMACAO" });
+    // So' quando um nome de unidade e' passado (perfil CORREGEDORIA, via
+    // "exportarRelatorioGerencialUnidade" com uma unidade escolhida) -
+    // ver "selecionarOrgaoRegrasAutomacaoNaPagina" para o motivo. Nao
+    // afeta o botao avulso "Exportar Regras de Automação" nem o cartao
+    // "Gestão da Unidade (alternativo)" (nenhum dos dois passa unidade
+    // aqui).
+    if (nomeUnidade) {
+      const [{ result: resultadoOrgao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoRegrasAutomacaoNaPagina,
+        args: [nomeUnidade],
+      });
+      if (resultadoOrgao && !resultadoOrgao.ok) {
+        return { regras: [], tituloPagina: "", totalRegrasNaPagina: 0, erro: resultadoOrgao.erro };
+      }
+      if (resultadoOrgao && resultadoOrgao.selecionado) {
+        // "Pesquisar" pode disparar uma navegacao de verdade (POST) ou so'
+        // redesenhar a tabela via AJAX - espera os dois casos antes de
+        // seguir para a leitura (que já tem seu próprio retry abaixo).
+        await aguardarCarregamentoAba(aba.id).catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    // A tabela de regras pode terminar de montar (via AJAX/DataTable)
+    // um pouco depois do "carregamento" da aba - sem repetir a leitura
+    // aqui, uma consulta um pouco mais lenta que o normal lia a tabela
+    // ainda vazia e devolvia "nenhuma regra" mesmo com regras cadastradas.
+    // Tenta ate' 4 vezes (500ms entre cada), parando assim que alguma
+    // linha aparecer na pagina.
+    let resposta = null;
+    for (let tentativa = 0; tentativa < 4; tentativa += 1) {
+      resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_REGRAS_AUTOMACAO" });
+      if (resposta && resposta.totalRegrasNaPagina > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
     return {
       regras: (resposta && resposta.regras) || [],
       tituloPagina: (resposta && resposta.tituloPagina) || "",
+      totalRegrasNaPagina: (resposta && resposta.totalRegrasNaPagina) || 0,
       erro: null,
     };
   } catch (e) {
@@ -2528,6 +6280,7 @@ async function abrirAbaEListarRegrasAutomacao(urlBase) {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
     }
+    liberarSlotDeAbaOculta();
   }
 }
 
@@ -2552,35 +6305,79 @@ function construirDocumentoRegras(regras, tituloPagina) {
             }</div>`
           : "";
 
+      // Sequencia vertical numerada (1 Origem -> 2 Critério -> 3 Destino
+      // -> 4 Ação automatizada, quando existir), em vez de caixas numa
+      // linha horizontal com "flex-wrap": com textos de tamanhos bem
+      // diferentes (nome de localizador curto, criterio longo, etc.), o
+      // wrap quebrava as caixas de forma imprevisivel e as setas ficavam
+      // soltas entre linhas - a leitura ficava confusa. Empilhado e
+      // numerado, a ordem de execucao fica clara independente do
+      // tamanho de cada texto, e sempre continua legivel no popup.
+      // Texto da Ação Automatizada em linhas SEPARADAS (uma por informação
+      // - ação programada, evento, texto etc.), cada uma com um divisor
+      // sutil entre si, em vez de um paragrafo corrido colando tudo num
+      // bloco so' (o que ficava dificil de escanear, especialmente quando
+      // a pagina do eproc nao usa <br> entre essas informações).
+      const linhasAcao = r.acaoLinhas && r.acaoLinhas.length > 0 ? r.acaoLinhas : r.acaoResumo ? [r.acaoResumo] : [];
+      const acaoHtml = linhasAcao.map((linha) => `<div class="fluxo-acao-linha">${escaparHtml(linha)}</div>`).join("");
+
+      // Todos os critérios levados em consideração (quando a regra aceita
+      // mais de um, ligados por "OU"), um por linha com um divisor sutil
+      // entre eles - em vez de só o primeiro com um badge "+N
+      // alternativa(s)" escondendo quais são os demais.
+      const criteriosLista = r.criteriosLista && r.criteriosLista.length > 0 ? r.criteriosLista : [r.criterioResumo];
+      const criterioHtmlFluxo = criteriosLista.map((linha) => `<div class="fluxo-criterio-linha">${escaparHtml(linha)}</div>`).join("");
+
+      const passos = [
+        { classe: "fluxo-origem", titulo: "Origem", texto: r.localizadorOrigem, extra: "" },
+        {
+          classe: "fluxo-criterio",
+          titulo: "Critério",
+          texto: null,
+          extra: criterioHtmlFluxo + fluxoExtra,
+        },
+        { classe: "fluxo-destino", titulo: "Destino", texto: r.destinoResumo, extra: "" },
+      ];
+      if (linhasAcao.length > 0) {
+        passos.push({ classe: "fluxo-acao", titulo: "Ação automatizada", texto: null, extra: acaoHtml });
+      }
+
+      // A caixa da Ação Automatizada, quando a regra tem um "Localizador
+      // de Erro" definido, ganha uma seta LATERAL apontando para uma
+      // caixa vermelha à parte com esse localizador - destacando
+      // visualmente para onde o processo vai se a ação automatizada
+      // falhar, em vez de misturar essa informação no meio do texto
+      // corrido da ação.
+      const caixaErro = r.localizadorErro
+        ? `
+      <div class="fluxo-seta-lateral" aria-hidden="true">&rarr;</div>
+      <div class="fluxo-caixa fluxo-erro">
+        <div class="fluxo-caixa-titulo">Localizador de Erro</div>
+        <div>${escaparHtml(r.localizadorErro)}</div>
+      </div>`
+        : "";
+
       const fluxo = `
     <div class="fluxo">
-      <div class="fluxo-caixa fluxo-origem">
-        <div class="fluxo-caixa-titulo">Origem</div>
-        <div>${escaparHtml(r.localizadorOrigem)}</div>
-      </div>
-      <div class="fluxo-seta" aria-hidden="true">&rarr;</div>
-      <div class="fluxo-coluna">
-        <div class="fluxo-caixa fluxo-criterio">
-          <div class="fluxo-caixa-titulo">Critério</div>
-          <div>${escaparHtml(r.criterioResumo)}</div>
-          ${r.criterioAlternativas > 0 ? `<div class="fluxo-badge">+${r.criterioAlternativas} alternativa(s)</div>` : ""}
-        </div>
-        ${fluxoExtra}
-      </div>
-      <div class="fluxo-seta" aria-hidden="true">&rarr;</div>
-      <div class="fluxo-caixa fluxo-destino">
-        <div class="fluxo-caixa-titulo">Destino</div>
-        <div>${escaparHtml(r.destinoResumo)}</div>
-      </div>
-      ${
-        r.acaoResumo
-          ? `<div class="fluxo-seta" aria-hidden="true">&rarr;</div>
-      <div class="fluxo-caixa fluxo-acao">
-        <div class="fluxo-caixa-titulo">Ação automatizada</div>
-        <div>${escaparHtml(r.acaoResumo)}</div>
-      </div>`
-          : ""
-      }
+      ${passos
+        .map((passo, indice) => {
+          const seta = indice > 0 ? `<div class="fluxo-seta" aria-hidden="true">&darr;</div>` : "";
+          const caixa = `
+      <div class="fluxo-caixa ${passo.classe}">
+        <div class="fluxo-caixa-titulo"><span class="fluxo-numero">${indice + 1}</span> ${escaparHtml(passo.titulo)}</div>
+        ${passo.texto !== null ? `<div>${escaparHtml(passo.texto)}</div>` : ""}
+        ${passo.extra}
+      </div>`;
+          // So' a caixa da Ação Automatizada (ultimo passo, quando tem
+          // Localizador de Erro) entra numa linha horizontal junto com a
+          // seta lateral e a caixa vermelha - as demais seguem empilhadas
+          // normalmente.
+          if (passo.classe === "fluxo-acao" && caixaErro) {
+            return `${seta}<div class="fluxo-linha-com-erro">${caixa}${caixaErro}</div>`;
+          }
+          return `${seta}${caixa}`;
+        })
+        .join("")}
     </div>`;
 
       return `
@@ -2620,20 +6417,34 @@ function construirDocumentoRegras(regras, tituloPagina) {
   .regra-cabecalho { display:flex; justify-content:space-between; align-items:baseline; border-bottom:2px solid #2c6ea6; padding-bottom:8px; margin-bottom:12px; }
   .regra-numero { font-size:16px; font-weight:700; color:#1c3d5a; }
   .regra-prioridade { font-size:12.5px; color:#2c6ea6; font-weight:600; }
-  .fluxo { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
-  .fluxo-caixa { background:#f4f7fa; border:1px solid #c8d6e0; border-radius:6px; padding:7px 10px; font-size:12px; line-height:1.4; max-width:220px; }
-  .fluxo-caixa-titulo { font-size:9.5px; text-transform:uppercase; letter-spacing:0.03em; font-weight:700; color:#2c6ea6; margin-bottom:2px; }
+  .fluxo { display:flex; flex-direction:column; align-items:stretch; gap:2px; margin-bottom:14px; max-width:560px; }
+  .fluxo-caixa { background:#f4f7fa; border:1px solid #c8d6e0; border-left-width:4px; border-radius:6px; padding:8px 12px; font-size:13px; line-height:1.4; }
+  .fluxo-caixa-titulo { display:flex; align-items:center; gap:6px; font-size:9.5px; text-transform:uppercase; letter-spacing:0.03em; font-weight:700; color:#2c6ea6; margin-bottom:3px; }
+  .fluxo-numero { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; border-radius:50%; background:#2c6ea6; color:#fff; font-size:9.5px; font-weight:700; }
   .fluxo-origem { background:#eef1f5; border-color:#c3cdd6; }
   .fluxo-criterio { background:#fff6e0; border-color:#f0d68a; }
   .fluxo-criterio .fluxo-caixa-titulo { color:#8a6d00; }
+  .fluxo-criterio .fluxo-numero { background:#8a6d00; color:#fff; }
   .fluxo-destino { background:#e9f7ee; border-color:#a9dcb9; }
   .fluxo-destino .fluxo-caixa-titulo { color:#1a7f37; }
+  .fluxo-destino .fluxo-numero { background:#1a7f37; color:#fff; }
   .fluxo-acao { background:#eef1fd; border-color:#c2caf5; }
   .fluxo-acao .fluxo-caixa-titulo { color:#3d4fc4; }
-  .fluxo-seta { font-size:16px; color:#9aa7b0; }
-  .fluxo-coluna { display:flex; flex-direction:column; gap:4px; }
-  .fluxo-extra { font-size:11px; color:#666; max-width:220px; }
-  .fluxo-badge { font-size:10px; color:#888; margin-top:2px; }
+  .fluxo-acao .fluxo-numero { background:#3d4fc4; color:#fff; }
+  .fluxo-seta { font-size:14px; color:#9aa7b0; text-align:center; line-height:1; margin:-2px 0; padding-left:8px; }
+  .fluxo-acao-linha { padding-top:4px; margin-top:4px; }
+  .fluxo-acao-linha:first-child { padding-top:0; margin-top:0; border-top:none; }
+  .fluxo-acao-linha + .fluxo-acao-linha { border-top:1px dashed #c2caf5; }
+  .fluxo-criterio-linha { padding-top:4px; margin-top:4px; }
+  .fluxo-criterio-linha:first-child { padding-top:0; margin-top:0; border-top:none; }
+  .fluxo-criterio-linha + .fluxo-criterio-linha { border-top:1px dashed #f0d68a; }
+  .fluxo-linha-com-erro { display:flex; align-items:stretch; gap:4px; }
+  .fluxo-linha-com-erro .fluxo-caixa.fluxo-acao { flex:1 1 auto; min-width:0; }
+  .fluxo-seta-lateral { flex:0 0 auto; display:flex; align-items:center; font-size:16px; color:#c0392b; padding:0 2px; }
+  .fluxo-erro { flex:0 0 auto; max-width:170px; background:#fdecea; border-color:#f1a9a0; }
+  .fluxo-erro .fluxo-caixa-titulo { color:#c0392b; }
+  .fluxo-extra { font-size:11.5px; color:#666; margin-top:5px; padding-top:5px; border-top:1px dashed #d8dee4; }
+  .fluxo-badge { display:inline-block; font-size:10px; color:#888; margin-top:3px; }
   dl { margin:0; }
   dt { font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; color:#888; font-weight:700; margin-top:10px; }
   dt:first-child { margin-top:0; }
@@ -2651,31 +6462,240 @@ function construirDocumentoRegras(regras, tituloPagina) {
 </html>`;
 }
 
-// Orquestra tudo: abre a aba oculta, coleta as regras ativas e abre o
-// documento HTML numa aba nova. Reporta progresso pelo mesmo callback
-// usado no resto da extensao.
-async function exportarRegrasAutomacao(aoProgredir) {
-  const notificar = (texto) => {
-    if (aoProgredir) aoProgredir(texto);
-  };
+// ---- Geracao do PDF de Regras de Automação ----
+//
+// Mesma informacao do documento HTML (construirDocumentoRegras), redesenhada
+// com pdf-lib: cada regra vira um "cartao" com o fluxo Localizador Origem ->
+// Critério -> Destino -> Ação Automatizada empilhado (caixas coloridas +
+// setas) - mesma linguagem visual da versao HTML, para quem preferir
+// baixar/arquivar em PDF em vez de abrir a aba com o HTML. O Localizador
+// de Erro (quando a regra tiver um) NÃO entra nesse fluxograma - so' no
+// detalhamento em texto logo abaixo, junto com a Ação Automatizada.
+const PDF_REGRAS_CORES = {
+  origem: { fundo: rgb(0xee / 255, 0xf1 / 255, 0xf5 / 255), acento: rgb(0x8b / 255, 0x99 / 255, 0xa6 / 255), titulo: COR_PRIMARIA },
+  criterio: { fundo: rgb(0xff / 255, 0xf6 / 255, 0xe0 / 255), acento: rgb(0x8a / 255, 0x6d / 255, 0x00 / 255), titulo: rgb(0x8a / 255, 0x6d / 255, 0x00 / 255) },
+  destino: { fundo: rgb(0xe9 / 255, 0xf7 / 255, 0xee / 255), acento: rgb(0x1a / 255, 0x7f / 255, 0x37 / 255), titulo: rgb(0x1a / 255, 0x7f / 255, 0x37 / 255) },
+  acao: { fundo: rgb(0xee / 255, 0xf1 / 255, 0xfd / 255), acento: rgb(0x3d / 255, 0x4f / 255, 0xc4 / 255), titulo: rgb(0x3d / 255, 0x4f / 255, 0xc4 / 255) },
+};
 
-  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!abaAtual || !abaAtual.url) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+// Desenha uma caixa do fluxo (Origem/Critério/Destino/Ação/Erro): faixa de
+// acento a esquerda, circulo numerado (quando "numero" e' informado - a
+// caixa de erro nao tem numero, so' o titulo), titulo e um ou mais
+// paragrafos de texto, opcionalmente separados por um traço fino entre si
+// (usado na Ação Automatizada, para nao colar as informações num bloco so').
+// Devolve a altura ocupada, para o chamador avançar o "y".
+function desenharCaixaFluxoPdf(pagina, { x, yTopo, largura, numero, titulo, paragrafos, cores, fonteNormal, fonteNegrito, comDivisores }) {
+  const padX = 8;
+  const padY = 7;
+  const larguraTexto = largura - padX * 2 - (numero !== null ? 16 : 0);
+  const xTexto = x + padX + (numero !== null ? 16 : 0);
+  const tamanhoTexto = 8.5;
+  const alturaLinhaTexto = 11.5;
+
+  const linhasPorParagrafo = paragrafos
+    .filter((p) => (p || "").trim() !== "")
+    .map((p) => quebrarLinhas(sanitizarTextoPdf(p), fonteNormal, tamanhoTexto, larguraTexto));
+
+  const alturaTitulo = 20;
+  const totalLinhasTexto = linhasPorParagrafo.reduce((soma, ls) => soma + Math.max(ls.length, 1), 0);
+  const alturaDivisores = comDivisores && linhasPorParagrafo.length > 1 ? (linhasPorParagrafo.length - 1) * 6 : 0;
+  const alturaCaixa = padY * 2 + alturaTitulo + totalLinhasTexto * alturaLinhaTexto + alturaDivisores;
+
+  pagina.drawRectangle({
+    x,
+    y: yTopo - alturaCaixa,
+    width: largura,
+    height: alturaCaixa,
+    color: cores.fundo,
+    borderColor: cores.acento,
+    borderWidth: 0.75,
+  });
+  pagina.drawRectangle({ x, y: yTopo - alturaCaixa, width: 3, height: alturaCaixa, color: cores.acento });
+
+  const yTituloBase = yTopo - padY - 9;
+  if (numero !== null) {
+    const cx = x + padX + 7;
+    const cy = yTituloBase + 2.5;
+    pagina.drawEllipse({ x: cx, y: cy, xScale: 6.5, yScale: 6.5, color: cores.acento });
+    pagina.drawText(String(numero), {
+      x: cx - (String(numero).length > 1 ? 4.5 : 2.3),
+      y: cy - 3,
+      size: 8,
+      font: fonteNegrito,
+      color: COR_BRANCO,
+    });
+  }
+  pagina.drawText(sanitizarTextoPdf(titulo).toUpperCase(), {
+    x: x + padX + (numero !== null ? 16 : 0),
+    y: yTituloBase,
+    size: 8,
+    font: fonteNegrito,
+    color: cores.titulo,
+  });
+
+  let y = yTopo - padY - alturaTitulo;
+  linhasPorParagrafo.forEach((linhas, indice) => {
+    if (indice > 0 && comDivisores) {
+      pagina.drawLine({
+        start: { x: xTexto, y: y + 4 },
+        end: { x: x + largura - padX, y: y + 4 },
+        thickness: 0.5,
+        color: COR_CINZA_BORDA,
+      });
+      y -= 6;
+    }
+    linhas.forEach((linha) => {
+      pagina.drawText(linha, { x: xTexto, y, size: tamanhoTexto, font: fonteNormal, color: COR_CINZA_TEXTO });
+      y -= alturaLinhaTexto;
+    });
+  });
+
+  return alturaCaixa;
+}
+
+// Seta simples (linha + ponta em "V") entre duas caixas - vertical (entre
+// os passos empilhados) ou horizontal (da Ação Automatizada para a caixa
+// de erro), conforme "direcao".
+function desenharSetaPdf(pagina, { x, y, comprimento, direcao, cor }) {
+  if (direcao === "baixo") {
+    pagina.drawLine({ start: { x, y }, end: { x, y: y - comprimento }, thickness: 1, color: cor });
+    pagina.drawLine({ start: { x: x - 3, y: y - comprimento + 4 }, end: { x, y: y - comprimento }, thickness: 1, color: cor });
+    pagina.drawLine({ start: { x: x + 3, y: y - comprimento + 4 }, end: { x, y: y - comprimento }, thickness: 1, color: cor });
+  } else {
+    pagina.drawLine({ start: { x, y }, end: { x: x + comprimento, y }, thickness: 1, color: cor });
+    pagina.drawLine({ start: { x: x + comprimento - 4, y: y + 3 }, end: { x: x + comprimento, y }, thickness: 1, color: cor });
+    pagina.drawLine({ start: { x: x + comprimento - 4, y: y - 3 }, end: { x: x + comprimento, y }, thickness: 1, color: cor });
+  }
+}
+
+async function construirPdfRegras(regras, tituloPagina) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  let pagina = null;
+  let y = 0;
+
+  function novaPagina(comTitulo) {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+    if (comTitulo) {
+      pagina.drawText(sanitizarTextoPdf("Regras de automação ativas"), {
+        x: margem,
+        y,
+        size: 14,
+        font: fonteNegrito,
+        color: COR_PRIMARIA_ESCURA,
+      });
+      y -= 16;
+      pagina.drawText(sanitizarTextoPdf(`${tituloPagina} — ${regras.length} regra(s) ativa(s)`), {
+        x: margem,
+        y,
+        size: 9,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
+      });
+      y -= 22;
+    }
+  }
+  novaPagina(true);
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina(false);
+    }
   }
 
-  notificar("Abrindo a tela de Automatizar Tramitação Processual...");
-  const { regras, tituloPagina, erro } = await abrirAbaEListarRegrasAutomacao(abaAtual.url);
+  for (const r of regras) {
+    garantirEspaco(60);
 
-  if (erro) throw new Error(erro);
-  if (regras.length === 0) throw new Error("Nenhuma regra ativa encontrada.");
+    pagina.drawText(sanitizarTextoPdf(`Regra ${r.numero || "?"}`), { x: margem, y, size: 12, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+    const textoPrioridade = sanitizarTextoPdf(r.prioridade || "");
+    if (textoPrioridade) {
+      const larguraPrioridade = fonteNegrito.widthOfTextAtSize(textoPrioridade, 9.5);
+      pagina.drawText(textoPrioridade, { x: margem + larguraUtil - larguraPrioridade, y: y + 1, size: 9.5, font: fonteNegrito, color: COR_PRIMARIA });
+    }
+    y -= 6;
+    pagina.drawLine({ start: { x: margem, y }, end: { x: margem + larguraUtil, y }, thickness: 1.25, color: COR_PRIMARIA });
+    y -= 14;
 
-  notificar("Gerando documento...");
-  const html = construirDocumentoRegras(regras, tituloPagina);
-  await chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(html) });
+    const linhasAcao = r.acaoLinhas && r.acaoLinhas.length > 0 ? r.acaoLinhas : r.acaoResumo ? [r.acaoResumo] : [];
+    const criteriosLista = r.criteriosLista && r.criteriosLista.length > 0 ? r.criteriosLista : [r.criterioResumo];
 
-  notificar("Finalizando...");
-  return { total: regras.length };
+    const passos = [
+      { titulo: "Localizador Origem", cores: PDF_REGRAS_CORES.origem, paragrafos: [r.localizadorOrigem], largura: larguraUtil },
+      {
+        titulo: "Critério",
+        cores: PDF_REGRAS_CORES.criterio,
+        paragrafos: criteriosLista,
+        largura: larguraUtil,
+        comDivisores: true,
+      },
+      { titulo: "Destino", cores: PDF_REGRAS_CORES.destino, paragrafos: [r.destinoResumo], largura: larguraUtil },
+    ];
+    if (linhasAcao.length > 0) {
+      passos.push({ titulo: "Ação automatizada", cores: PDF_REGRAS_CORES.acao, paragrafos: linhasAcao, largura: larguraUtil, comDivisores: true });
+    }
+
+    passos.forEach((passo, indice) => {
+      garantirEspaco(30);
+      if (indice > 0) {
+        desenharSetaPdf(pagina, { x: margem + larguraUtil / 2, y, comprimento: 8, direcao: "baixo", cor: rgb(0.6, 0.65, 0.68) });
+        y -= 11;
+      }
+      const alturaCaixa = desenharCaixaFluxoPdf(pagina, {
+        x: margem,
+        yTopo: y,
+        largura: passo.largura,
+        numero: indice + 1,
+        titulo: passo.titulo,
+        paragrafos: passo.paragrafos,
+        cores: passo.cores,
+        fonteNormal,
+        fonteNegrito,
+        comDivisores: passo.comDivisores,
+      });
+      y -= alturaCaixa;
+    });
+
+    y -= 8;
+
+    const camposTexto = [
+      ["Grupo", r.grupo],
+      ["Localizador Origem", r.localizadorOrigem],
+      ["Tipo de Controle / Critério", r.criterioResumo],
+      ["Localizador Destino / Ação", r.destinoResumo],
+      ["Outros Critérios", (r.outrosCriteriosResumo || []).join(" — ") || "Nenhum"],
+      ...(linhasAcao.length > 0 ? [["Ação Automatizada", linhasAcao.join(" — ")]] : []),
+      ...(r.localizadorErro ? [["Localizador de Erro", r.localizadorErro]] : []),
+    ];
+    for (const [rotulo, valor] of camposTexto) {
+      const linhasRotulo = quebrarLinhas(sanitizarTextoPdf(rotulo), fonteNegrito, 8, larguraUtil);
+      const linhasValor = quebrarLinhas(sanitizarTextoPdf(String(valor || "-")), fonteNormal, 9.5, larguraUtil);
+      garantirEspaco(14 + linhasValor.length * 12);
+      pagina.drawText(linhasRotulo[0] || rotulo, { x: margem, y, size: 8, font: fonteNegrito, color: COR_CINZA_TEXTO });
+      y -= 12;
+      linhasValor.forEach((linha) => {
+        pagina.drawText(linha, { x: margem, y, size: 9.5, font: fonteNormal, color: rgb(0.13, 0.13, 0.13) });
+        y -= 12;
+      });
+      y -= 2;
+    }
+
+    y -= 6;
+    pagina.drawLine({ start: { x: margem, y }, end: { x: margem + larguraUtil, y }, thickness: 0.5, color: COR_CINZA_BORDA });
+    y -= 16;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+
+  return pdf.save();
 }
 
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
@@ -2686,56 +6706,23 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     return true;
   }
 
-  if (mensagem && mensagem.tipo === "GERAR_RELATORIO") {
-    // Mesmo padrao de BAIXAR_DOCUMENTOS: confirma o recebimento na hora e
-    // avisa o resultado final por uma mensagem separada
-    // (RELATORIO_FINALIZADO), em vez de manter a chamada original
-    // pendurada esperando uma unica resposta. Esse fluxo demora vários
-    // segundos (varias trocas de aba/pagina); manter só um canal de
-    // resposta pendente por tanto tempo é frágil - se o service worker
-    // for suspenso e reativado no meio do caminho, a promessa original
-    // nunca resolve e a UI fica "pendurada".
-    gerarRelatorioGeral((texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO", texto }).catch(() => {});
+  if (mensagem && mensagem.tipo === "LISTAR_UNIDADES_RELATORIO_GERAL") {
+    // Mesmo padrao das demais operacoes em segundo plano: confirma o
+    // recebimento na hora e avisa o resultado final por uma mensagem
+    // separada, ja' que essa operacao navega a aba e demora alguns
+    // segundos.
+    listarUnidadesRelatorioGeral((texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_UNIDADES_RELATORIO", texto }).catch(() => {});
     })
       .then((resultado) => {
-        chrome.runtime.sendMessage({ tipo: "RELATORIO_FINALIZADO", ok: true, resultado }).catch(() => {});
-      })
-      .catch((e) => {
         chrome.runtime
-          .sendMessage({
-            tipo: "RELATORIO_FINALIZADO",
-            ok: false,
-            erro: e && e.message ? e.message : String(e),
-          })
-          .catch(() => {});
-      });
-    sendResponse({ ok: true });
-    return true;
-  }
-
-  if (mensagem && mensagem.tipo === "ABRIR_TELA_RELATORIO") {
-    abrirTelaRelatorioGeral()
-      .then(() => sendResponse({ ok: true }))
-      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
-    return true;
-  }
-
-  if (mensagem && mensagem.tipo === "ABRIR_RELATORIO_PREENCHIDO") {
-    // Mesmo padrao de GERAR_RELATORIO: essa operacao tambem navega a aba e
-    // espera o carregamento/consulta terminar (alguns segundos), entao usa
-    // confirmacao imediata + mensagem separada de conclusao em vez de um
-    // unico sendResponse pendurado.
-    abrirRelatorioPreenchido(mensagem.categoria, mensagem.situacao, mensagem.filtro, mensagem.exportarExcel)
-      .then(() => {
-        chrome.runtime
-          .sendMessage({ tipo: "RELATORIO_PREENCHIDO_FINALIZADO", ok: true })
+          .sendMessage({ tipo: "UNIDADES_RELATORIO_FINALIZADO", ok: true, resultado })
           .catch(() => {});
       })
       .catch((e) => {
         chrome.runtime
           .sendMessage({
-            tipo: "RELATORIO_PREENCHIDO_FINALIZADO",
+            tipo: "UNIDADES_RELATORIO_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })
@@ -2764,35 +6751,9 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     return true;
   }
 
-  if (mensagem && mensagem.tipo === "EXPORTAR_LOCALIZADORES") {
-    // Mesmo padrao de GERAR_RELATORIO: a operacao percorre varias paginas
-    // e demora, entao confirma o recebimento na hora e avisa o resultado
-    // final por uma mensagem separada.
-    exportarLocalizadores(mensagem.formatos, (texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_LOCALIZADORES", texto }).catch(() => {});
-    })
-      .then((resultado) => {
-        chrome.runtime
-          .sendMessage({ tipo: "LOCALIZADORES_FINALIZADO", ok: true, resultado })
-          .catch(() => {});
-      })
-      .catch((e) => {
-        chrome.runtime
-          .sendMessage({
-            tipo: "LOCALIZADORES_FINALIZADO",
-            ok: false,
-            erro: e && e.message ? e.message : String(e),
-          })
-          .catch(() => {});
-      });
-    sendResponse({ ok: true });
-    return true;
-  }
-
   if (mensagem && mensagem.tipo === "LISTAR_LOCALIZADORES_COM_PROCESSOS") {
-    // Mesmo padrao de EXPORTAR_LOCALIZADORES: percorre varias paginas e
-    // demora, entao confirma o recebimento na hora e avisa o resultado
-    // final por uma mensagem separada.
+    // Percorre varias paginas e demora, entao confirma o recebimento na
+    // hora e avisa o resultado final por uma mensagem separada.
     listarLocalizadoresComProcessos((texto) => {
       chrome.runtime.sendMessage({ tipo: "PROGRESSO_LISTAR_LOCALIZADORES", texto }).catch(() => {});
     })
@@ -2837,20 +6798,97 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     return true;
   }
 
-  if (mensagem && mensagem.tipo === "EXPORTAR_REGRAS_AUTOMACAO") {
-    // Mesmo padrao de EXPORTAR_LOCALIZADORES/GERAR_RELATORIO: navega uma
-    // aba oculta e demora alguns segundos, entao confirma o recebimento
-    // na hora e avisa o resultado final por uma mensagem separada.
-    exportarRegrasAutomacao((texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_REGRAS", texto }).catch(() => {});
+  if (mensagem && mensagem.tipo === "EXPORTAR_DOCUMENTOS_LOCALIZADOR") {
+    // Mesmo padrao das demais exportacoes em segundo plano; pode demorar
+    // bastante (um processo de cada vez, cada um com sua propria aba
+    // oculta), entao confirma o recebimento na hora e avisa o resultado
+    // final por uma mensagem separada.
+    exportarDocumentosProcessosLocalizador(mensagem.nomeLocalizador, mensagem.urlProcessos, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_DOCUMENTOS_LOCALIZADOR", texto }).catch(() => {});
     })
       .then((resultado) => {
-        chrome.runtime.sendMessage({ tipo: "REGRAS_FINALIZADO", ok: true, resultado }).catch(() => {});
+        chrome.runtime
+          .sendMessage({ tipo: "DOCUMENTOS_LOCALIZADOR_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
       })
       .catch((e) => {
         chrome.runtime
           .sendMessage({
-            tipo: "REGRAS_FINALIZADO",
+            tipo: "DOCUMENTOS_LOCALIZADOR_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_GERENCIAL_UNIDADE") {
+    // Mesmo padrao das demais operacoes em segundo plano.
+    exportarRelatorioGerencialUnidade(
+      mensagem.valorUnidade,
+      mensagem.nomeUnidade,
+      mensagem.opcoes,
+      (texto) => {
+        chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_GERENCIAL", texto }).catch(() => {});
+      }
+    )
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_GERENCIAL_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_UNIDADE_ATUAL") {
+    // Mesmo padrao das demais operacoes em segundo plano.
+    exportarRelatorioUnidadeAtual(mensagem.opcoes, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_UNIDADE_ATUAL", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "RELATORIO_UNIDADE_ATUAL_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_UNIDADE_ATUAL_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_PANORAMICO") {
+    // Mesmo padrao das demais operacoes em segundo plano.
+    exportarRelatorioPanoramico((texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_PANORAMICO", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "RELATORIO_PANORAMICO_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_PANORAMICO_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })

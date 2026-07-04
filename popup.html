@@ -7,246 +7,328 @@
 </head>
 <body>
   <header class="cabecalho-app">
-    <h1>Extensão Auxiliar eProc</h1>
+    <div class="cabecalho-titulos">
+      <h1>Extensão Auxiliar eProc</h1>
+      <span class="cabecalho-sub">TJPR · Sistema eProc</span>
+    </div>
+    <button
+      id="btn-abrir-configuracoes"
+      class="btn-config"
+      type="button"
+      title="Configurações"
+      aria-label="Abrir configurações"
+    >⚙</button>
   </header>
 
-  <section class="card">
-    <h2 class="card-titulo">
-      <span class="card-icone" aria-hidden="true">📄</span>
-      Exportar Documentos
-    </h2>
+  <div id="lista-cards-perfil">
 
-    <div id="area-status" class="status">
-      Abra a página de detalhes de um processo no eproc e clique em
-      "Detectar documentos".
-    </div>
-
-    <div class="botoes">
-      <button id="btn-detectar">Detectar documentos</button>
-    </div>
-
-    <div id="area-processo" class="processo" hidden>
-      Processo: <strong id="numero-processo"></strong>
-      (<span id="total-documentos"></span> documento(s))
-    </div>
-
-    <div id="area-opcoes" class="opcoes" hidden>
-      <label class="opcao-radio">
-        <input type="radio" name="modo-exportacao" id="radio-individuais" checked />
-        Arquivos individuais
-      </label>
-      <label class="opcao-radio">
-        <input type="radio" name="modo-exportacao" id="radio-pdf-unico" />
-        PDF único combinado
-      </label>
-      <label class="opcao-radio">
-        <input type="radio" name="modo-exportacao" id="radio-md-unico" />
-        MD único (texto e anonimizado)
-      </label>
-      <div id="aviso-md-unico" class="aviso-md-unico" hidden>
-        Extrai o texto de todos os documentos (PDFs com camada de texto e
-        HTML; imagens e PDFs escaneados sem camada de texto entram só com
-        uma nota, sem OCR nesta versão), inclui a movimentação processual
-        numa seção antes dos anexos, e remove automaticamente CPF, CNPJ,
-        telefone, e-mail, linhas com possível endereço e abrevia nomes.
-        <strong>Isso é um processo de melhor esforço, não uma garantia de
-        anonimização completa</strong> — sempre revise o arquivo gerado
-        antes de compartilhar externamente.
+  <details class="card card--privilegiado" id="card-corregedoria" hidden>
+    <summary class="card-titulo">
+      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
+      <span class="card-icone" aria-hidden="true">🏛️</span>
+      <span class="card-rotulo">Corregedoria</span>
+      <span class="selo">perfil CORREGEDORIA</span>
+    </summary>
+    <div class="card-corpo">
+      <div id="area-corregedoria-info" class="status">
+        Relatório para Correição.
       </div>
-      <button id="btn-baixar" disabled>Baixar</button>
+
+      <!-- Relatório Geral (todas as unidades) desativado por enquanto -
+           precisa de melhorias antes de voltar a ficar visível no painel.
+           O botão, a área de progresso e toda a lógica em background.js/
+           popup.js continuam no lugar, só comentados/ocultos.
+      <div class="botoes">
+        <button id="btn-relatorio-panoramico" class="btn">Relatório Geral (todas as unidades)</button>
+      </div>
+
+      <div id="area-progresso-panoramico" class="progresso-spinner" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="texto-progresso-panoramico"></span>
+      </div>
+      -->
+
+      <div class="botoes">
+        <button id="btn-relatorio-gerencial-unidade" class="btn-secundario">Carregar unidades (Relatório para Correição)</button>
+      </div>
+
+      <div id="area-progresso-unidades" class="progresso-spinner" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="texto-progresso-unidades"></span>
+      </div>
+
+      <div class="opcoes" id="area-select-comarca" hidden>
+        <select id="select-comarca-relatorio">
+          <option value="" selected disabled>Selecione uma comarca...</option>
+        </select>
+      </div>
+
+      <div class="opcoes" id="area-select-unidade" hidden>
+        <select id="select-unidade-relatorio">
+          <option value="" selected disabled>Selecione um juízo/vara...</option>
+        </select>
+      </div>
+
+      <div id="area-unidade-selecionada" class="status" hidden></div>
+
+      <div class="opcoes" id="area-personalizar-relatorio" hidden>
+        <span class="legenda-opcoes">Itens a incluir no PDF:</span>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-processos-ativos" checked />
+          Relação de processos ativos
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-suspensos" checked />
+          Suspensos/sobrestados
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-conclusos-decisao" checked />
+          Conclusos para decisão
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-conclusos-sentenca" checked />
+          Conclusos para sentença
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-sem-movimentacao" checked />
+          Processos sem movimentação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-paralisados" checked />
+          Processos paralisados (31+ dias)
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-remessas-juizes-leigos" checked />
+          Remessas aos juízes leigos
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-regras-automacao" checked />
+          Regras de automação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-localizadores" checked />
+          Localizadores
+        </label>
+      </div>
+
+      <div class="botoes" id="area-btn-exportar-gerencial" hidden>
+        <button id="btn-exportar-relatorio-gerencial" class="btn">Exportar Relatório para Correição (PDF)</button>
+      </div>
+
+      <div id="area-progresso-relatorio-gerencial" class="progresso-spinner" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="texto-progresso-relatorio-gerencial"></span>
+      </div>
+
+      <div id="area-erros-corregedoria" class="erros" hidden></div>
     </div>
+  </details>
 
-    <div id="area-progresso" class="progresso" hidden>
-      <progress id="barra-progresso" value="0" max="100"></progress>
-      <span id="texto-progresso"></span>
+
+  <details class="card" id="card-gestao-unidade-alt">
+    <summary class="card-titulo">
+      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
+      <span class="card-icone" aria-hidden="true">🏢</span>
+      <span class="card-rotulo">Gestão da Unidade</span>
+    </summary>
+    <div class="card-corpo">
+      <div id="area-relatorio-unidade-alt-info" class="status">
+        Gera o Relatório da Unidade usando a unidade já habilitada nesta
+        sessão - não é preciso escolher uma unidade.
+      </div>
+
+      <div class="opcoes" id="area-personalizar-relatorio-alt">
+        <span class="legenda-opcoes">Itens a incluir no PDF:</span>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-processos-ativos" checked />
+          Relação de processos ativos
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-suspensos" checked />
+          Suspensos/sobrestados
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-conclusos-decisao" checked />
+          Conclusos para decisão
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-conclusos-sentenca" checked />
+          Conclusos para sentença
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-sem-movimentacao" checked />
+          Processos sem movimentação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-mandados" checked />
+          Mandados em aberto
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-paralisados" checked />
+          Processos paralisados (31+ dias)
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-remessas-juizes-leigos" checked />
+          Remessas aos juízes leigos
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-regras-automacao" checked />
+          Regras de automação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-localizadores" checked />
+          Localizadores
+        </label>
+      </div>
+
+      <div class="botoes">
+        <button id="btn-exportar-relatorio-unidade-alt" class="btn">Exportar Relatório da Unidade (PDF)</button>
+      </div>
+
+      <div id="area-progresso-relatorio-unidade-alt" class="progresso-spinner" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="texto-progresso-relatorio-unidade-alt"></span>
+      </div>
+
+      <div id="area-erros-unidade-alt" class="erros" hidden></div>
     </div>
+  </details>
 
-    <ul id="lista-documentos" class="lista-documentos" hidden></ul>
+  <details class="card card--privilegiado" id="card-documentos">
+    <summary class="card-titulo">
+      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
+      <span class="card-icone" aria-hidden="true">🗄️</span>
+      <span class="card-rotulo">Gestão Gabinete</span>
+    </summary>
+    <div class="card-corpo">
+      <details class="subsecao subsecao--colapsavel">
+        <summary class="subsecao-titulo">
+          <span class="subsecao-icone" aria-hidden="true">📄</span>
+          Exportar Documentos
+        </summary>
+        <div id="area-status" class="status">
+          Abra um processo no eproc e clique em "Detectar documentos".
+        </div>
 
-    <div id="area-erros" class="erros" hidden></div>
-  </section>
+        <div class="botoes">
+          <button id="btn-detectar" class="btn">Detectar documentos</button>
+        </div>
 
-  <section class="card">
-    <h2 class="card-titulo">
-      <span class="card-icone" aria-hidden="true">📊</span>
-      Relatórios
-    </h2>
+        <div id="area-processo" class="processo" hidden>
+          Processo: <strong id="numero-processo"></strong>
+          (<span id="total-documentos"></span> documento(s))
+        </div>
 
-    <div id="area-relatorio-info" class="status">
-      Aperte o botão para gerar relatórios pré-configurados.
+        <div id="area-opcoes" class="opcoes" hidden>
+          <label class="opcao">
+            <input type="radio" name="modo-exportacao" id="radio-individuais" checked />
+            Arquivos individuais
+          </label>
+          <label class="opcao">
+            <input type="radio" name="modo-exportacao" id="radio-pdf-unico" />
+            PDF único combinado
+          </label>
+          <label class="opcao">
+            <input type="radio" name="modo-exportacao" id="radio-md-unico" />
+            MD único (texto e anonimizado)
+          </label>
+          <div id="aviso-md-unico" class="aviso" hidden>
+            Extrai o texto dos documentos (sem OCR), inclui a movimentação e
+            remove CPF/CNPJ, telefone, e-mail e endereços, abreviando nomes.
+            <strong>Anonimização de melhor esforço — revise antes de
+            compartilhar.</strong>
+          </div>
+          <button id="btn-baixar" class="btn" disabled>Baixar</button>
+        </div>
+
+        <div id="area-progresso" class="progresso" hidden>
+          <progress id="barra-progresso" value="0" max="100"></progress>
+          <span id="texto-progresso"></span>
+        </div>
+
+        <ul id="lista-documentos" class="lista-documentos" hidden></ul>
+
+        <div id="area-erros" class="erros" hidden></div>
+      </details>
+
+      <hr class="separador-subsecao" />
+
+      <details class="subsecao subsecao--colapsavel">
+        <summary class="subsecao-titulo">
+          <span class="subsecao-icone" aria-hidden="true">🔎</span>
+          Busca específica de localizadores
+        </summary>
+        <div id="area-nav-localizadores-info" class="status">
+          Escolha um localizador para abrir ou exportar seus processos.
+        </div>
+
+        <div class="botoes">
+          <button id="btn-carregar-localizadores" class="btn">Carregar localizadores</button>
+        </div>
+
+        <div id="area-progresso-nav-localizadores" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-nav-localizadores"></span>
+        </div>
+
+        <div class="opcoes" id="area-select-localizador" hidden>
+          <select id="select-localizador-processos">
+            <option value="" selected disabled>Selecione um localizador...</option>
+          </select>
+        </div>
+
+        <div class="opcoes" id="area-acoes-localizador" hidden>
+          <button id="btn-ir-para-processos-localizador" class="btn-secundario">Ir para o relatório</button>
+          <div class="linha-formatos">
+            <label class="opcao">
+              <input type="checkbox" id="chk-processos-localizador-pdf" checked />
+              PDF
+            </label>
+            <label class="opcao">
+              <input type="checkbox" id="chk-processos-localizador-excel" />
+              Excel
+            </label>
+          </div>
+          <button id="btn-exportar-processos-localizador" class="btn">Exportar relação de processos deste localizador</button>
+          <button id="btn-exportar-documentos-localizador" class="btn-secundario">Exportar na íntegra todos os processos nesse localizador</button>
+        </div>
+
+        <div id="area-progresso-processos-localizador" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-processos-localizador"></span>
+        </div>
+
+        <div id="area-progresso-documentos-localizador" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-documentos-localizador"></span>
+        </div>
+
+        <div id="area-erros-nav-localizadores" class="erros" hidden></div>
+      </details>
     </div>
+  </details>
 
-    <div class="botoes">
-      <button id="btn-relatorios">Gerar relatório</button>
-      <button
-        id="btn-abrir-tela-relatorio"
-        class="btn-icone"
-        title="Abrir a tela do Relatório Geral nesta aba"
-        aria-label="Abrir a tela do Relatório Geral nesta aba"
-      >↗</button>
-    </div>
+  </div>
 
-    <div id="area-progresso-relatorio" class="progresso-relatorio" hidden>
-      <span class="spinner" aria-hidden="true"></span>
-      <span id="texto-progresso-relatorio"></span>
-    </div>
-
-    <div id="area-relatorio" class="relatorio" hidden>
-      <table class="tabela-relatorio">
-        <thead>
-          <tr>
-            <th scope="col">Situação</th>
-            <th scope="col">Total</th>
-            <th scope="col">Urgentes</th>
-            <th scope="col">+30 dias</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th scope="row">Despacho</th>
-            <td><button type="button" class="valor-link" id="valor-despacho" data-tipo="situacao" data-situacao="despacho" data-filtro="total" disabled></button></td>
-            <td><button type="button" class="valor-link" id="valor-despacho-urgentes" data-tipo="situacao" data-situacao="despacho" data-filtro="urgentes" disabled></button></td>
-            <td><button type="button" class="valor-link" id="valor-despacho-mais30dias" data-tipo="situacao" data-situacao="despacho" data-filtro="mais30Dias" disabled></button></td>
-          </tr>
-          <tr>
-            <th scope="row">Sentença</th>
-            <td><button type="button" class="valor-link" id="valor-sentenca" data-tipo="situacao" data-situacao="sentenca" data-filtro="total" disabled></button></td>
-            <td><button type="button" class="valor-link" id="valor-sentenca-urgentes" data-tipo="situacao" data-situacao="sentenca" data-filtro="urgentes" disabled></button></td>
-            <td><button type="button" class="valor-link" id="valor-sentenca-mais30dias" data-tipo="situacao" data-situacao="sentenca" data-filtro="mais30Dias" disabled></button></td>
-          </tr>
-        </tbody>
-      </table>
-
-      <table class="tabela-relatorio tabela-relatorio-sem-mov">
-        <thead>
-          <tr>
-            <th scope="col">Sem movimentação</th>
-            <th scope="col">30 dias</th>
-            <th scope="col">90 dias</th>
-            <th scope="col">120 dias</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th scope="row">Processos</th>
-            <td><button type="button" class="valor-link" id="valor-sem-mov-30" data-tipo="semMovimentacao" data-filtro="30" disabled></button></td>
-            <td><button type="button" class="valor-link" id="valor-sem-mov-90" data-tipo="semMovimentacao" data-filtro="90" disabled></button></td>
-            <td><button type="button" class="valor-link" id="valor-sem-mov-120" data-tipo="semMovimentacao" data-filtro="120" disabled></button></td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div id="aviso-urgencia" class="aviso-urgencia" hidden></div>
-    </div>
-
-    <div id="area-erros-relatorio" class="erros" hidden></div>
-  </section>
-
-  <section class="card">
-    <h2 class="card-titulo">
-      <span class="card-icone" aria-hidden="true">⚙️</span>
-      Regras de Automação
-    </h2>
-
-    <div id="area-regras-info" class="status">
-      Exporta as regras ativas de "Automatizar Tramitação Processual" em
-      segundo plano, sem precisar estar nessa tela.
-    </div>
-
-    <div class="botoes">
-      <button id="btn-exportar-regras">Exportar regras ativas</button>
-    </div>
-
-    <div id="area-erros-regras" class="erros" hidden></div>
-  </section>
-
-  <section class="card">
-    <h2 class="card-titulo">
-      <span class="card-icone" aria-hidden="true">🗂️</span>
-      Localizadores do Órgão
-    </h2>
-
-    <div id="area-localizadores-info" class="status">
-      Exporta a lista de Localizadores do Órgão (nome, descrição e total
-      de processos) em PDF e/ou planilha Excel, percorrendo todas as
-      páginas da listagem automaticamente.
-    </div>
-
-    <div class="opcoes">
-      <label class="opcao-radio">
-        <input type="checkbox" id="chk-localizadores-pdf" checked />
-        PDF
-      </label>
-      <label class="opcao-radio">
-        <input type="checkbox" id="chk-localizadores-excel" />
-        Planilha Excel
-      </label>
-      <button id="btn-exportar-localizadores">Exportar</button>
-    </div>
-
-    <div id="area-progresso-localizadores" class="progresso-relatorio" hidden>
-      <span class="spinner" aria-hidden="true"></span>
-      <span id="texto-progresso-localizadores"></span>
-    </div>
-
-    <div id="area-erros-localizadores" class="erros" hidden></div>
-  </section>
-
-  <section class="card">
-    <h2 class="card-titulo">
-      <span class="card-icone" aria-hidden="true">🔎</span>
-      Busca específica de localizadores
-    </h2>
-
-    <div id="area-nav-localizadores-info" class="status">
-      Carrega os Localizadores do Órgão que têm pelo menos um processo
-      atribuído. Depois de escolher um, você decide se quer ir até a
-      lista de processos dele ou exportar um relatório em PDF/Excel.
-    </div>
-
-    <div class="botoes">
-      <button id="btn-carregar-localizadores">Carregar localizadores</button>
-    </div>
-
-    <div id="area-progresso-nav-localizadores" class="progresso-relatorio" hidden>
-      <span class="spinner" aria-hidden="true"></span>
-      <span id="texto-progresso-nav-localizadores"></span>
-    </div>
-
-    <div class="opcoes" id="area-select-localizador" hidden>
-      <select id="select-localizador-processos">
-        <option value="" selected disabled>Selecione um localizador...</option>
-      </select>
-    </div>
-
-    <div class="opcoes" id="area-acoes-localizador" hidden>
-      <button id="btn-ir-para-processos-localizador">Ir para o relatório</button>
-      <label class="opcao-radio">
-        <input type="checkbox" id="chk-processos-localizador-pdf" checked />
-        PDF
-      </label>
-      <label class="opcao-radio">
-        <input type="checkbox" id="chk-processos-localizador-excel" />
-        Planilha Excel
-      </label>
-      <button id="btn-exportar-processos-localizador">Exportar processos deste localizador</button>
-    </div>
-
-    <div id="area-progresso-processos-localizador" class="progresso-relatorio" hidden>
-      <span class="spinner" aria-hidden="true"></span>
-      <span id="texto-progresso-processos-localizador"></span>
-    </div>
-
-    <div id="area-erros-nav-localizadores" class="erros" hidden></div>
-  </section>
-
-  <div id="modal-escolha-relatorio" class="modal-overlay" hidden>
+  <div id="modal-configuracoes" class="modal-overlay" hidden>
     <div class="modal-caixa">
-      <p class="modal-texto">O que você deseja fazer com esse valor?</p>
+      <p class="modal-texto">Configurações</p>
+      <div class="opcoes">
+        <label class="opcao">
+          <input type="checkbox" id="chk-config-substituir-sigla" />
+          Substituir a sigla do usuário pelo nome e cargo na movimentação
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-config-separar-orgao-juizo" />
+          Separar Comarca/Juízo no campo "Órgão/Juízo" do Relatório Geral
+        </label>
+        <label class="opcao">
+          <input type="checkbox" id="chk-config-anexar-magistrado-conclusos" />
+          Acrescentar o Magistrado aos eventos "Conclusos *" na tela do processo
+        </label>
+      </div>
       <div class="modal-botoes">
-        <button id="modal-btn-abrir" type="button" class="modal-btn-primario">Abrir relatório</button>
-        <button id="modal-btn-excel" type="button" class="modal-btn-excel">Exportar planilha (Excel)</button>
-        <button id="modal-btn-cancelar" type="button" class="modal-btn-cancelar">Cancelar</button>
+        <button id="modal-config-fechar" type="button" class="btn-secundario">Fechar</button>
       </div>
     </div>
   </div>
