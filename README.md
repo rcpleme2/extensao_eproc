@@ -597,10 +597,15 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      contrário do item anterior (só a contagem), aqui a extensão lê a
      **relação de processos** de verdade, numa única tabela (sem separar
      por faixa de dias), em **página retrato**, com os campos **Nº do
-     Processo, Situação, Classe, Localizador, Último Evento e Data/Hora**
-     (a tabela real do eproc traz mais colunas, como Sigilo e Data da
-     Autuação, que ficam de fora aqui) — casados pelo texto do cabeçalho,
-     igual às demais relações deste relatório. Localizadores seguem a
+     Processo, Situação, Classe, Localizador, Último Evento, Data/Hora e
+     Dias** (a tabela real do eproc traz mais colunas, como Sigilo e Data
+     da Autuação, que ficam de fora aqui) — casados pelo texto do
+     cabeçalho, igual às demais relações deste relatório. A última coluna
+     ("Dias") é calculada pela própria extensão (não vem da tabela
+     original): a diferença, em dias corridos, entre o momento da geração
+     do relatório e a Data/Hora do último evento — quando essa data não é
+     reconhecida por algum motivo, a coluna fica em branco em vez de
+     mostrar um número sem sentido. Localizadores seguem a
      mesma técnica de quebra de linha das demais tabelas (um por linha,
      "?" descartado), mas aqui, quando há **mais de um**, cada linha
      também ganha um **marcador "- "** na frente (diferente da relação de
