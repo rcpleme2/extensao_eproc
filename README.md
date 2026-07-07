@@ -839,7 +839,7 @@ cobertas abaixo.
   ordenada pela Data da Remessa do mandado parado há **mais tempo para o
   mais recente**. Na capa, o resumo traz duas seções: **"MANDADOS EM
   ABERTO"**, com a contagem por Situação (da mais frequente para a menos
-  frequente, Total por último), e **"MANDADOS POR OFICIAL"**, com a
+  frequente, Total por último), e **"MANDADOS POR CUMPRIDOR"**, com a
   contagem de mandados aguardando cumprimento por Responsável (também da
   mais frequente para a menos frequente; só aparece quando algum mandado
   já tem oficial designado). Não precisa de nenhuma seleção de unidade (a

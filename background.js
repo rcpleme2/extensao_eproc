@@ -4805,7 +4805,7 @@ async function exportarRelatorioGerencialUnidade(
       const linhasOficial = Array.from(contagemPorOficial.entries())
         .sort((a, b) => b[1] - a[1])
         .map(([nome, contagem]) => ({ rotulo: nome, valor: contagem }));
-      secoesResumo.push({ titulo: "MANDADOS POR OFICIAL", linhas: linhasOficial });
+      secoesResumo.push({ titulo: "MANDADOS POR CUMPRIDOR", linhas: linhasOficial });
     }
   }
   if (opcoesFinais.paralisados) {
@@ -6271,13 +6271,39 @@ async function abrirAbaEListarRegrasAutomacao(urlBase, nomeUnidade) {
     // um pouco depois do "carregamento" da aba - sem repetir a leitura
     // aqui, uma consulta um pouco mais lenta que o normal lia a tabela
     // ainda vazia e devolvia "nenhuma regra" mesmo com regras cadastradas.
-    // Tenta ate' 4 vezes (500ms entre cada), parando assim que alguma
+    // Tenta ate' 6 vezes (500ms entre cada), parando assim que alguma
     // linha aparecer na pagina.
+    //
+    // Perfil CORREGEDORIA (com "nomeUnidade"): o clique em "Pesquisar"
+    // logo acima pode disparar uma navegacao de verdade (nao so' AJAX) -
+    // nesse caso, o content script da pagina RECARREGADA leva um instante
+    // a mais para ser reinjetado (document_idle) depois do evento
+    // "complete" da aba, e um "chrome.tabs.sendMessage" chamado exatamente
+    // nesse intervalo REJEITA com "Could not establish connection.
+    // Receiving end does not exist." - sem o try/catch abaixo, essa
+    // excecao escapava do laco de tentativas inteiro (o catch mais externo
+    // desta funcao a devolvia direto como erro final), abortando o
+    // relatorio no PRIMEIRO instante de azar em vez de tentar de novo.
     let resposta = null;
-    for (let tentativa = 0; tentativa < 4; tentativa += 1) {
-      resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_REGRAS_AUTOMACAO" });
+    let erroConexao = null;
+    for (let tentativa = 0; tentativa < 6; tentativa += 1) {
+      try {
+        resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_REGRAS_AUTOMACAO" });
+        erroConexao = null;
+      } catch (e) {
+        resposta = null;
+        erroConexao = e && e.message ? e.message : String(e);
+      }
       if (resposta && resposta.totalRegrasNaPagina > 0) break;
       await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    // Se as 6 tentativas terminaram sem NENHUMA resposta do content
+    // script (erroConexao ainda preenchido), o problema foi mesmo de
+    // conexão, não "nenhuma regra cadastrada" - reporta o erro de
+    // conexão em vez de um resultado vazio silencioso.
+    if (!resposta && erroConexao) {
+      return { regras: [], tituloPagina: "", totalRegrasNaPagina: 0, erro: erroConexao };
     }
 
     return {
