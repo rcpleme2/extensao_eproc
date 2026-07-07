@@ -455,6 +455,21 @@ button {
   gap: var(--espaco-3);
 }
 
+/* Linha com os atalhos "Marcar tudo" / "Desmarcar tudo" acima de uma
+   lista de checkboxes - os botões não esticam (diferente do padrão
+   flex:1 de .btn-ghost em outros lugares), só ocupam o texto. */
+.linha-acoes-opcoes {
+  display: flex;
+  gap: var(--espaco-3);
+  margin-bottom: 4px;
+}
+
+.linha-acoes-opcoes .btn-ghost {
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  font-size: var(--fonte-pequena);
+}
+
 .opcoes .btn,
 .opcoes .btn-secundario {
   margin-top: 4px;

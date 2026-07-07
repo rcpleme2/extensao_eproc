@@ -1631,6 +1631,27 @@ function consultarUmaVezNaPagina(parametros) {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  // Filtra a consulta por um Rito Processual especifico (select#selRitoProcesso,
+  // bootstrap-select de selecao unica - mesmo mecanismo de "selecionarOrgaoJuizo":
+  // o <select> nativo continua no DOM, so' escondido, com as mesmas <option>).
+  // Usado para descobrir quantos processos ativos existem em cada rito (grafico
+  // de distribuicao por rito, ao lado do de classe processual).
+  function selecionarRito(valorRito) {
+    const select = document.getElementById("selRitoProcesso");
+    if (!select) throw new Error('Campo "Rito Processual" (#selRitoProcesso) não encontrado nesta página.');
+
+    let encontrouOpcao = false;
+    for (const opcao of select.options) {
+      const selecionada = opcao.value === valorRito;
+      opcao.selected = selecionada;
+      if (selecionada) encontrouOpcao = true;
+    }
+    if (!encontrouOpcao) {
+      throw new Error(`Rito "${valorRito}" não encontrado no filtro Rito Processual.`);
+    }
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   // Usa o setter nativo do HTMLInputElement (em vez de so' "input.value =
   // ...") para garantir que a mudanca seja percebida mesmo se algum
   // framework de formulario estiver "escutando" o proprio setter da
@@ -1859,6 +1880,13 @@ function consultarUmaVezNaPagina(parametros) {
       // ativos", mutuamente exclusivo com "valorSituacao"/"grupoSituacao".
       if (parametros.gruposSituacaoExcluir) {
         selecionarTodosGruposExceto(parametros.gruposSituacaoExcluir);
+      }
+
+      // Rito Processual especifico (ex.: contagem de processos ativos em
+      // cada rito, um por consulta) - independente da Situação, pode ser
+      // combinado com "gruposSituacaoExcluir" acima.
+      if (parametros.valorRito) {
+        selecionarRito(parametros.valorRito);
       }
 
       if (parametros.diasSituacao != null) {
@@ -2958,6 +2986,109 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
   }
 }
 
+// Le', na tela do Relatório Geral, todas as opcoes do filtro "Rito
+// Processual" (select#selRitoProcesso) - so' para descobrir a lista
+// antes de consultar quantos processos existem em cada rito (uma
+// consulta por opcao, em paralelo - ver "abrirAbaEConsultarRitosAtivos").
+// Autocontida, executada via chrome.scripting.executeScript.
+function listarRitosNaPagina() {
+  const select = document.getElementById("selRitoProcesso");
+  if (!select) {
+    return { opcoes: [], erro: 'Campo "Rito Processual" (#selRitoProcesso) não encontrado nesta página.' };
+  }
+  const opcoes = Array.from(select.options)
+    .filter((opcao) => opcao.value && opcao.value !== "null")
+    .map((opcao) => ({ valor: opcao.value, texto: (opcao.textContent || opcao.getAttribute("title") || "").trim() }));
+  return { opcoes, erro: null };
+}
+
+// Abre uma aba oculta, navega ate' o Relatório Geral, seleciona a unidade
+// pedida (quando houver) e le' (sem consultar) as opcoes do filtro "Rito
+// Processual" - mesmo padrao de "abrirAbaEListarSituacoesDoGrupo".
+async function abrirAbaEListarRitosDisponiveis(urlBase, valorOrgaoJuizo) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioGeralNaPagina,
+    });
+    if (!linkEncontrado) {
+      return {
+        opcoes: [],
+        erro:
+          'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    if (valorOrgaoJuizo) {
+      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+        args: [valorOrgaoJuizo],
+      });
+      if (!resultadoSelecao || !resultadoSelecao.ok) {
+        return {
+          opcoes: [],
+          erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo.",
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: listarRitosNaPagina,
+    });
+    return result || { opcoes: [], erro: "Sem resultado ao listar os ritos processuais." };
+  } catch (e) {
+    return { opcoes: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Lista os ritos disponiveis e consulta, EM PARALELO (uma aba oculta por
+// rito, respeitando o semaforo global), quantos processos ATIVOS (mesmo
+// filtro "gruposSituacaoExcluir" da relação de processos ativos) existem
+// em cada um - usado para o gráfico de distribuição por rito processual,
+// ao lado do gráfico de distribuição por classe processual. Nunca lança
+// exceção: falhas em ritos individuais só ficam de fora da lista, sem
+// interromper os demais.
+async function abrirAbaEConsultarRitosAtivos(urlBase, valorOrgaoJuizo) {
+  const { opcoes, erro: erroListagem } = await abrirAbaEListarRitosDisponiveis(urlBase, valorOrgaoJuizo);
+  if (opcoes.length === 0) {
+    return { distribuicao: [], erro: erroListagem || "Nenhum rito processual encontrado." };
+  }
+
+  const resultados = await Promise.all(
+    opcoes.map((opcao) =>
+      abrirAbaEConsultarUmaVez(urlBase, {
+        gruposSituacaoExcluir: ["B", "S"],
+        valorOrgaoJuizo,
+        valorRito: opcao.valor,
+      }).then((r) => ({ rito: opcao.texto, contagem: r.contagem, erro: r.erro }))
+    )
+  );
+
+  const distribuicao = resultados.filter((r) => r.contagem != null && r.contagem > 0);
+  const erros = resultados.filter((r) => r.erro).map((r) => `${r.rito}: ${r.erro}`);
+  return {
+    distribuicao,
+    erro: distribuicao.length === 0 && erros.length > 0 ? erros.join(" | ") : null,
+  };
+}
+
 // Le', na tela do Relatório Geral, todas as opcoes do filtro
 // "Órgão/Juízo" (select#selIdOrgaoJuizo) - visualmente um dropdown do
 // bootstrap-select (o botao com texto "Selecione" e o menu que abre ao
@@ -3910,7 +4041,7 @@ function mapaCoresPorValor(valores) {
   return mapa;
 }
 
-async function construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes) {
+async function construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes, distribuicaoRitos) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
   const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
@@ -3986,15 +4117,22 @@ async function construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgente
     `Processos ativos da unidade "${nomeUnidade}" — ${itens.length} processo(s), do mais antigo ao mais novo`
   );
 
-  // Grafico de distribuicao por classe processual e ranking de maiores
-  // demandantes/demandados, anexados como pagina(s) extra no FINAL da
-  // relacao de processos ativos - reaproveitam os mesmos "itens" ja'
-  // extraidos (campos "classe"/"autores"/"reus"), sem nenhuma consulta a
-  // mais.
+  // Grafico de distribuicao por classe processual (reaproveita os mesmos
+  // "itens" ja' extraidos, sem nenhuma consulta a mais), logo em seguida
+  // o de distribuicao por Rito Processual (dados vindos de fora, ja'
+  // agregados - o Rito não é coluna da tabela, só filtro; ver
+  // "abrirAbaEConsultarRitosAtivos") e por fim o ranking de maiores
+  // demandantes/demandados - todos anexados como pagina(s) extra no FINAL
+  // da relacao de processos ativos.
   const bytesGrafico = await construirPdfGraficoClassesAtivos(itens, nomeUnidade);
+  const bytesGraficoRitos =
+    distribuicaoRitos && distribuicaoRitos.length > 0
+      ? await construirPdfGraficoRitosAtivos(distribuicaoRitos, nomeUnidade)
+      : null;
   const bytesRanking = await construirPdfRankingPartes(itens, nomeUnidade);
   const pdfFinal = await PDFDocument.load(bytesTabela);
-  for (const bytesExtra of [bytesGrafico, bytesRanking]) {
+  for (const bytesExtra of [bytesGrafico, bytesGraficoRitos, bytesRanking]) {
+    if (!bytesExtra) continue;
     const pdfExtra = await PDFDocument.load(bytesExtra);
     const paginasExtra = await pdfFinal.copyPages(pdfExtra, pdfExtra.getPageIndices());
     paginasExtra.forEach((pagina) => pdfFinal.addPage(pagina));
@@ -4101,6 +4239,109 @@ async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
       width: larguraBarra,
       height: alturaBarra - 3,
       color: item.classe === "Outros" ? COR_CINZA_BORDA : COR_PRIMARIA,
+    });
+
+    pagina.drawText(`${percentual.toFixed(1)}% (${item.contagem})`, {
+      x: margem + larguraRotulo + larguraBarra + 6,
+      y: y - 9,
+      size: tamanhoFonte,
+      font: fonteNegrito,
+      color: COR_PRIMARIA_ESCURA,
+    });
+
+    y -= alturaLinha;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+  return pdf.save();
+}
+
+// Mesmo grafico de barras horizontais do "Distribuição por classe
+// processual" acima, so' que para o Rito Processual - anexado logo em
+// seguida (mesma secao/lugar no relatório), sem exigir nenhum item novo
+// em "Itens a incluir no PDF" (roda automaticamente junto com "Relação de
+// processos ativos"). Diferente do grafico de classes, aqui os dados ja'
+// chegam AGREGADOS (uma consulta por rito no Relatório Geral - ver
+// "abrirAbaEConsultarRitosAtivos"), em vez de contados a partir da
+// relação de processos já extraída (o Rito não aparece como coluna na
+// tabela de resultados, só como filtro).
+async function construirPdfGraficoRitosAtivos(distribuicao, nomeUnidade) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  let pagina = null;
+  let y = 0;
+
+  const total = distribuicao.reduce((soma, item) => soma + item.contagem, 0) || 1;
+
+  function novaPagina(comTitulo) {
+    pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+    if (comTitulo) {
+      const linhasTitulo = quebrarLinhas(
+        sanitizarTextoPdf(`Distribuição por rito processual — unidade "${nomeUnidade}"`),
+        fonteNegrito,
+        13,
+        larguraUtil
+      );
+      for (const linhaTitulo of linhasTitulo) {
+        pagina.drawText(linhaTitulo, { x: margem, y, size: 13, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+        y -= 17;
+      }
+      pagina.drawText(`${total} processo(s) no total`, {
+        x: margem,
+        y,
+        size: 9.5,
+        font: fonteNormal,
+        color: COR_CINZA_TEXTO,
+      });
+      y -= 22;
+    }
+  }
+
+  function garantirEspaco(alturaNecessaria) {
+    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
+      novaPagina(false);
+    }
+  }
+
+  novaPagina(true);
+
+  const ordenado = [...distribuicao].sort((a, b) => b.contagem - a.contagem);
+  const maiorContagem = Math.max(...ordenado.map((d) => d.contagem), 1);
+
+  const larguraRotulo = 200;
+  const larguraPercentual = 90;
+  const larguraMaxBarra = larguraUtil - larguraRotulo - larguraPercentual;
+  const alturaBarra = 14;
+  const tamanhoFonte = 8.5;
+
+  for (const item of ordenado) {
+    const linhasRotulo = quebrarLinhas(sanitizarTextoPdf(item.rito), fonteNormal, tamanhoFonte, larguraRotulo - 6);
+    const alturaLinha = Math.max(alturaBarra, linhasRotulo.length * 10) + 8;
+    garantirEspaco(alturaLinha);
+
+    let yRotulo = y - 9;
+    for (const linha of linhasRotulo) {
+      pagina.drawText(linha, { x: margem, y: yRotulo, size: tamanhoFonte, font: fonteNormal, color: COR_CINZA_TEXTO });
+      yRotulo -= 10;
+    }
+
+    const percentual = (item.contagem / total) * 100;
+    const larguraBarra = Math.max(2, (item.contagem / maiorContagem) * larguraMaxBarra);
+    pagina.drawRectangle({
+      x: margem + larguraRotulo,
+      y: y - alturaBarra,
+      width: larguraBarra,
+      height: alturaBarra - 3,
+      color: COR_PRIMARIA,
     });
 
     pagina.drawText(`${percentual.toFixed(1)}% (${item.contagem})`, {
@@ -4511,6 +4752,18 @@ async function exportarRelatorioGerencialUnidade(
     }
   }
 
+  // Distribuição de processos ativos por Rito Processual (select#selRitoProcesso
+  // do Relatório Geral) - uma consulta por rito (em paralelo), pra' alimentar o
+  // gráfico de barras ao lado do de classe processual. Nunca impede o resto do
+  // relatório: falha aqui só fica de fora do gráfico (sem aviso próprio, já que
+  // é um complemento best-effort, não um item obrigatório do "Itens a incluir").
+  let distribuicaoRitos = [];
+  if (opcoesFinais.processosAtivos) {
+    notificar("Consultando distribuição por rito processual...");
+    const rRitos = await abrirAbaEConsultarRitosAtivos(abaAtual.url, valorUnidade);
+    distribuicaoRitos = rRitos.distribuicao;
+  }
+
   // Suspensos/sobrestados: grupo "S" inteiro do filtro Situação (todas
   // as ~40 variantes de suspensão/sobrestamento de uma vez).
   const suspensos = { total: null, mais90Dias: null, detalhamento: [], tabela: null, erros: [], avisoDetalhamentoParcial: null };
@@ -4885,7 +5138,7 @@ async function exportarRelatorioGerencialUnidade(
   // de fora, sem quebrar o resto do relatório). Mesma ordem das seções
   // acima: ativos, suspensos e, por fim, remessas aos juízes leigos.
   if (opcoesFinais.processosAtivos && processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
-    const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade, processosUrgentes);
+    const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade, processosUrgentes, distribuicaoRitos);
     const pdfTabela = await PDFDocument.load(bytesTabela);
     const paginas = await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
@@ -4952,6 +5205,217 @@ async function exportarRelatorioGerencialUnidade(
   return {
     unidade: nomeUnidade,
     totalLocalizadores: localizadoresOrdenados.length,
+  };
+}
+
+// Gera o Relatório para Correição de VÁRIAS unidades em sequência - uma
+// unidade de cada vez (nunca em paralelo, ja' que cada uma navega a
+// mesma aba ativa do usuário e abre várias abas ocultas próprias) -,
+// cada uma em um arquivo PDF separado (nome do arquivo já inclui o nome
+// da unidade, ver "nomeArquivo" acima). Erro em uma unidade não
+// interrompe as demais: cada resultado carrega seu proprio ok/erro, e a
+// mensagem final ao painel lista sucessos e falhas separadamente.
+async function exportarRelatorioGerencialMultiplasUnidades(unidades, opcoes, aoProgredir) {
+  const resultados = [];
+  for (let i = 0; i < unidades.length; i++) {
+    const unidade = unidades[i];
+    const prefixo = unidades.length > 1 ? `[${i + 1}/${unidades.length}] ${unidade.nome} - ` : "";
+    try {
+      const resultado = await exportarRelatorioGerencialUnidade(
+        unidade.valor,
+        unidade.nome,
+        opcoes,
+        (texto) => {
+          if (aoProgredir) aoProgredir(`${prefixo}${texto}`);
+        }
+      );
+      resultados.push({ unidade: unidade.nome, ok: true, resultado });
+    } catch (e) {
+      resultados.push({ unidade: unidade.nome, ok: false, erro: e && e.message ? e.message : String(e) });
+    }
+  }
+  return resultados;
+}
+
+// Coleta so' os NÚMEROS de resumo de uma unidade (sem tabelas/linhas, sem
+// localizadores/remessas/regras - essas 3 últimas refletem a unidade
+// HABILITADA na sessão, não a escolhida no filtro Órgão/Juízo, então não
+// fazem sentido numa comparação entre unidades escolhidas livremente).
+// Usado pela função de comparação abaixo - bem mais leve que o Relatório
+// da Unidade completo, ja' que não abre a tabela linha a linha nem monta
+// PDF nenhum sozinha.
+async function obterResumoUnidade(urlBase, valorUnidade, nomeUnidade, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(`${nomeUnidade}: ${texto}`);
+  };
+  const resumo = { unidade: nomeUnidade, erros: [] };
+
+  notificar("consultando processos ativos e suspensos/sobrestados...");
+  const [rAtivos, rSuspensos, rSuspensosAtraso] = await Promise.all([
+    abrirAbaEConsultarUmaVez(urlBase, {
+      gruposSituacaoExcluir: ["B", "S"],
+      urgente: false,
+      diasSituacao: null,
+      valorOrgaoJuizo: valorUnidade,
+    }),
+    abrirAbaEConsultarUmaVez(urlBase, {
+      grupoSituacao: "S",
+      urgente: false,
+      diasSituacao: null,
+      valorOrgaoJuizo: valorUnidade,
+    }),
+    abrirAbaEConsultarUmaVez(urlBase, {
+      grupoSituacao: "S",
+      urgente: false,
+      diasSituacao: DIAS_LIMITE_ATRASO_UNIDADE,
+      valorOrgaoJuizo: valorUnidade,
+    }),
+  ]);
+  resumo.processosAtivos = rAtivos.contagem;
+  if (rAtivos.erro) resumo.erros.push(`processos ativos: ${rAtivos.erro}`);
+  resumo.suspensos = rSuspensos.contagem;
+  resumo.suspensosMais90Dias = rSuspensosAtraso.contagem;
+  if (rSuspensos.erro) resumo.erros.push(`suspensos: ${rSuspensos.erro}`);
+
+  notificar("consultando conclusos para decisão e para sentença...");
+  const [despacho, sentenca] = await Promise.all([
+    consultarBlocoUnidade(urlBase, valorUnidade, "conclusos para decisão", VALOR_SITUACAO_AGUARDA_DESPACHO, () => {}),
+    consultarBlocoUnidade(urlBase, valorUnidade, "conclusos para sentença", VALOR_SITUACAO_AGUARDA_SENTENCA, () => {}),
+  ]);
+  resumo.conclusosDecisao = despacho;
+  resumo.conclusosSentenca = sentenca;
+  resumo.erros.push(...despacho.erros.map((e) => `conclusos p/ decisão - ${e}`));
+  resumo.erros.push(...sentenca.erros.map((e) => `conclusos p/ sentença - ${e}`));
+
+  notificar("consultando processos sem movimentação e paralisados...");
+  const [resultadosFaixas, rParalisados] = await Promise.all([
+    Promise.all(
+      FAIXAS_DIAS_SEM_MOVIMENTACAO.map((dias) =>
+        abrirAbaEConsultarUmaVez(urlBase, {
+          valorSituacao: null,
+          urgente: false,
+          diasSituacao: null,
+          diasSemMovimentacao: dias,
+          valorOrgaoJuizo: valorUnidade,
+        })
+      )
+    ),
+    abrirAbaEConsultarUmaVez(urlBase, {
+      valorSituacao: null,
+      urgente: false,
+      diasSituacao: null,
+      diasSemMovimentacao: DIAS_MINIMO_PARALISADOS,
+      valorOrgaoJuizo: valorUnidade,
+    }),
+  ]);
+  resumo.semMovimentacao = {};
+  FAIXAS_DIAS_SEM_MOVIMENTACAO.forEach((dias, i) => {
+    const r = resultadosFaixas[i];
+    resumo.semMovimentacao[`dias${dias}`] = r.contagem;
+    if (r.erro) resumo.erros.push(`sem movimentação ${dias} dias: ${r.erro}`);
+  });
+  resumo.paralisados = rParalisados.contagem;
+  if (rParalisados.erro) resumo.erros.push(`paralisados: ${rParalisados.erro}`);
+
+  return resumo;
+}
+
+// Monta o PDF de comparação: uma tabela unica, uma LINHA por unidade,
+// paisagem (A4 landscape via construirPdfTabelaDinamica) - assim da'
+// pra' comparar todas as unidades escolhidas lado a lado, coluna a
+// coluna, em vez de um relatório completo por unidade.
+async function construirPdfComparacaoUnidades(resumos) {
+  const num = (v) => (v == null ? "?" : String(v));
+
+  // Largura customizada por coluna (em vez do rateio igual de
+  // "construirPdfTabelaDinamica") - "Unidade" precisa de mais espaço
+  // (nomes longos, ex.: "Juizado Especial Cível... de Cândido de Abreu")
+  // e os cabecalhos das demais colunas sao curtos o bastante pra' caber
+  // numa so' linha nessa largura (o cabecalho nao quebra linha sozinho).
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const larguraUnidade = 170;
+  const larguraDemais = (larguraUtil - larguraUnidade) / 6;
+  const colunas = [
+    { titulo: "Unidade", largura: larguraUnidade, campo: "unidade" },
+    { titulo: "Proc. ativos", largura: larguraDemais, campo: "ativos" },
+    { titulo: `Susp. (+${DIAS_LIMITE_ATRASO_UNIDADE}d)`, largura: larguraDemais, campo: "suspensos" },
+    { titulo: "Decisão (u/t)", largura: larguraDemais, campo: "decisao" },
+    { titulo: "Sentença (u/t)", largura: larguraDemais, campo: "sentenca" },
+    { titulo: "Sem movimentação", largura: larguraDemais, campo: "semMov" },
+    { titulo: "Paralisados", largura: larguraDemais, campo: "paralisados" },
+  ];
+
+  const itens = resumos.map((r) => {
+    if (r.erro) {
+      return { unidade: r.unidade, ativos: `Falha ao consultar: ${r.erro}`, suspensos: "", decisao: "", sentenca: "", semMov: "", paralisados: "" };
+    }
+    const suspensosTexto =
+      r.suspensosMais90Dias == null || !r.suspensos
+        ? num(r.suspensos)
+        : `${num(r.suspensos)} (${r.suspensosMais90Dias})`;
+    return {
+      unidade: r.unidade,
+      ativos: num(r.processosAtivos),
+      suspensos: suspensosTexto,
+      decisao: `${num(r.conclusosDecisao.urgentes)} / ${num(r.conclusosDecisao.total)}`,
+      sentenca: `${num(r.conclusosSentenca.urgentes)} / ${num(r.conclusosSentenca.total)}`,
+      semMov: `${num(r.semMovimentacao.dias30)} / ${num(r.semMovimentacao.dias90)} / ${num(r.semMovimentacao.dias120)}`,
+      paralisados: num(r.paralisados),
+    };
+  });
+
+  // O título recebe a legenda das abreviações junto (quebra sozinho em
+  // varias linhas, ja' que "novaPagina" dentro de "construirPdfTabela"
+  // usa "quebrarLinhas" pra' desenhar o título) - assim a legenda fica
+  // visivel sem precisar encolher os cabecalhos das colunas mais do que
+  // o necessário.
+  const titulo =
+    `Comparação entre unidades - dados de resumo (${new Date().toLocaleString("pt-BR")}). ` +
+    "u/t = urgentes / total. Sem movimentação: 30 / 90 / 120 dias. Paralisados: a partir de 31 dias sem movimentação.";
+
+  return construirPdfTabela(itens, colunas, titulo);
+}
+
+// Orquestra a comparação: coleta o resumo de CADA unidade escolhida, uma
+// de cada vez (mesma razão do relatório multiplas unidades - todas
+// dividem a mesma aba ativa e as mesmas abas ocultas), e gera um ÚNICO
+// PDF no final com todas lado a lado. Erro numa unidade não interrompe
+// as demais - a linha dela no PDF so' mostra a falha.
+async function exportarComparacaoUnidades(unidades, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  if (!unidades || unidades.length < 2) {
+    throw new Error("Selecione ao menos duas unidades para comparar.");
+  }
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  const resumos = [];
+  for (let i = 0; i < unidades.length; i++) {
+    const unidade = unidades[i];
+    try {
+      const resumo = await obterResumoUnidade(abaAtual.url, unidade.valor, unidade.nome, (texto) =>
+        notificar(`[${i + 1}/${unidades.length}] ${texto}`)
+      );
+      resumos.push(resumo);
+    } catch (e) {
+      resumos.push({ unidade: unidade.nome, erro: e && e.message ? e.message : String(e) });
+    }
+  }
+
+  notificar("Gerando PDF de comparação...");
+  const bytes = await construirPdfComparacaoUnidades(resumos);
+  const nomeArquivo = `eproc/Comparacao_Unidades_${new Date().toISOString().slice(0, 10)}.pdf`;
+  await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytes));
+
+  return {
+    totalUnidades: resumos.length,
+    totalComErro: resumos.filter((r) => r.erro).length,
   };
 }
 
@@ -6516,6 +6980,33 @@ const PDF_REGRAS_CORES = {
   acao: { fundo: rgb(0xee / 255, 0xf1 / 255, 0xfd / 255), acento: rgb(0x3d / 255, 0x4f / 255, 0xc4 / 255), titulo: rgb(0x3d / 255, 0x4f / 255, 0xc4 / 255) },
 };
 
+// Calcula, ANTES de desenhar, a altura que uma caixa do fluxo vai ocupar
+// (mesma conta feita dentro de "desenharCaixaFluxoPdf") - usada pelo
+// chamador para decidir se cabe o resto da pagina atual ou se precisa
+// pular para uma pagina nova ANTES de desenhar, em vez de descobrir isso
+// tarde demais (com a caixa ja' desenhada). Regras com muitos criterios
+// alternativos (ligados por "OU") podem gerar uma caixa "Critério" bem
+// mais alta que o valor fixo usado antes (30pt) - sem calcular a altura
+// de verdade, a caixa estourava o rodape' da pagina (ou ate' invadia a
+// pagina seguinte por cima do numero de pagina) em vez de comecar limpa
+// no topo de uma pagina nova.
+function calcularAlturaCaixaFluxoPdf({ largura, numero, paragrafos, fonteNormal, comDivisores }) {
+  const padX = 8;
+  const padY = 7;
+  const larguraTexto = largura - padX * 2 - (numero !== null ? 16 : 0);
+  const tamanhoTexto = 8.5;
+  const alturaLinhaTexto = 11.5;
+
+  const linhasPorParagrafo = paragrafos
+    .filter((p) => (p || "").trim() !== "")
+    .map((p) => quebrarLinhas(sanitizarTextoPdf(p), fonteNormal, tamanhoTexto, larguraTexto));
+
+  const alturaTitulo = 20;
+  const totalLinhasTexto = linhasPorParagrafo.reduce((soma, ls) => soma + Math.max(ls.length, 1), 0);
+  const alturaDivisores = comDivisores && linhasPorParagrafo.length > 1 ? (linhasPorParagrafo.length - 1) * 6 : 0;
+  return padY * 2 + alturaTitulo + totalLinhasTexto * alturaLinhaTexto + alturaDivisores;
+}
+
 // Desenha uma caixa do fluxo (Origem/Critério/Destino/Ação/Erro): faixa de
 // acento a esquerda, circulo numerado (quando "numero" e' informado - a
 // caixa de erro nao tem numero, so' o titulo), titulo e um ou mais
@@ -6535,9 +7026,7 @@ function desenharCaixaFluxoPdf(pagina, { x, yTopo, largura, numero, titulo, para
     .map((p) => quebrarLinhas(sanitizarTextoPdf(p), fonteNormal, tamanhoTexto, larguraTexto));
 
   const alturaTitulo = 20;
-  const totalLinhasTexto = linhasPorParagrafo.reduce((soma, ls) => soma + Math.max(ls.length, 1), 0);
-  const alturaDivisores = comDivisores && linhasPorParagrafo.length > 1 ? (linhasPorParagrafo.length - 1) * 6 : 0;
-  const alturaCaixa = padY * 2 + alturaTitulo + totalLinhasTexto * alturaLinhaTexto + alturaDivisores;
+  const alturaCaixa = calcularAlturaCaixaFluxoPdf({ largura, numero, paragrafos, fonteNormal, comDivisores });
 
   pagina.drawRectangle({
     x,
@@ -6650,6 +7139,71 @@ async function construirPdfRegras(regras, tituloPagina) {
     }
   }
 
+  // Desenha uma caixa do fluxo que pode ser MAIOR que uma pagina inteira
+  // (ex.: "Critério" com muitas alternativas ligadas por "OU") - divide os
+  // paragrafos em quantas subcaixas forem necessarias, cada uma cabendo
+  // no espaco restante da propria pagina, avançando para uma pagina nova
+  // entre uma subcaixa e outra. Sem essa divisao, uma caixa grande demais
+  // simplesmente estourava o rodape' da pagina (ou invadia a pagina
+  // seguinte por cima do numero de pagina), cortando as ultimas linhas em
+  // vez de continuar numa pagina nova. Subcaixas depois da primeira
+  // repetem o titulo com "(continuação)" e não repetem o número/círculo
+  // do passo (mesmo padrão da caixa de Localizador de Erro, que também
+  // não tem número).
+  function desenharCaixaFluxoComQuebra({ largura, numero, titulo, paragrafos, cores, comDivisores }) {
+    const restante = (paragrafos || []).filter((p) => (p || "").trim() !== "");
+
+    if (restante.length === 0) {
+      const alturaCaixa = desenharCaixaFluxoPdf(pagina, {
+        x: margem, yTopo: y, largura, numero, titulo, paragrafos: [], cores, fonteNormal, fonteNegrito, comDivisores,
+      });
+      y -= alturaCaixa;
+      return;
+    }
+
+    let indice = 0;
+    let primeiraSubcaixa = true;
+    while (indice < restante.length) {
+      // Quantos paragrafos, a partir daqui, cabem no espaco restante da
+      // pagina ATUAL - sempre inclui pelo menos 1 (mesmo que ele sozinho
+      // nao caiba inteiro, pra' nunca travar num laço infinito; nesse caso
+      // raro essa subcaixa fica maior que o espaço restante e a página
+      // segue mesmo assim, sem cortar o restante do relatório).
+      let quantos = 1;
+      while (indice + quantos < restante.length) {
+        const grupoTentativa = restante.slice(indice, indice + quantos + 1);
+        const alturaTentativa = calcularAlturaCaixaFluxoPdf({
+          largura,
+          numero: primeiraSubcaixa ? numero : null,
+          paragrafos: grupoTentativa,
+          fonteNormal,
+          comDivisores,
+        });
+        if (y - alturaTentativa < PDF_ALTURA_RODAPE + margem) break;
+        quantos += 1;
+      }
+
+      const grupo = restante.slice(indice, indice + quantos);
+      const tituloCaixa = primeiraSubcaixa ? titulo : `${titulo} (continuação)`;
+      const alturaCaixa = desenharCaixaFluxoPdf(pagina, {
+        x: margem,
+        yTopo: y,
+        largura,
+        numero: primeiraSubcaixa ? numero : null,
+        titulo: tituloCaixa,
+        paragrafos: grupo,
+        cores,
+        fonteNormal,
+        fonteNegrito,
+        comDivisores,
+      });
+      y -= alturaCaixa;
+      indice += quantos;
+      primeiraSubcaixa = false;
+      if (indice < restante.length) novaPagina(false);
+    }
+  }
+
   for (const r of regras) {
     garantirEspaco(60);
 
@@ -6682,24 +7236,24 @@ async function construirPdfRegras(regras, tituloPagina) {
     }
 
     passos.forEach((passo, indice) => {
-      garantirEspaco(30);
+      // So' garante espaço mínimo pra' seta + início da caixa aqui - a
+      // caixa em si (que pode ser bem mais alta que isso, ex.: "Critério"
+      // com várias alternativas ligadas por "OU") é quem decide, dentro de
+      // "desenharCaixaFluxoComQuebra", se cabe inteira na página atual ou
+      // se precisa continuar numa página nova.
+      garantirEspaco((indice > 0 ? 11 : 0) + 30);
       if (indice > 0) {
         desenharSetaPdf(pagina, { x: margem + larguraUtil / 2, y, comprimento: 8, direcao: "baixo", cor: rgb(0.6, 0.65, 0.68) });
         y -= 11;
       }
-      const alturaCaixa = desenharCaixaFluxoPdf(pagina, {
-        x: margem,
-        yTopo: y,
+      desenharCaixaFluxoComQuebra({
         largura: passo.largura,
         numero: indice + 1,
         titulo: passo.titulo,
         paragrafos: passo.paragrafos,
         cores: passo.cores,
-        fonteNormal,
-        fonteNegrito,
         comDivisores: passo.comDivisores,
       });
-      y -= alturaCaixa;
     });
 
     y -= 8;
@@ -6881,6 +7435,55 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({
             tipo: "RELATORIO_GERENCIAL_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_GERENCIAL_MULTIPLAS_UNIDADES") {
+    // Mesmo padrao das demais operacoes em segundo plano, so' que aqui o
+    // "resultado" que chega em RELATORIO_GERENCIAL_FINALIZADO e' sempre um
+    // array "resultados" (1 ou mais unidades, cada uma com seu proprio
+    // ok/erro) - ver exportarRelatorioGerencialMultiplasUnidades.
+    exportarRelatorioGerencialMultiplasUnidades(mensagem.unidades, mensagem.opcoes, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_GERENCIAL", texto }).catch(() => {});
+    })
+      .then((resultados) => {
+        chrome.runtime
+          .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultados })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_GERENCIAL_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_COMPARACAO_UNIDADES") {
+    // Mesmo padrao das demais operacoes em segundo plano.
+    exportarComparacaoUnidades(mensagem.unidades, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_COMPARACAO_UNIDADES", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "COMPARACAO_UNIDADES_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "COMPARACAO_UNIDADES_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })

@@ -64,15 +64,20 @@
       </div>
 
       <div class="opcoes" id="area-select-unidade" hidden>
-        <select id="select-unidade-relatorio">
-          <option value="" selected disabled>Selecione um juízo/vara...</option>
+        <select id="select-unidade-relatorio" multiple size="6">
+          <option value="" disabled>Selecione um juízo/vara...</option>
         </select>
+        <span class="legenda-opcoes">Segure Ctrl (Cmd no Mac) e clique para escolher mais de uma unidade - um PDF será gerado por unidade, em sequência.</span>
       </div>
 
       <div id="area-unidade-selecionada" class="status" hidden></div>
 
       <div class="opcoes" id="area-personalizar-relatorio" hidden>
         <span class="legenda-opcoes">Itens a incluir no PDF:</span>
+        <div class="linha-acoes-opcoes">
+          <button type="button" id="btn-marcar-tudo-relatorio" class="btn-ghost">Marcar tudo</button>
+          <button type="button" id="btn-desmarcar-tudo-relatorio" class="btn-ghost">Desmarcar tudo</button>
+        </div>
         <label class="opcao">
           <input type="checkbox" id="chk-rel-processos-ativos" checked />
           Relação de processos ativos
@@ -118,6 +123,15 @@
       <div id="area-progresso-relatorio-gerencial" class="progresso-spinner" hidden>
         <span class="spinner" aria-hidden="true"></span>
         <span id="texto-progresso-relatorio-gerencial"></span>
+      </div>
+
+      <div class="botoes" id="area-btn-comparar-unidades" hidden>
+        <button id="btn-comparar-unidades" class="btn-secundario">Comparar dados de resumo das unidades (PDF)</button>
+      </div>
+
+      <div id="area-progresso-comparacao-unidades" class="progresso-spinner" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="texto-progresso-comparacao-unidades"></span>
       </div>
 
       <div id="area-erros-corregedoria" class="erros" hidden></div>

@@ -334,10 +334,16 @@ const chkRelParalisados = document.getElementById("chk-rel-paralisados");
 const chkRelRemessasJuizesLeigos = document.getElementById("chk-rel-remessas-juizes-leigos");
 const chkRelRegrasAutomacao = document.getElementById("chk-rel-regras-automacao");
 const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
+const btnMarcarTudoRelatorio = document.getElementById("btn-marcar-tudo-relatorio");
+const btnDesmarcarTudoRelatorio = document.getElementById("btn-desmarcar-tudo-relatorio");
 const areaBtnExportarGerencial = document.getElementById("area-btn-exportar-gerencial");
 const btnExportarRelatorioGerencial = document.getElementById("btn-exportar-relatorio-gerencial");
 const areaProgressoRelatorioGerencial = document.getElementById("area-progresso-relatorio-gerencial");
 const textoProgressoRelatorioGerencial = document.getElementById("texto-progresso-relatorio-gerencial");
+const areaBtnCompararUnidades = document.getElementById("area-btn-comparar-unidades");
+const btnCompararUnidades = document.getElementById("btn-comparar-unidades");
+const areaProgressoComparacaoUnidades = document.getElementById("area-progresso-comparacao-unidades");
+const textoProgressoComparacaoUnidades = document.getElementById("texto-progresso-comparacao-unidades");
 // Relatório Geral (panorama) desativado por enquanto - ver comentário em
 // popup.html no lugar do botão. Refs comentadas junto para não quebrar
 // (document.getElementById de um id que não existe mais no DOM).
@@ -346,11 +352,12 @@ const textoProgressoRelatorioGerencial = document.getElementById("texto-progress
 // const textoProgressoPanoramico = document.getElementById("texto-progresso-panoramico");
 const areaErrosCorregedoria = document.getElementById("area-erros-corregedoria");
 
-// A unidade escolhida no dropdown (nome + valor do filtro Órgão/Juízo) -
-// e' o "campo com a escolha da unidade" que todo relatório deste painel
-// da Corregedoria precisa conferir antes de rodar (ver
-// "exigirUnidadeSelecionada" abaixo).
-let unidadeSelecionadaCorregedoria = null;
+// As unidades escolhidas no dropdown (nome + valor do filtro Órgão/Juízo,
+// uma ou mais - o select agora e' multiplo) - e' o "campo com a escolha
+// da unidade" que todo relatório deste painel da Corregedoria precisa
+// conferir antes de rodar (ver "exigirUnidadesSelecionadas" abaixo).
+// Cada item: { valor, nome }.
+let unidadesSelecionadasCorregedoria = [];
 
 // Algumas comarcas do Paraná tem "de" no PRÓPRIO nome (ex.: "Cândido de
 // Abreu") - separar pelo ÚLTIMO " de " cortaria errado nesses casos (ex.:
@@ -358,7 +365,7 @@ let unidadeSelecionadaCorregedoria = null;
 // de "Cândido de Abreu", já que o último " de " fica DENTRO do próprio
 // nome da comarca). Lista de exceções conhecidas: quando o nome termina
 // com uma delas, a comarca é a exceção inteira, sem tentar nenhum split.
-const COMARCAS_COM_DE_NO_NOME = ["Cândido de Abreu"];
+const COMARCAS_COM_DE_NO_NOME = ["Cândido de Abreu", "Primeiro de Maio"];
 
 // Nomes de unidade do eproc seguem o padrão "<Juízo/Vara> de <Comarca>"
 // (ex.: "Juizado Especial Cível, Criminal e da Fazenda Pública de
@@ -405,14 +412,15 @@ function setStatusCorregedoria(texto, tipo) {
 // Todo relatório do painel da Corregedoria (hoje so' o Relatório
 // Gerencial da Unidade consolidado, mas a mesma checagem vale para
 // qualquer outro que venha a ser adicionado aqui) precisa conferir se
-// uma unidade foi escolhida antes de rodar - lanca erro com uma mensagem
-// clara em vez de deixar a operacao seguir sem saber de qual unidade
-// extrair os dados.
-function exigirUnidadeSelecionada() {
-  if (!unidadeSelecionadaCorregedoria || !unidadeSelecionadaCorregedoria.valor) {
-    throw new Error('Selecione uma unidade na lista antes de gerar este relatório.');
+// ao menos uma unidade foi escolhida antes de rodar - lanca erro com uma
+// mensagem clara em vez de deixar a operacao seguir sem saber de qual(is)
+// unidade(s) extrair os dados. Retorna sempre um array (1+ unidades),
+// ja' que o select agora permite escolher varias.
+function exigirUnidadesSelecionadas() {
+  if (!unidadesSelecionadasCorregedoria || unidadesSelecionadasCorregedoria.length === 0) {
+    throw new Error('Selecione ao menos uma unidade na lista antes de gerar este relatório.');
   }
-  return unidadeSelecionadaCorregedoria;
+  return unidadesSelecionadasCorregedoria;
 }
 
 // O cartão "Corregedoria" so' aparece quando o perfil ativo da aba atual
@@ -447,7 +455,8 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
   areaUnidadeSelecionada.hidden = true;
   areaPersonalizarRelatorio.hidden = true;
   areaBtnExportarGerencial.hidden = true;
-  unidadeSelecionadaCorregedoria = null;
+  areaBtnCompararUnidades.hidden = true;
+  unidadesSelecionadasCorregedoria = [];
   areaProgressoUnidades.hidden = false;
   textoProgressoUnidades.textContent = "Iniciando...";
   setStatusCorregedoria("Abrindo o Relatório Geral e lendo as unidades disponíveis (sua aba atual será navegada)...");
@@ -475,12 +484,13 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
 // deixaria a lista mais poluida).
 selectComarcaRelatorio.addEventListener("change", () => {
   const comarca = selectComarcaRelatorio.value;
-  unidadeSelecionadaCorregedoria = null;
+  unidadesSelecionadasCorregedoria = [];
   areaUnidadeSelecionada.hidden = true;
   areaPersonalizarRelatorio.hidden = true;
   areaBtnExportarGerencial.hidden = true;
+  areaBtnCompararUnidades.hidden = true;
 
-  selectUnidadeRelatorio.innerHTML = '<option value="" selected disabled>Selecione um juízo/vara...</option>';
+  selectUnidadeRelatorio.innerHTML = '<option value="" disabled>Selecione um juízo/vara...</option>';
   if (!comarca) {
     areaSelectUnidade.hidden = true;
     return;
@@ -499,31 +509,40 @@ selectComarcaRelatorio.addEventListener("change", () => {
   areaSelectUnidade.hidden = false;
 });
 
-// Ao escolher uma unidade no dropdown, preenche o campo indicando de
-// onde a informação será extraída (e' esse campo que
-// "exigirUnidadeSelecionada" confere antes de qualquer relatório deste
-// painel) e libera o botao de exportar o relatorio consolidado.
+// Ao escolher uma ou mais unidades no dropdown (agora multiplo), preenche
+// o campo indicando de onde a informação será extraída (e' esse campo
+// que "exigirUnidadesSelecionadas" confere antes de qualquer relatório
+// deste painel) e libera o botao de exportar o(s) relatorio(s)
+// consolidado(s) - um PDF por unidade, gerados em sequência.
 selectUnidadeRelatorio.addEventListener("change", () => {
-  const valor = selectUnidadeRelatorio.value;
-  const opcaoSelecionada = selectUnidadeRelatorio.selectedOptions[0];
-  if (!valor || !opcaoSelecionada) {
-    unidadeSelecionadaCorregedoria = null;
+  const opcoesSelecionadas = Array.from(selectUnidadeRelatorio.selectedOptions).filter((o) => o.value);
+  if (opcoesSelecionadas.length === 0) {
+    unidadesSelecionadasCorregedoria = [];
     areaUnidadeSelecionada.hidden = true;
     areaPersonalizarRelatorio.hidden = true;
     areaBtnExportarGerencial.hidden = true;
+    areaBtnCompararUnidades.hidden = true;
     return;
   }
-  unidadeSelecionadaCorregedoria = {
-    valor,
+  unidadesSelecionadasCorregedoria = opcoesSelecionadas.map((opcaoSelecionada) => ({
+    valor: opcaoSelecionada.value,
     // O nome completo original (com "de <Comarca>") e' o que identifica a
     // unidade sem ambiguidade nos relatórios/PDFs - o texto exibido no
     // dropdown, so' o Juízo/Vara, e' so' pra' facilitar a escolha visual.
     nome: opcaoSelecionada.dataset.nomeCompleto || opcaoSelecionada.textContent,
-  };
+  }));
   areaUnidadeSelecionada.hidden = false;
-  areaUnidadeSelecionada.textContent = `Informações serão extraídas de: ${unidadeSelecionadaCorregedoria.nome}`;
+  areaUnidadeSelecionada.textContent =
+    unidadesSelecionadasCorregedoria.length === 1
+      ? `Informações serão extraídas de: ${unidadesSelecionadasCorregedoria[0].nome}`
+      : `${unidadesSelecionadasCorregedoria.length} unidades selecionadas: ${unidadesSelecionadasCorregedoria
+          .map((u) => u.nome)
+          .join("; ")}`;
   areaPersonalizarRelatorio.hidden = false;
   areaBtnExportarGerencial.hidden = false;
+  // A comparação exige pelo menos 2 unidades (não faz sentido "comparar"
+  // uma so' unidade consigo mesma) - o botão só aparece a partir daí.
+  areaBtnCompararUnidades.hidden = unidadesSelecionadasCorregedoria.length < 2;
 });
 
 // Le' o estado atual dos checkboxes de "Itens a incluir no PDF" - as
@@ -544,12 +563,36 @@ function lerOpcoesRelatorioUnidade() {
   };
 }
 
+const CHECKBOXES_ITENS_RELATORIO_UNIDADE = [
+  chkRelProcessosAtivos,
+  chkRelSuspensos,
+  chkRelConclusosDecisao,
+  chkRelConclusosSentenca,
+  chkRelSemMovimentacao,
+  chkRelParalisados,
+  chkRelRemessasJuizesLeigos,
+  chkRelRegrasAutomacao,
+  chkRelLocalizadores,
+];
+
+btnMarcarTudoRelatorio.addEventListener("click", () => {
+  CHECKBOXES_ITENS_RELATORIO_UNIDADE.forEach((chk) => {
+    chk.checked = true;
+  });
+});
+
+btnDesmarcarTudoRelatorio.addEventListener("click", () => {
+  CHECKBOXES_ITENS_RELATORIO_UNIDADE.forEach((chk) => {
+    chk.checked = false;
+  });
+});
+
 btnExportarRelatorioGerencial.addEventListener("click", async () => {
   areaErrosCorregedoria.hidden = true;
 
-  let unidade;
+  let unidades;
   try {
-    unidade = exigirUnidadeSelecionada();
+    unidades = exigirUnidadesSelecionadas();
   } catch (e) {
     areaErrosCorregedoria.hidden = false;
     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
@@ -568,17 +611,20 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
   textoProgressoRelatorioGerencial.textContent = "Iniciando...";
   iniciarCronometroStatus(areaCorregedoriaInfo);
   setStatusCorregedoria(
-    `Gerando o Relatório para Correição de "${unidade.nome}" em segundo plano...`
+    unidades.length === 1
+      ? `Gerando o Relatório para Correição de "${unidades[0].nome}" em segundo plano...`
+      : `Gerando ${unidades.length} relatórios para Correição em segundo plano, um por vez (arquivos separados)...`
   );
 
   // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
   // comecou; o resultado final chega pela mensagem
-  // RELATORIO_GERENCIAL_FINALIZADO.
+  // RELATORIO_GERENCIAL_FINALIZADO. Sempre usa a mensagem "multiplas
+  // unidades" (mesmo com uma so' unidade) - o background.js gera os PDFs
+  // sequencialmente, um por unidade, em arquivos separados.
   try {
     const resposta = await chrome.runtime.sendMessage({
-      tipo: "EXPORTAR_RELATORIO_GERENCIAL_UNIDADE",
-      valorUnidade: unidade.valor,
-      nomeUnidade: unidade.nome,
+      tipo: "EXPORTAR_RELATORIO_GERENCIAL_MULTIPLAS_UNIDADES",
+      unidades: unidades.map((u) => ({ valor: u.valor, nome: u.nome })),
       opcoes,
     });
     if (!resposta || !resposta.ok) {
@@ -590,6 +636,53 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
     areaProgressoRelatorioGerencial.hidden = true;
     btnExportarRelatorioGerencial.disabled = false;
+  }
+});
+
+// Compara so' os dados de RESUMO (contagens - sem tabelas, sem
+// localizadores/remessas/regras) de 2+ unidades escolhidas, num único
+// PDF com uma linha por unidade - não usa os checkboxes de "Itens a
+// incluir no PDF" (esses valem so' para o Relatório da Unidade acima).
+btnCompararUnidades.addEventListener("click", async () => {
+  areaErrosCorregedoria.hidden = true;
+
+  let unidades;
+  try {
+    unidades = exigirUnidadesSelecionadas();
+  } catch (e) {
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+    return;
+  }
+  if (unidades.length < 2) {
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = "Selecione ao menos duas unidades para comparar.";
+    return;
+  }
+
+  btnCompararUnidades.disabled = true;
+  areaProgressoComparacaoUnidades.hidden = false;
+  textoProgressoComparacaoUnidades.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaCorregedoriaInfo);
+  setStatusCorregedoria(`Comparando ${unidades.length} unidades em segundo plano...`);
+
+  // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
+  // comecou; o resultado final chega pela mensagem
+  // COMPARACAO_UNIDADES_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "EXPORTAR_COMPARACAO_UNIDADES",
+      unidades: unidades.map((u) => ({ valor: u.valor, nome: u.nome })),
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a comparação.");
+    }
+  } catch (e) {
+    setStatusCorregedoria("Erro ao gerar a comparação entre unidades.", "erro");
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+    areaProgressoComparacaoUnidades.hidden = true;
+    btnCompararUnidades.disabled = false;
   }
 });
 
@@ -752,7 +845,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         opcao.textContent = comarca;
         selectComarcaRelatorio.appendChild(opcao);
       }
-      selectUnidadeRelatorio.innerHTML = '<option value="" selected disabled>Selecione um juízo/vara...</option>';
+      selectUnidadeRelatorio.innerHTML = '<option value="" disabled>Selecione um juízo/vara...</option>';
       areaSelectUnidade.hidden = true;
       areaSelectComarca.hidden = comarcas.length === 0;
       // Sem nenhuma unidade encontrada nao ha' nada mais a fazer com a
@@ -787,18 +880,63 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     btnExportarRelatorioGerencial.disabled = false;
 
     if (mensagem.ok) {
-      const resultado = mensagem.resultado || {};
-      setStatusCorregedoria(
-        `Concluído! Relatório para Correição de "${resultado.unidade || ""}" salvo em Downloads/eproc/ (${
-          resultado.totalLocalizadores || 0
-        } localizador(es)).`,
-        "ok"
-      );
+      const resultados = mensagem.resultados || [];
+      const sucessos = resultados.filter((r) => r.ok);
+      const falhas = resultados.filter((r) => !r.ok);
+
+      if (resultados.length <= 1) {
+        const unico = resultados[0] || {};
+        const resultado = unico.resultado || {};
+        setStatusCorregedoria(
+          `Concluído! Relatório para Correição de "${unico.unidade || resultado.unidade || ""}" salvo em Downloads/eproc/ (${
+            resultado.totalLocalizadores || 0
+          } localizador(es)).`,
+          "ok"
+        );
+      } else {
+        setStatusCorregedoria(
+          `Concluído! ${sucessos.length} de ${resultados.length} relatório(s) gerado(s) em Downloads/eproc/ (arquivos separados por unidade)${
+            falhas.length > 0 ? `, ${falhas.length} com erro` : ""
+          }.`,
+          falhas.length > 0 ? "erro" : "ok"
+        );
+      }
+
+      if (falhas.length > 0) {
+        areaErrosCorregedoria.hidden = false;
+        areaErrosCorregedoria.textContent = falhas
+          .map((f) => `${f.unidade}: ${f.erro || "falha desconhecida"}`)
+          .join("; ");
+      }
     } else {
       setStatusCorregedoria("Erro ao gerar o relatório gerencial.", "erro");
       areaErrosCorregedoria.hidden = false;
       areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao gerar o relatório gerencial.";
+    }
+  }
+
+  if (mensagem.tipo === "PROGRESSO_COMPARACAO_UNIDADES") {
+    textoProgressoComparacaoUnidades.textContent = mensagem.texto || "Processando...";
+  }
+
+  if (mensagem.tipo === "COMPARACAO_UNIDADES_FINALIZADO") {
+    areaProgressoComparacaoUnidades.hidden = true;
+    btnCompararUnidades.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      setStatusCorregedoria(
+        `Concluído! Comparação de ${resultado.totalUnidades || 0} unidade(s) salva em Downloads/eproc/${
+          resultado.totalComErro > 0 ? ` (${resultado.totalComErro} com erro na consulta)` : ""
+        }.`,
+        resultado.totalComErro > 0 ? "erro" : "ok"
+      );
+    } else {
+      setStatusCorregedoria("Erro ao gerar a comparação entre unidades.", "erro");
+      areaErrosCorregedoria.hidden = false;
+      areaErrosCorregedoria.textContent =
+        mensagem.erro || "Falha desconhecida ao gerar a comparação entre unidades.";
     }
   }
 

@@ -553,7 +553,7 @@ const ID_WRAPPER_COMARCA_JUIZO = "eproc-exportador-comarca-juizo";
 // "... do Juízo Único de Cândido de Abreu" viraria comarca "Abreu" em vez
 // de "Cândido de Abreu"). Mesma lista de exceções usada em
 // "separarComarcaDoJuizo" (popup.js).
-const COMARCAS_COM_DE_NO_NOME_ORGAO = ["Cândido de Abreu"];
+const COMARCAS_COM_DE_NO_NOME_ORGAO = ["Cândido de Abreu", "Primeiro de Maio"];
 
 function separarComarcaDoJuizoOrgao(nomeCompleto) {
   const texto = (nomeCompleto || "").trim();
