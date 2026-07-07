@@ -652,6 +652,14 @@ function quebrarLinhas(texto, fonte, tamanhoFonte, larguraMaxima) {
   const linhasFinal = [];
   const linhasOriginais = texto.split(/\r\n|\r|\n/);
 
+  const largura = (t) => {
+    try {
+      return fonte.widthOfTextAtSize(t, tamanhoFonte);
+    } catch (e) {
+      return 0;
+    }
+  };
+
   for (const linhaOriginal of linhasOriginais) {
     if (linhaOriginal.trim() === "") {
       linhasFinal.push("");
@@ -661,14 +669,33 @@ function quebrarLinhas(texto, fonte, tamanhoFonte, larguraMaxima) {
     const palavras = linhaOriginal.split(/\s+/).filter(Boolean);
     let linhaAtual = "";
     for (const palavra of palavras) {
-      const tentativa = linhaAtual ? `${linhaAtual} ${palavra}` : palavra;
-      let largura;
-      try {
-        largura = fonte.widthOfTextAtSize(tentativa, tamanhoFonte);
-      } catch (e) {
-        largura = 0;
+      if (largura(palavra) > larguraMaxima) {
+        // Palavra sozinha (sem espaço - ex.: "MOVIMENTO-AGUARDA") mais
+        // larga que a coluna inteira: sem isso ela nunca quebraria (o
+        // laço normal so' quebra ENTRE palavras) e vazaria visualmente
+        // para a coluna vizinha da tabela. Quebra caractere a caractere,
+        // cada pedaço virando sua própria linha - exceto o último, que
+        // ainda pode receber a próxima palavra normalmente.
+        if (linhaAtual) {
+          linhasFinal.push(linhaAtual);
+          linhaAtual = "";
+        }
+        let pedacoAtual = "";
+        for (const caractere of palavra) {
+          const tentativa = pedacoAtual + caractere;
+          if (largura(tentativa) > larguraMaxima && pedacoAtual) {
+            linhasFinal.push(pedacoAtual);
+            pedacoAtual = caractere;
+          } else {
+            pedacoAtual = tentativa;
+          }
+        }
+        linhaAtual = pedacoAtual;
+        continue;
       }
-      if (largura > larguraMaxima && linhaAtual) {
+
+      const tentativa = linhaAtual ? `${linhaAtual} ${palavra}` : palavra;
+      if (largura(tentativa) > larguraMaxima && linhaAtual) {
         linhasFinal.push(linhaAtual);
         linhaAtual = palavra;
       } else {
@@ -4560,7 +4587,12 @@ async function construirPdfProcessosParalisados(tabela, nomeUnidade) {
       const diasParado = dataHoraOrdenavel > 0 ? Math.floor((agora - dataHoraOrdenavel) / 86400000) : null;
       return {
         processo: valorDe(linha, idxProcesso),
-        situacao: valorDe(linha, idxSituacao),
+        // Abrevia os nomes longos/técnicos de situação (ex.: "MOVIMENTO-
+        // AGUARDA DESPACHO" -> "Cls. Despacho") - mesma abreviação usada
+        // na relação de processos ativos, e' o mesmo texto (unico "token"
+        // sem espaço no meio) que antes vazava para a coluna "Classe" por
+        // ser mais largo que a própria coluna.
+        situacao: abreviarSituacao(valorDe(linha, idxSituacao)),
         classe: valorDe(linha, idxClasse),
         localizador: formatarLocalizadores(valorDe(linha, idxLocalizador), true),
         ultimoEvento: valorDe(linha, idxEvento),
@@ -4575,12 +4607,16 @@ async function construirPdfProcessosParalisados(tabela, nomeUnidade) {
 
   const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
   const colunas = [
-    { titulo: "Nº do Processo", largura: larguraUtil * 0.2, campo: "processo" },
-    { titulo: "Situação", largura: larguraUtil * 0.15, campo: "situacao" },
-    { titulo: "Classe", largura: larguraUtil * 0.15, campo: "classe" },
-    { titulo: "Localizador", largura: larguraUtil * 0.17, campo: "localizador" },
-    { titulo: "Último Evento", largura: larguraUtil * 0.11, campo: "ultimoEvento" },
-    { titulo: "Data/Hora", largura: larguraUtil * 0.12, campo: "dataHora" },
+    { titulo: "Nº do Processo", largura: larguraUtil * 0.19, campo: "processo" },
+    { titulo: "Situação", largura: larguraUtil * 0.13, campo: "situacao" },
+    { titulo: "Classe", largura: larguraUtil * 0.14, campo: "classe" },
+    { titulo: "Localizador", largura: larguraUtil * 0.15, campo: "localizador" },
+    // "Últ. Evento" (nao "Último Evento") pelo mesmo motivo do "Dias"
+    // logo abaixo: o cabecalho da coluna nao quebra linha - um rotulo
+    // mais longo estourava a largura da coluna e vazava visualmente
+    // para dentro da coluna "Data/Hora" vizinha.
+    { titulo: "Últ. Evento", largura: larguraUtil * 0.14, campo: "ultimoEvento" },
+    { titulo: "Data/Hora", largura: larguraUtil * 0.15, campo: "dataHora" },
     // Rótulo curto de proposito (nao "Dias Parado") - o cabecalho da
     // coluna nao quebra linha, entao um rotulo mais longo estourava a
     // largura da coluna e cortava fora da pagina.
