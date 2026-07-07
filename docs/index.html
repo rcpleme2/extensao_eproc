@@ -6,248 +6,451 @@
 <title>Extensão Auxiliar eProc</title>
 <meta name="description" content="Extensão para Chrome/Edge com ferramentas de exportação de documentos, relatórios em PDF e automações para o sistema eProc do TJPR." />
 <style>
+  /* Mesmos tokens de design de popup.css - a página usa deliberadamente
+     a mesma paleta/tipografia/componentes do próprio painel da extensão
+     (cartões colapsáveis, botões, selos, avisos), em vez de um design
+     próprio à parte. */
   :root {
     --cor-primaria: #2c6ea6;
     --cor-primaria-escura: #1c3d5a;
-    --cor-texto: #1c2a33;
-    --cor-texto-suave: #55636b;
+    --cor-primaria-hover: #24597f;
+    --cor-texto: #26313a;
+    --cor-texto-suave: #5c6b78;
     --cor-fundo: #f4f6f8;
     --cor-cartao: #ffffff;
-    --cor-borda: #dde3e8;
-    --cor-codigo-fundo: #f0f4f8;
-    --raio: 10px;
+    --cor-borda: #dfe4e8;
+    --cor-borda-suave: #ecf0f3;
+    --cor-realce-fundo: #f0f4f8;
+    --cor-aviso: #7a5c00;
+    --cor-aviso-fundo: #fff8e1;
+    --cor-aviso-borda: #f0d98c;
+    --cor-ok: #1a7f37;
+    --cor-ok-fundo: #eaf6ee;
+    --raio: 6px;
+    --raio-cartao: 8px;
+    --espaco-1: 6px;
+    --espaco-2: 10px;
+    --espaco-3: 14px;
+    --fonte-base: 14px;
+    --fonte-pequena: 12px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --cor-primaria: #5b9bd5;
+      --cor-primaria: #6fa8d8;
       --cor-primaria-escura: #cfe0f0;
-      --cor-texto: #e8edf1;
-      --cor-texto-suave: #a9b6bf;
-      --cor-fundo: #10171d;
-      --cor-cartao: #1a2129;
-      --cor-borda: #2b343c;
-      --cor-codigo-fundo: #10171d;
+      --cor-primaria-hover: #86b6e0;
+      --cor-texto: #dde3e8;
+      --cor-texto-suave: #98a5b0;
+      --cor-fundo: #10161b;
+      --cor-cartao: #1a2229;
+      --cor-borda: #2c363e;
+      --cor-borda-suave: #232b32;
+      --cor-realce-fundo: #202a32;
+      --cor-aviso-fundo: #2a2410;
+      --cor-aviso-borda: #5c4c14;
+      --cor-aviso: #e0c05c;
+      --cor-ok-fundo: #123321;
+      --cor-ok: #4cbf78;
     }
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
     background: var(--cor-fundo);
     color: var(--cor-texto);
+    font-size: var(--fonte-base);
     line-height: 1.55;
   }
-  .faixa-topo {
-    background: linear-gradient(135deg, var(--cor-primaria-escura), var(--cor-primaria));
-    color: #fff;
-    padding: 48px 20px 56px;
-  }
-  @media (prefers-color-scheme: dark) {
-    .faixa-topo { color: #0d1318; }
-  }
-  .topo-conteudo {
-    max-width: 860px;
-    margin: 0 auto;
+  main { max-width: 760px; margin: 0 auto; padding: var(--espaco-3) var(--espaco-2) 40px; }
+
+  /* ---- Cabeçalho (igual ao cabecalho-app do painel) ---- */
+  .cabecalho-app {
     display: flex;
     align-items: center;
-    gap: 20px;
-    flex-wrap: wrap;
+    gap: var(--espaco-2);
+    padding: 4px 2px 12px;
+    border-bottom: 2px solid var(--cor-primaria);
+    margin-bottom: var(--espaco-3);
   }
-  .topo-conteudo img { width: 64px; height: 64px; flex-shrink: 0; }
-  .topo-texto h1 { margin: 0 0 6px; font-size: 1.7rem; }
-  .topo-texto p { margin: 0; opacity: 0.92; max-width: 56ch; }
-  .badges { margin-top: 18px; display: flex; gap: 10px; flex-wrap: wrap; }
-  .badge {
+  .cabecalho-app img { width: 30px; height: 30px; flex: 0 0 auto; }
+  .cabecalho-titulos { min-width: 0; }
+  .cabecalho-app h1 {
+    font-size: 17px;
+    font-weight: 700;
+    margin: 0;
+    color: var(--cor-primaria-escura);
+  }
+  .cabecalho-sub {
+    font-size: var(--fonte-pequena);
+    color: var(--cor-texto-suave);
+  }
+
+  /* ---- Cartões (mesmo <details>/<summary> do painel) ---- */
+  .card {
+    background: var(--cor-cartao);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-cartao);
+    margin-bottom: var(--espaco-2);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+  }
+  .card-titulo {
+    display: flex;
+    align-items: center;
+    gap: var(--espaco-1);
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--cor-primaria);
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+  }
+  .card-titulo::-webkit-details-marker { display: none; }
+  .card-titulo::after {
+    content: "";
+    margin-left: auto;
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid var(--cor-texto-suave);
+    border-bottom: 2px solid var(--cor-texto-suave);
+    transform: rotate(45deg);
+    transition: transform 0.15s ease;
+    flex: 0 0 auto;
+  }
+  .card[open] > .card-titulo::after { transform: rotate(225deg); }
+  .card[open] > .card-titulo { border-bottom: 1px solid var(--cor-borda-suave); }
+  .card-titulo:hover { background: var(--cor-realce-fundo); }
+  .card-icone { font-size: 15px; }
+  .card-corpo { padding: 14px; display: flex; flex-direction: column; gap: var(--espaco-2); }
+  .card-corpo p { margin: 0; }
+  .card-corpo ol, .card-corpo ul { margin: 0; padding-left: 1.25em; }
+  .card-corpo li { margin-bottom: 5px; }
+  .card-corpo li:last-child { margin-bottom: 0; }
+
+  .selo {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--cor-primaria-escura);
+    background: var(--cor-realce-fundo);
+    border: 1px solid var(--cor-borda);
+    border-radius: 10px;
+    padding: 2px 8px;
+    margin-left: var(--espaco-1);
+  }
+
+  /* ---- Botões (mesmas 2 variações do painel) ---- */
+  button { font: inherit; }
+  .btn, .btn-secundario {
+    padding: 8px 14px;
+    border-radius: var(--raio);
+    font-size: var(--fonte-base);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.1s ease;
+    text-decoration: none;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: rgba(255,255,255,0.16);
-    border: 1px solid rgba(255,255,255,0.35);
-    border-radius: 999px;
-    padding: 5px 12px;
-    font-size: 0.85rem;
   }
-  main { max-width: 860px; margin: -28px auto 60px; padding: 0 20px; }
-  .cartao {
-    background: var(--cor-cartao);
-    border: 1px solid var(--cor-borda);
-    border-radius: var(--raio);
-    padding: 24px 26px;
-    margin-bottom: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-  }
-  .cartao h2 {
-    margin-top: 0;
-    font-size: 1.2rem;
-    color: var(--cor-primaria-escura);
-  }
-  @media (prefers-color-scheme: dark) {
-    .cartao h2 { color: var(--cor-primaria); }
-  }
-  .cartao h2 .num {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
+  .btn {
+    border: 1px solid var(--cor-primaria);
     background: var(--cor-primaria);
     color: #fff;
-    font-size: 0.85rem;
-    margin-right: 8px;
   }
-  ol, ul { padding-left: 1.3em; }
-  li { margin-bottom: 6px; }
-  code {
-    background: var(--cor-codigo-fundo);
+  .btn:hover { background: var(--cor-primaria-hover); border-color: var(--cor-primaria-hover); }
+  .btn-secundario {
+    border: 1px solid var(--cor-primaria);
+    background: var(--cor-cartao);
+    color: var(--cor-primaria);
+  }
+  .btn-secundario:hover { background: var(--cor-realce-fundo); }
+  .btn-secundario.copiado { border-color: var(--cor-ok); color: var(--cor-ok); }
+
+  /* ---- Acesso direto ao navegador (em vez de instrução para digitar) ---- */
+  .endereco-navegador {
+    display: flex;
+    align-items: center;
+    gap: var(--espaco-1);
+    flex-wrap: wrap;
+    background: var(--cor-realce-fundo);
     border: 1px solid var(--cor-borda);
-    border-radius: 4px;
-    padding: 1px 6px;
-    font-size: 0.92em;
+    border-radius: var(--raio);
+    padding: 8px 10px;
   }
-  .grade-funcoes {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-    gap: 14px;
-    margin-top: 6px;
+  .endereco-navegador code {
+    font-size: 0.95em;
+    color: var(--cor-primaria-escura);
+    flex: 1 1 auto;
   }
-  .funcao {
+  .endereco-navegador .btn-secundario {
+    padding: 4px 10px;
+    font-size: var(--fonte-pequena);
+    flex: 0 0 auto;
+  }
+
+  .aviso {
+    padding: 8px 10px;
+    background: var(--cor-aviso-fundo);
+    border: 1px solid var(--cor-aviso-borda);
+    border-radius: var(--raio);
+    color: var(--cor-aviso);
+    font-size: var(--fonte-pequena);
+    line-height: 1.5;
+  }
+  .aviso strong { color: inherit; }
+
+  /* ---- Versão ---- */
+  .linha-versao {
+    display: flex;
+    align-items: center;
+    gap: var(--espaco-2);
+    flex-wrap: wrap;
+  }
+  .versao-numero {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--cor-primaria-escura);
+    background: var(--cor-realce-fundo);
     border: 1px solid var(--cor-borda);
-    border-radius: 8px;
-    padding: 14px 16px;
+    border-radius: 10px;
+    padding: 3px 10px;
   }
-  .funcao h3 {
-    margin: 0 0 6px;
-    font-size: 1rem;
+  .novidades {
+    border-top: 1px solid var(--cor-borda-suave);
+    padding-top: var(--espaco-2);
+  }
+  .novidades h3 {
+    display: flex;
+    align-items: baseline;
+    gap: var(--espaco-1);
+    flex-wrap: wrap;
+    margin: 0 0 var(--espaco-1);
+    font-size: var(--fonte-base);
+    font-weight: 700;
     color: var(--cor-texto);
   }
-  .funcao p { margin: 0; font-size: 0.92rem; color: var(--cor-texto-suave); }
-  .funcao .selo {
-    display: inline-block;
-    font-size: 0.72rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: var(--cor-primaria);
-    margin-bottom: 4px;
-  }
-  .aviso {
-    background: var(--cor-codigo-fundo);
-    border: 1px solid var(--cor-borda);
-    border-left: 4px solid var(--cor-primaria);
-    border-radius: 6px;
-    padding: 12px 16px;
-    font-size: 0.92rem;
+  .versao-numero-pequena {
+    font-size: var(--fonte-pequena);
+    font-weight: 500;
     color: var(--cor-texto-suave);
   }
+  .novidades ul {
+    margin: 0;
+    padding-left: 1.25em;
+  }
+  .novidades li {
+    margin-bottom: 5px;
+    font-size: var(--fonte-pequena);
+    color: var(--cor-texto-suave);
+  }
+  .novidades li:last-child { margin-bottom: 0; }
+  .novidades li strong { color: var(--cor-texto); }
+
+  /* ---- Funcionalidades ---- */
+  .lista-funcoes { display: flex; flex-direction: column; gap: var(--espaco-2); }
+  .funcao {
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio);
+    padding: 10px 12px;
+  }
+  .funcao-cabecalho {
+    display: flex;
+    align-items: baseline;
+    gap: var(--espaco-1);
+    margin-bottom: 3px;
+  }
+  .funcao-cabecalho strong { color: var(--cor-texto); font-size: var(--fonte-base); }
+  .funcao p { margin: 0; font-size: var(--fonte-pequena); color: var(--cor-texto-suave); }
+
+  code {
+    background: var(--cor-realce-fundo);
+    border: 1px solid var(--cor-borda);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.92em;
+  }
+  a { color: var(--cor-primaria); }
+
   footer {
     text-align: center;
-    font-size: 0.85rem;
+    font-size: var(--fonte-pequena);
     color: var(--cor-texto-suave);
-    padding: 20px;
+    padding: 20px 0 0;
   }
-  footer a { color: var(--cor-primaria); }
-  a { color: var(--cor-primaria); }
 </style>
 </head>
 <body>
-
-<div class="faixa-topo">
-  <div class="topo-conteudo">
-    <img src="assets/icon128.png" alt="" />
-    <div class="topo-texto">
-      <h1>Extensão Auxiliar eProc</h1>
-      <p>Ferramentas para o sistema eProc do TJPR: exportação de documentos e processos, relatórios gerenciais em PDF e automações para o dia a dia no eProc — direto do navegador, sem instalar nada além da extensão.</p>
-    </div>
-  </div>
-  <div class="badges">
-    <span class="badge">Chrome / Edge</span>
-    <span class="badge">Manifest V3</span>
-    <span class="badge">Uso gratuito e local</span>
-  </div>
-</div>
-
 <main>
 
-  <div class="cartao">
-    <h2><span class="num">1</span>Instalação (modo desenvolvedor)</h2>
-    <p>A extensão ainda não está publicada na Chrome Web Store — a instalação é feita carregando a pasta do projeto diretamente no navegador. Leva menos de um minuto:</p>
-    <ol>
-      <li>Baixe ou clone este repositório na sua máquina.</li>
-      <li>Abra <code>chrome://extensions</code> (ou <code>edge://extensions</code> no Edge).</li>
-      <li>Ative o <strong>"Modo de desenvolvedor"</strong> (canto superior direito da página).</li>
-      <li>Clique em <strong>"Carregar sem compactação"</strong> e selecione a pasta do projeto.</li>
-      <li>O ícone da extensão (uma balança da justiça) aparece na barra de ferramentas.</li>
-    </ol>
-    <div class="aviso">
-      Sempre que houver uma atualização, baixe a nova versão e clique em
-      "Atualizar" na página <code>chrome://extensions</code> para recarregar a extensão.
+  <header class="cabecalho-app">
+    <img src="assets/icon48.png" alt="" />
+    <div class="cabecalho-titulos">
+      <h1>Extensão Auxiliar eProc</h1>
+      <div class="cabecalho-sub">TJPR · Sistema eProc</div>
     </div>
-  </div>
+  </header>
 
-  <div class="cartao">
-    <h2><span class="num">2</span>Como usar</h2>
-    <ol>
-      <li>Faça login no eProc (<code>eproc1g.tjpr.jus.br</code> ou <code>eproc1g.tre.tjpr.jus.br</code>) e abra a página desejada.</li>
-      <li>Clique no ícone da extensão para abrir o <strong>painel lateral</strong> — ou use o botão que a extensão adiciona ao lado da logo do "Portal jus.br", no próprio cabeçalho do eProc.</li>
-      <li>Escolha a ferramenta desejada num dos cartões (todos começam fechados; clique no título para abrir).</li>
-    </ol>
-    <p>O painel se adapta ao perfil logado: o cartão <strong>Corregedoria</strong> só aparece para quem está com esse perfil ativo; os demais ficam sempre disponíveis.</p>
-  </div>
-
-  <div class="cartao">
-    <h2><span class="num">3</span>Principais funcionalidades</h2>
-    <div class="grade-funcoes">
-
-      <div class="funcao">
-        <span class="selo">Gestão Gabinete</span>
-        <h3>Exportar Documentos</h3>
-        <p>Baixa todos os documentos de um processo de uma vez, organizados em pastas por processo. Pode combinar tudo num único PDF ou gerar um Markdown anonimizado com a movimentação e o texto dos documentos.</p>
+  <details class="card" open>
+    <summary class="card-titulo">
+      <span class="card-icone" aria-hidden="true">⬇️</span>
+      <span>Instalar</span>
+    </summary>
+    <div class="card-corpo">
+      <p>A extensão ainda não está publicada na Chrome Web Store — a instalação é feita carregando a pasta do projeto diretamente no navegador, em modo desenvolvedor. Leva menos de um minuto:</p>
+      <ol>
+        <li>
+          Baixe o código-fonte e extraia o .zip numa pasta fixa do seu computador (evite Downloads/área de trabalho, para não mover ou apagar por engano depois):
+          <div style="margin-top: 6px;">
+            <a class="btn" href="https://github.com/rcpleme2/extensao_eproc/archive/refs/heads/main.zip">⬇ Baixar código-fonte (.zip)</a>
+          </div>
+        </li>
+        <li>Abra a página de extensões do seu navegador:
+          <div class="endereco-navegador">
+            <code>chrome://extensions</code>
+            <button type="button" class="btn-secundario" data-copiar="chrome://extensions">Copiar endereço</button>
+          </div>
+          <div class="endereco-navegador" style="margin-top: 6px;">
+            <code>edge://extensions</code>
+            <button type="button" class="btn-secundario" data-copiar="edge://extensions">Copiar endereço</button>
+          </div>
+          <p style="margin-top: 4px; font-size: var(--fonte-pequena); color: var(--cor-texto-suave);">O navegador não permite abrir essa página por um link comum — clique em "Copiar endereço", cole na barra de endereços do navegador (Ctrl+V ou Cmd+V) e aperte Enter.</p>
+        </li>
+        <li>Ative o <strong>"Modo de desenvolvedor"</strong> (chave no canto superior direito da página).</li>
+        <li>Clique em <strong>"Carregar sem compactação"</strong> e selecione a pasta onde você extraiu o .zip.</li>
+        <li>O ícone da extensão (uma balança da justiça) aparece na barra de ferramentas.</li>
+      </ol>
+      <div class="aviso">
+        <strong>Atualizações:</strong> a cada nova versão, baixe o .zip novo e extraia
+        <strong>substituindo os arquivos na mesma pasta</strong> usada na instalação — depois
+        clique em "Atualizar" (ícone de recarregar) no card da extensão em
+        <code>chrome://extensions</code>. Se preferir começar do zero, remova a extensão
+        nessa mesma página, apague a pasta antiga e repita os passos de instalação
+        acima com a pasta nova.
       </div>
-
-      <div class="funcao">
-        <span class="selo">Gestão Gabinete</span>
-        <h3>Busca específica de localizadores</h3>
-        <p>Lista os processos de um localizador escolhido e permite abri-los ou exportar os documentos/processos encontrados.</p>
-      </div>
-
-      <div class="funcao">
-        <span class="selo">Gestão da Unidade</span>
-        <h3>Relatório da Unidade (PDF)</h3>
-        <p>Panorama da unidade habilitada na sessão: processos ativos e suspensos, conclusos para decisão/sentença, sem movimentação, paralisados, remessas aos juízes leigos, regras de automação e localizadores — sem precisar escolher a unidade manualmente.</p>
-      </div>
-
-      <div class="funcao">
-        <span class="selo">Corregedoria</span>
-        <h3>Relatório para Correição</h3>
-        <p>A mesma relação de dados do Relatório da Unidade, para qualquer unidade escolhida num dropdown — inclusive várias de uma vez, gerando um PDF separado por unidade, em sequência.</p>
-      </div>
-
-      <div class="funcao">
-        <span class="selo">Corregedoria</span>
-        <h3>Comparação entre unidades</h3>
-        <p>Compara os dados de resumo (contagens) de duas ou mais unidades escolhidas, lado a lado, num único PDF.</p>
-      </div>
-
-      <div class="funcao">
-        <span class="selo">Automação</span>
-        <h3>Regras de Automação (PDF)</h3>
-        <p>Exporta as regras ativas de "Automatizar Tramitação Processual" como um fluxograma legível, um cartão por regra.</p>
-      </div>
-
     </div>
-  </div>
+  </details>
 
-  <div class="cartao">
-    <h2><span class="num">4</span>Saiba mais</h2>
-    <p>Todos os detalhes — inclusive configurações, formatos de saída e observações de segurança/privacidade — estão no <a href="https://github.com/rcpleme2/extensao_eproc#readme">README do repositório</a>.</p>
-  </div>
+  <details class="card">
+    <summary class="card-titulo">
+      <span class="card-icone" aria-hidden="true">🏷️</span>
+      <span>Versão</span>
+    </summary>
+    <div class="card-corpo">
+      <div class="linha-versao">
+        <span class="versao-numero">v1.1.0</span>
+        <a class="btn-secundario" href="https://github.com/rcpleme2/extensao_eproc/archive/refs/heads/main.zip">⬇ Baixar versão atual (.zip)</a>
+      </div>
+      <p style="font-size: var(--fonte-pequena); color: var(--cor-texto-suave);">
+        O número da versão instalada fica em <code>chrome://extensions</code>, no card
+        da extensão. Histórico completo de mudanças e o esquema de versionamento estão no
+        <a href="https://github.com/rcpleme2/extensao_eproc#readme">README do repositório</a>.
+      </p>
+
+      <div class="novidades">
+        <h3>Novidades da v1.1.0 <span class="versao-numero-pequena">desde a v1.0.0</span></h3>
+        <ul>
+          <li>Nova <strong>comparação de dados de resumo entre unidades</strong> (Corregedoria): escolha 2 ou mais unidades e exporte um único PDF comparando os números lado a lado.</li>
+          <li>O Relatório para Correição agora aceita <strong>escolher várias unidades de uma vez</strong>, gerando um PDF separado por unidade, em sequência.</li>
+          <li>Novo <strong>gráfico de distribuição por rito processual</strong> no Relatório da Unidade.</li>
+          <li>Botões <strong>"Marcar tudo"/"Desmarcar tudo"</strong> nos itens do PDF do Relatório para Correição.</li>
+          <li>"Primeiro de Maio" incluída na lista de exceções de comarca (mesmo tratamento de "Cândido de Abreu").</li>
+          <li>Correção: caixas de fluxo com muitos critérios não ultrapassam mais o rodapé da página no PDF de Regras de Automação.</li>
+          <li>Correção: texto sobreposto entre colunas na tabela de processos paralisados do PDF.</li>
+        </ul>
+      </div>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary class="card-titulo">
+      <span class="card-icone" aria-hidden="true">📋</span>
+      <span>Como usar</span>
+    </summary>
+    <div class="card-corpo">
+      <ol>
+        <li>Faça login no eProc (<code>eproc1g.tjpr.jus.br</code> ou <code>eproc1g.tre.tjpr.jus.br</code>) e abra a página desejada.</li>
+        <li>Clique no ícone da extensão para abrir o painel lateral — ou use o botão que ela adiciona ao lado da logo do "Portal jus.br", no cabeçalho do eProc.</li>
+        <li>Escolha a ferramenta desejada num dos cartões (todos começam fechados; clique no título para abrir).</li>
+      </ol>
+      <p style="font-size: var(--fonte-pequena); color: var(--cor-texto-suave);">O painel se adapta ao perfil logado: o cartão <strong>Corregedoria</strong> só aparece para quem está com esse perfil ativo.</p>
+    </div>
+  </details>
+
+  <details class="card">
+    <summary class="card-titulo">
+      <span class="card-icone" aria-hidden="true">🧭</span>
+      <span>Principais funcionalidades</span>
+    </summary>
+    <div class="card-corpo">
+      <div class="lista-funcoes">
+
+        <div class="funcao">
+          <div class="funcao-cabecalho"><strong>Exportar Documentos</strong><span class="selo">Gestão Gabinete</span></div>
+          <p>Baixa todos os documentos de um processo de uma vez, organizados em pastas por processo. Pode combinar tudo num único PDF ou gerar um Markdown anonimizado com a movimentação e o texto dos documentos.</p>
+        </div>
+
+        <div class="funcao">
+          <div class="funcao-cabecalho"><strong>Busca específica de localizadores</strong><span class="selo">Gestão Gabinete</span></div>
+          <p>Lista os processos de um localizador escolhido e permite abri-los ou exportar os documentos/processos encontrados.</p>
+        </div>
+
+        <div class="funcao">
+          <div class="funcao-cabecalho"><strong>Relatório da Unidade (PDF)</strong><span class="selo">Gestão da Unidade</span></div>
+          <p>Panorama da unidade habilitada na sessão: processos ativos e suspensos, conclusos para decisão/sentença, sem movimentação, paralisados, remessas aos juízes leigos, regras de automação e localizadores.</p>
+        </div>
+
+        <div class="funcao">
+          <div class="funcao-cabecalho"><strong>Relatório para Correição</strong><span class="selo">Corregedoria</span></div>
+          <p>A mesma relação de dados do Relatório da Unidade, para qualquer unidade escolhida num dropdown — inclusive várias de uma vez, gerando um PDF separado por unidade, em sequência.</p>
+        </div>
+
+        <div class="funcao">
+          <div class="funcao-cabecalho"><strong>Comparação entre unidades</strong><span class="selo">Corregedoria</span></div>
+          <p>Compara os dados de resumo (contagens) de duas ou mais unidades escolhidas, lado a lado, num único PDF.</p>
+        </div>
+
+        <div class="funcao">
+          <div class="funcao-cabecalho"><strong>Regras de Automação (PDF)</strong></div>
+          <p>Exporta as regras ativas de "Automatizar Tramitação Processual" como um fluxograma legível, um cartão por regra.</p>
+        </div>
+
+      </div>
+    </div>
+  </details>
+
+  <footer>
+    <a href="https://github.com/rcpleme2/extensao_eproc">rcpleme2/extensao_eproc</a> — código aberto, uso interno.
+  </footer>
 
 </main>
 
-<footer>
-  <a href="https://github.com/rcpleme2/extensao_eproc">rcpleme2/extensao_eproc</a> — código aberto, uso interno.
-</footer>
+<script>
+  document.querySelectorAll("[data-copiar]").forEach((botao) => {
+    botao.addEventListener("click", async () => {
+      const texto = botao.getAttribute("data-copiar");
+      try {
+        await navigator.clipboard.writeText(texto);
+      } catch (e) {
+        // Sem permissão/API de clipboard (ex.: contexto não seguro) - o
+        // usuário ainda pode selecionar e copiar o texto manualmente do
+        // <code> ao lado.
+      }
+      const rotuloOriginal = botao.textContent;
+      botao.textContent = "Copiado!";
+      botao.classList.add("copiado");
+      setTimeout(() => {
+        botao.textContent = rotuloOriginal;
+        botao.classList.remove("copiado");
+      }, 1500);
+    });
+  });
+</script>
 
 </body>
 </html>
