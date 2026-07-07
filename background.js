@@ -1679,6 +1679,32 @@ function consultarUmaVezNaPagina(parametros) {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  // Filtra a consulta por um ou mais valores do filtro "Competência"
+  // (select#selCompetencia, bootstrap-select de SELEÇÃO MÚLTIPLA -
+  // mesma mecânica de "selecionarGrupoSituacao": o <select> nativo
+  // continua no DOM, so' escondido, com as mesmas <option>). Recebe uma
+  // LISTA de valores porque cada "Competência" (ex.: "Juizado Especial
+  // Cível") do painel na verdade agrupa várias opções desse campo (ex.:
+  // "Juizado Especial Cível - Acidentes de Trânsito", "... - Consórcio",
+  // etc. - ver "agruparCompetencias" em background.js) - marca todas de
+  // uma vez.
+  function selecionarCompetencias(valores) {
+    const select = document.getElementById("selCompetencia");
+    if (!select) throw new Error('Campo "Competência" (#selCompetencia) não encontrado nesta página.');
+
+    const conjunto = new Set((valores || []).map(String));
+    let alguma = false;
+    for (const opcao of select.options) {
+      const selecionada = conjunto.has(opcao.value);
+      opcao.selected = selecionada;
+      if (selecionada) alguma = true;
+    }
+    if (!alguma) {
+      throw new Error("Nenhuma das opções de competência informadas foi encontrada na lista.");
+    }
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   // Usa o setter nativo do HTMLInputElement (em vez de so' "input.value =
   // ...") para garantir que a mudanca seja percebida mesmo se algum
   // framework de formulario estiver "escutando" o proprio setter da
@@ -1914,6 +1940,14 @@ function consultarUmaVezNaPagina(parametros) {
       // combinado com "gruposSituacaoExcluir" acima.
       if (parametros.valorRito) {
         selecionarRito(parametros.valorRito);
+      }
+
+      // Um ou mais valores do filtro "Competência" (agrupados por
+      // "agruparCompetencias" antes de chegar aqui) - independente da
+      // Situação/Rito, pode ser combinado com qualquer um dos filtros
+      // acima.
+      if (parametros.valoresCompetencia) {
+        selecionarCompetencias(parametros.valoresCompetencia);
       }
 
       if (parametros.diasSituacao != null) {
@@ -3083,6 +3117,101 @@ async function abrirAbaEListarRitosDisponiveis(urlBase, valorOrgaoJuizo) {
     }
     liberarSlotDeAbaOculta();
   }
+}
+
+// Le', na tela do Relatório Geral, todas as opcoes do filtro
+// "Competência" (select#selCompetencia) - mesmo padrao de
+// "listarRitosNaPagina". Autocontida, executada via
+// chrome.scripting.executeScript.
+function listarCompetenciasNaPagina() {
+  const select = document.getElementById("selCompetencia");
+  if (!select) {
+    return { opcoes: [], erro: 'Campo "Competência" (#selCompetencia) não encontrado nesta página.' };
+  }
+  const opcoes = Array.from(select.options)
+    .filter((opcao) => opcao.value && opcao.value !== "null")
+    .map((opcao) => ({ valor: opcao.value, texto: (opcao.textContent || opcao.getAttribute("title") || "").trim() }));
+  return { opcoes, erro: null };
+}
+
+// Abre uma aba oculta, navega ate' o Relatório Geral, seleciona a unidade
+// pedida (quando houver) e le' (sem consultar) as opcoes do filtro
+// "Competência" - mesmo padrao de "abrirAbaEListarRitosDisponiveis".
+async function abrirAbaEListarCompetenciasDisponiveis(urlBase, valorOrgaoJuizo) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioGeralNaPagina,
+    });
+    if (!linkEncontrado) {
+      return {
+        opcoes: [],
+        erro:
+          'Link "Relatório Geral" não encontrado na página atual. Abra uma página do eproc com o menu lateral e tente novamente.',
+      };
+    }
+
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    if (valorOrgaoJuizo) {
+      const [{ result: resultadoSelecao } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: selecionarOrgaoJuizoRelatorioGeralNaPagina,
+        args: [valorOrgaoJuizo],
+      });
+      if (!resultadoSelecao || !resultadoSelecao.ok) {
+        return {
+          opcoes: [],
+          erro: (resultadoSelecao && resultadoSelecao.erro) || "Falha ao selecionar o Órgão/Juízo.",
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: listarCompetenciasNaPagina,
+    });
+    return result || { opcoes: [], erro: "Sem resultado ao listar as competências." };
+  } catch (e) {
+    return { opcoes: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Agrupa as opções do filtro "Competência" (cada uma no formato "<Grande
+// área> - <Detalhe>", ex.: "Juizado Especial Cível - Acidentes de
+// Trânsito") pelo texto ANTES do primeiro "-" - várias opções distintas
+// (mesmos values diferentes) costumam compartilhar o mesmo prefixo (ex.:
+// "Juizado Especial Cível - Consórcio", "... - Direito Bancário...") e
+// viram um ÚNICO grupo "Competência" no relatório, ignorando o que vem
+// depois do "-". Determinístico: mesma lista de opções sempre gera os
+// mesmos grupos, na ordem em que os prefixos aparecem pela primeira vez.
+function agruparCompetencias(opcoes) {
+  const grupos = [];
+  const indicePorCompetencia = new Map();
+  for (const opcao of opcoes || []) {
+    const indiceHifen = (opcao.texto || "").indexOf("-");
+    const competencia = (indiceHifen >= 0 ? opcao.texto.slice(0, indiceHifen) : opcao.texto).trim();
+    if (!competencia) continue;
+    if (!indicePorCompetencia.has(competencia)) {
+      indicePorCompetencia.set(competencia, grupos.length);
+      grupos.push({ competencia, valores: [] });
+    }
+    grupos[indicePorCompetencia.get(competencia)].valores.push(opcao.valor);
+  }
+  return grupos;
 }
 
 // Lista os ritos disponiveis e consulta, EM PARALELO (uma aba oculta por
@@ -4720,7 +4849,7 @@ async function exportarRelatorioGerencialUnidade(
   opcoes,
   aoProgredir,
   tituloRelatorio = "Relatório para Correição",
-  separarPorRito = false
+  separarPorCompetencia = false
 ) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
@@ -4807,56 +4936,60 @@ async function exportarRelatorioGerencialUnidade(
   // gráfico de barras ao lado do de classe processual. Nunca impede o resto do
   // relatório: falha aqui só fica de fora do gráfico (sem aviso próprio, já que
   // é um complemento best-effort, não um item obrigatório do "Itens a incluir").
-  // No modo "separação por rito" (ver abaixo) esse gráfico fica de fora - a
-  // separação em si (subseções + subtotais por rito) já cobre a mesma
-  // informação com mais detalhe, então evita repetir a mesma consulta.
+  // No modo "separação por competência" (ver abaixo) esse gráfico fica de
+  // fora - a separação em si (subseções + subtotais por competência) já
+  // cobre uma informação parecida, com mais detalhe, então evita repetir
+  // outra rodada de consultas.
   let distribuicaoRitos = [];
-  // Lista de ritos processuais disponíveis (valor + texto) - so' buscada
-  // quando o usuário escolheu "Separação por rito processual" no painel
-  // (radio exclusivo com "Unidade integral"); todas as 6 seções que
-  // aceitam separação reaproveitam essa MESMA lista, em vez de listar de
-  // novo a cada seção.
-  let ritosDisponiveis = [];
-  if (separarPorRito) {
-    notificar("Consultando ritos processuais disponíveis para separar o relatório...");
-    const { opcoes: ritosEncontrados, erro: erroRitos } = await abrirAbaEListarRitosDisponiveis(
+  // Grupos de "Competência" disponíveis (select#selCompetencia do
+  // Relatório Geral) - so' buscados quando o usuário escolheu "Separação
+  // por competência" no painel (radio exclusivo com "Unidade integral");
+  // cada opção do filtro vem no formato "<Competência> - <Detalhe>" e é
+  // agrupada pelo texto ANTES do primeiro "-" (ver "agruparCompetencias")
+  // - várias opções (values diferentes) costumam cair no mesmo grupo.
+  // Todas as 6 seções que aceitam separação reaproveitam essa MESMA
+  // lista de grupos, em vez de listar de novo a cada seção.
+  let gruposCompetencia = [];
+  if (separarPorCompetencia) {
+    notificar("Consultando competências disponíveis para separar o relatório...");
+    const { opcoes: competenciasEncontradas, erro: erroCompetencias } = await abrirAbaEListarCompetenciasDisponiveis(
       abaAtual.url,
       valorUnidade
     );
-    if (ritosEncontrados.length === 0) {
+    if (competenciasEncontradas.length === 0) {
       throw new Error(
-        erroRitos ||
-          'Não foi possível listar os ritos processuais para separar o relatório (campo "Rito Processual" não encontrado nesta página).'
+        erroCompetencias ||
+          'Não foi possível listar as competências para separar o relatório (campo "Competência" não encontrado nesta página).'
       );
     }
-    ritosDisponiveis = ritosEncontrados;
+    gruposCompetencia = agruparCompetencias(competenciasEncontradas);
   } else if (opcoesFinais.processosAtivos) {
     notificar("Consultando distribuição por rito processual...");
     const rRitos = await abrirAbaEConsultarRitosAtivos(abaAtual.url, valorUnidade);
     distribuicaoRitos = rRitos.distribuicao;
   }
 
-  // Processos ativos POR RITO (uma consulta por rito, em paralelo, com
-  // "extrairTabela" - precisa das linhas de verdade, não so' da
-  // contagem, ja' que cada rito com pelo menos 1 processo vira uma
-  // subseção própria com sua própria tabela mais abaixo). So' roda no
-  // modo "separação por rito".
-  let processosAtivosPorRito = [];
-  if (separarPorRito && opcoesFinais.processosAtivos) {
-    notificar("Consultando processos ativos por rito processual...");
+  // Processos ativos POR COMPETÊNCIA (uma consulta por grupo, em
+  // paralelo, com "extrairTabela" - precisa das linhas de verdade, não
+  // so' da contagem, ja' que cada competência com pelo menos 1 processo
+  // vira uma subseção própria com sua própria tabela mais abaixo). So'
+  // roda no modo "separação por competência".
+  let processosAtivosPorCompetencia = [];
+  if (separarPorCompetencia && opcoesFinais.processosAtivos) {
+    notificar("Consultando processos ativos por competência...");
     const resultados = await Promise.all(
-      ritosDisponiveis.map((rito) =>
+      gruposCompetencia.map((grupo) =>
         abrirAbaEConsultarUmaVez(abaAtual.url, {
           gruposSituacaoExcluir: ["B", "S"],
           urgente: false,
           diasSituacao: null,
           valorOrgaoJuizo: valorUnidade,
-          valorRito: rito.valor,
+          valoresCompetencia: grupo.valores,
           extrairTabela: true,
-        }).then((r) => ({ rito: rito.texto, total: r.contagem, tabela: r.tabela, erro: r.erro }))
+        }).then((r) => ({ competencia: grupo.competencia, total: r.contagem, tabela: r.tabela, erro: r.erro }))
       )
     );
-    processosAtivosPorRito = resultados.filter((r) => (r.total || 0) > 0);
+    processosAtivosPorCompetencia = resultados.filter((r) => (r.total || 0) > 0);
   }
 
   // Suspensos/sobrestados: grupo "S" inteiro do filtro Situação (todas
@@ -4889,11 +5022,11 @@ async function exportarRelatorioGerencialUnidade(
       if (r.erro) suspensos.erros.push(`+${DIAS_LIMITE_ATRASO_UNIDADE} dias: ${r.erro}`);
     }
     // Detalhamento por situação específica so' roda na "unidade integral" -
-    // no modo "separação por rito" essa quebra vira, em vez disso, o
-    // detalhamento por rito (bloco logo abaixo), pra' não rodar as duas
-    // quebras (situação E rito) na capa ao mesmo tempo, o que ficaria
-    // repetitivo e mais lento sem necessidade.
-    if (!separarPorRito) {
+    // no modo "separação por competência" essa quebra vira, em vez disso,
+    // o detalhamento por competência (bloco logo abaixo), pra' não rodar
+    // as duas quebras (situação E competência) na capa ao mesmo tempo, o
+    // que ficaria repetitivo e mais lento sem necessidade.
+    if (!separarPorCompetencia) {
       notificar("Consultando suspensos/sobrestados: detalhamento por situação específica...");
       const { itens, erro, parcial, motivoParcial } = await abrirAbaEConsultarSituacoesGrupo(abaAtual.url, valorUnidade, "S");
       // So' entram na capa as situações com pelo menos 1 processo - listar
@@ -4915,25 +5048,25 @@ async function exportarRelatorioGerencialUnidade(
     }
   }
 
-  // Suspensos/sobrestados POR RITO (total + tabela por rito, mesmo
-  // padrão de "processosAtivosPorRito" acima) - so' no modo "separação
-  // por rito".
-  let suspensosPorRito = [];
-  if (separarPorRito && opcoesFinais.suspensos) {
-    notificar("Consultando suspensos/sobrestados por rito processual...");
+  // Suspensos/sobrestados POR COMPETÊNCIA (total + tabela por
+  // competência, mesmo padrão de "processosAtivosPorCompetencia" acima) -
+  // so' no modo "separação por competência".
+  let suspensosPorCompetencia = [];
+  if (separarPorCompetencia && opcoesFinais.suspensos) {
+    notificar("Consultando suspensos/sobrestados por competência...");
     const resultados = await Promise.all(
-      ritosDisponiveis.map((rito) =>
+      gruposCompetencia.map((grupo) =>
         abrirAbaEConsultarUmaVez(abaAtual.url, {
           grupoSituacao: "S",
           urgente: false,
           diasSituacao: null,
           valorOrgaoJuizo: valorUnidade,
-          valorRito: rito.valor,
+          valoresCompetencia: grupo.valores,
           extrairTabela: true,
-        }).then((r) => ({ rito: rito.texto, total: r.contagem, tabela: r.tabela, erro: r.erro }))
+        }).then((r) => ({ competencia: grupo.competencia, total: r.contagem, tabela: r.tabela, erro: r.erro }))
       )
     );
-    suspensosPorRito = resultados.filter((r) => (r.total || 0) > 0);
+    suspensosPorCompetencia = resultados.filter((r) => (r.total || 0) > 0);
   }
 
   // Despacho e sentença sao blocos independentes entre si (cada um com
@@ -4950,45 +5083,45 @@ async function exportarRelatorioGerencialUnidade(
       : Promise.resolve(blocoVazio()),
   ]);
 
-  // Conclusos para decisão/sentença POR RITO - so' o TOTAL de cada rito
-  // (sem separar urgente/não urgente por rito, pra' não multiplicar
-  // ainda mais o numero de consultas); o bloco "despacho"/"sentenca"
-  // acima continua sendo o Total/Urgentes/Não urgentes da unidade
-  // inteira, sem mudanca nenhuma.
-  let despachoPorRito = [];
-  let sentencaPorRito = [];
-  if (separarPorRito) {
-    notificar("Consultando conclusos para decisão e sentença por rito processual...");
+  // Conclusos para decisão/sentença POR COMPETÊNCIA - so' o TOTAL de cada
+  // competência (sem separar urgente/não urgente por competência, pra'
+  // não multiplicar ainda mais o numero de consultas); o bloco
+  // "despacho"/"sentenca" acima continua sendo o Total/Urgentes/Não
+  // urgentes da unidade inteira, sem mudanca nenhuma.
+  let despachoPorCompetencia = [];
+  let sentencaPorCompetencia = [];
+  if (separarPorCompetencia) {
+    notificar("Consultando conclusos para decisão e sentença por competência...");
     const [resultadosDespacho, resultadosSentenca] = await Promise.all([
       opcoesFinais.conclusosDecisao
         ? Promise.all(
-            ritosDisponiveis.map((rito) =>
+            gruposCompetencia.map((grupo) =>
               abrirAbaEConsultarUmaVez(abaAtual.url, {
                 valorSituacao: VALOR_SITUACAO_AGUARDA_DESPACHO,
                 urgente: false,
                 diasSituacao: null,
                 valorOrgaoJuizo: valorUnidade,
-                valorRito: rito.valor,
-              }).then((r) => ({ rito: rito.texto, total: r.contagem, erro: r.erro }))
+                valoresCompetencia: grupo.valores,
+              }).then((r) => ({ competencia: grupo.competencia, total: r.contagem, erro: r.erro }))
             )
           )
         : Promise.resolve([]),
       opcoesFinais.conclusosSentenca
         ? Promise.all(
-            ritosDisponiveis.map((rito) =>
+            gruposCompetencia.map((grupo) =>
               abrirAbaEConsultarUmaVez(abaAtual.url, {
                 valorSituacao: VALOR_SITUACAO_AGUARDA_SENTENCA,
                 urgente: false,
                 diasSituacao: null,
                 valorOrgaoJuizo: valorUnidade,
-                valorRito: rito.valor,
-              }).then((r) => ({ rito: rito.texto, total: r.contagem, erro: r.erro }))
+                valoresCompetencia: grupo.valores,
+              }).then((r) => ({ competencia: grupo.competencia, total: r.contagem, erro: r.erro }))
             )
           )
         : Promise.resolve([]),
     ]);
-    despachoPorRito = resultadosDespacho.filter((r) => (r.total || 0) > 0);
-    sentencaPorRito = resultadosSentenca.filter((r) => (r.total || 0) > 0);
+    despachoPorCompetencia = resultadosDespacho.filter((r) => (r.total || 0) > 0);
+    sentencaPorCompetencia = resultadosSentenca.filter((r) => (r.total || 0) > 0);
   }
 
   const semMovimentacao = { erros: [] };
@@ -5014,14 +5147,15 @@ async function exportarRelatorioGerencialUnidade(
     });
   }
 
-  // Sem movimentação POR RITO: as mesmas 3 faixas (30/90/120 dias), uma
-  // vez por rito - "resultadosFaixas" de cada rito roda em paralelo
-  // (3 consultas), e os proprios ritos tambem em paralelo entre si.
-  let semMovimentacaoPorRito = [];
-  if (separarPorRito && opcoesFinais.semMovimentacao) {
-    notificar("Consultando processos sem movimentação por rito processual...");
+  // Sem movimentação POR COMPETÊNCIA: as mesmas 3 faixas (30/90/120
+  // dias), uma vez por competência - "resultadosFaixas" de cada
+  // competência roda em paralelo (3 consultas), e os proprios grupos de
+  // competência tambem em paralelo entre si.
+  let semMovimentacaoPorCompetencia = [];
+  if (separarPorCompetencia && opcoesFinais.semMovimentacao) {
+    notificar("Consultando processos sem movimentação por competência...");
     const resultados = await Promise.all(
-      ritosDisponiveis.map(async (rito) => {
+      gruposCompetencia.map(async (grupo) => {
         const resultadosFaixas = await Promise.all(
           FAIXAS_DIAS_SEM_MOVIMENTACAO.map((dias) =>
             abrirAbaEConsultarUmaVez(abaAtual.url, {
@@ -5030,7 +5164,7 @@ async function exportarRelatorioGerencialUnidade(
               diasSituacao: null,
               diasSemMovimentacao: dias,
               valorOrgaoJuizo: valorUnidade,
-              valorRito: rito.valor,
+              valoresCompetencia: grupo.valores,
             })
           )
         );
@@ -5041,10 +5175,10 @@ async function exportarRelatorioGerencialUnidade(
           porFaixa[`dias${dias}`] = r.contagem;
           if (r.erro) errosFaixa.push(`${dias} dias: ${r.erro}`);
         });
-        return { rito: rito.texto, porFaixa, erros: errosFaixa };
+        return { competencia: grupo.competencia, porFaixa, erros: errosFaixa };
       })
     );
-    semMovimentacaoPorRito = resultados.filter(
+    semMovimentacaoPorCompetencia = resultados.filter(
       (r) => (r.porFaixa.dias30 || 0) > 0 || (r.porFaixa.dias90 || 0) > 0 || (r.porFaixa.dias120 || 0) > 0
     );
   }
@@ -5086,25 +5220,26 @@ async function exportarRelatorioGerencialUnidade(
     if (r.tabela && r.tabela.erro) processosParalisados.erros.push(r.tabela.erro);
   }
 
-  // Processos paralisados POR RITO (total + tabela por rito, mesmo
-  // padrão das demais seções acima) - so' no modo "separação por rito".
-  let paralisadosPorRito = [];
-  if (separarPorRito && opcoesFinais.paralisados) {
-    notificar("Consultando processos paralisados por rito processual...");
+  // Processos paralisados POR COMPETÊNCIA (total + tabela por
+  // competência, mesmo padrão das demais seções acima) - so' no modo
+  // "separação por competência".
+  let paralisadosPorCompetencia = [];
+  if (separarPorCompetencia && opcoesFinais.paralisados) {
+    notificar("Consultando processos paralisados por competência...");
     const resultados = await Promise.all(
-      ritosDisponiveis.map((rito) =>
+      gruposCompetencia.map((grupo) =>
         abrirAbaEConsultarUmaVez(abaAtual.url, {
           valorSituacao: null,
           urgente: false,
           diasSituacao: null,
           diasSemMovimentacao: DIAS_MINIMO_PARALISADOS,
           valorOrgaoJuizo: valorUnidade,
-          valorRito: rito.valor,
+          valoresCompetencia: grupo.valores,
           extrairTabela: true,
-        }).then((r) => ({ rito: rito.texto, total: r.contagem, tabela: r.tabela, erro: r.erro }))
+        }).then((r) => ({ competencia: grupo.competencia, total: r.contagem, tabela: r.tabela, erro: r.erro }))
       )
     );
-    paralisadosPorRito = resultados.filter((r) => (r.total || 0) > 0);
+    paralisadosPorCompetencia = resultados.filter((r) => (r.total || 0) > 0);
   }
 
   // Remessas aos juízes leigos: tela própria (menu "Relatórios" >
@@ -5215,23 +5350,24 @@ async function exportarRelatorioGerencialUnidade(
   // aos juízes leigos - a mesma ordem dos checkboxes no painel.
   // Localizadores fica de fora daqui: sua lista de nomes é desenhada em
   // páginas próprias, no final do PDF (ver "construirPaginaListaLocalizadores").
-  // No modo "separação por rito", cada seção ganha uma linha de SUBTOTAL
-  // por rito (so' os ritos com pelo menos 1 processo, do maior para o
-  // menor) ANTES da linha de Total (unidade inteira) - o Total em si
-  // nunca muda, sempre vem da MESMA consulta de sempre (ver acima),
-  // então continua correto mesmo que alguma consulta por rito falhe.
-  const linhasPorRito = (lista) =>
+  // No modo "separação por competência", cada seção ganha uma linha de
+  // SUBTOTAL por competência (so' as com pelo menos 1 processo, da maior
+  // para a menor) ANTES da linha de Total (unidade inteira) - o Total em
+  // si nunca muda, sempre vem da MESMA consulta de sempre (ver acima),
+  // então continua correto mesmo que alguma consulta por competência
+  // falhe.
+  const linhasPorCompetencia = (lista) =>
     (lista || [])
       .slice()
       .sort((a, b) => (b.total || 0) - (a.total || 0))
-      .map((r) => ({ rotulo: r.rito, valor: r.total }));
+      .map((r) => ({ rotulo: r.competencia, valor: r.total }));
 
   const secoesResumo = [];
   if (opcoesFinais.processosAtivos) {
     secoesResumo.push({
       titulo: "PROCESSOS ATIVOS",
       linhas: [
-        ...(separarPorRito ? linhasPorRito(processosAtivosPorRito) : []),
+        ...(separarPorCompetencia ? linhasPorCompetencia(processosAtivosPorCompetencia) : []),
         { rotulo: "Total", valor: processosAtivos.total == null ? "?" : processosAtivos.total },
       ],
     });
@@ -5240,7 +5376,7 @@ async function exportarRelatorioGerencialUnidade(
     secoesResumo.push({
       titulo: "SUSPENSOS / SOBRESTADOS",
       linhas: [
-        ...(separarPorRito ? linhasPorRito(suspensosPorRito) : (suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem }))),
+        ...(separarPorCompetencia ? linhasPorCompetencia(suspensosPorCompetencia) : (suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem }))),
         {
           rotulo: "Total",
           valor: totalComExcesso(suspensos.total, suspensos.mais90Dias, `há mais de ${DIAS_LIMITE_ATRASO_UNIDADE} dias`),
@@ -5251,13 +5387,13 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.conclusosDecisao) {
     secoesResumo.push({
       titulo: "CONCLUSOS PARA DECISÃO",
-      linhas: [...(separarPorRito ? linhasPorRito(despachoPorRito) : []), ...linhasBloco(despacho)],
+      linhas: [...(separarPorCompetencia ? linhasPorCompetencia(despachoPorCompetencia) : []), ...linhasBloco(despacho)],
     });
   }
   if (opcoesFinais.conclusosSentenca) {
     secoesResumo.push({
       titulo: "CONCLUSOS PARA SENTENÇA",
-      linhas: [...(separarPorRito ? linhasPorRito(sentencaPorRito) : []), ...linhasBloco(sentenca)],
+      linhas: [...(separarPorCompetencia ? linhasPorCompetencia(sentencaPorCompetencia) : []), ...linhasBloco(sentenca)],
     });
   }
   if (opcoesFinais.semMovimentacao) {
@@ -5265,12 +5401,12 @@ async function exportarRelatorioGerencialUnidade(
     secoesResumo.push({
       titulo: "PROCESSOS SEM MOVIMENTAÇÃO",
       linhas: [
-        ...(separarPorRito
-          ? (semMovimentacaoPorRito || [])
+        ...(separarPorCompetencia
+          ? (semMovimentacaoPorCompetencia || [])
               .slice()
               .sort((a, b) => (b.porFaixa.dias30 || 0) - (a.porFaixa.dias30 || 0))
               .map((r) => ({
-                rotulo: r.rito,
+                rotulo: r.competencia,
                 valor: `30d: ${num(r.porFaixa.dias30)} · 90d: ${num(r.porFaixa.dias90)} · 120d: ${num(r.porFaixa.dias120)}`,
               }))
           : []),
@@ -5313,7 +5449,7 @@ async function exportarRelatorioGerencialUnidade(
     secoesResumo.push({
       titulo: "PROCESSOS PARALISADOS",
       linhas: [
-        ...(separarPorRito ? linhasPorRito(paralisadosPorRito) : []),
+        ...(separarPorCompetencia ? linhasPorCompetencia(paralisadosPorCompetencia) : []),
         {
           rotulo: `A partir de ${DIAS_MINIMO_PARALISADOS} dias`,
           valor: processosParalisados.total == null ? "?" : processosParalisados.total,
@@ -5380,11 +5516,9 @@ async function exportarRelatorioGerencialUnidade(
   paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
 
   // Anexa uma sequencia de PDFs (ja' carregados como bytes) ao final do
-  // relatório - helper comum aos 3 blocos "POR RITO" abaixo, cada
-  // subseção de rito vira suas proprias paginas, na ordem em que os
-  // ritos aparecem em "lista" (maior numero de processos primeiro, ja'
-  // que cada "PorRito" ja' chega ordenado do helper "linhasPorRito"... na
-  // verdade cada bloco ordena por conta propria, ver abaixo).
+  // relatório - helper comum aos 3 blocos "POR COMPETÊNCIA" abaixo, cada
+  // subseção vira suas proprias paginas, na ordem em que os grupos
+  // aparecem em "ordenados" (maior numero de processos primeiro).
   async function anexarPaginas(bytes) {
     const pdfExtra = await PDFDocument.load(bytes);
     const paginas = await pdfFinal.copyPages(pdfExtra, pdfExtra.getPageIndices());
@@ -5399,16 +5533,16 @@ async function exportarRelatorioGerencialUnidade(
   // de fora, sem quebrar o resto do relatório). Mesma ordem das seções
   // acima: ativos, suspensos e, por fim, remessas aos juízes leigos.
   //
-  // No modo "separação por rito", em vez de UMA tabela combinada, cada
-  // rito com pelo menos 1 processo vira sua PRÓPRIA subseção (tabela com
-  // título indicando o rito) - do rito com mais processos para o com
-  // menos, mesma ordem usada no resumo.
+  // No modo "separação por competência", em vez de UMA tabela combinada,
+  // cada competência com pelo menos 1 processo vira sua PRÓPRIA subseção
+  // (tabela com título indicando a competência) - da competência com
+  // mais processos para a com menos, mesma ordem usada no resumo.
   if (opcoesFinais.processosAtivos) {
-    if (separarPorRito) {
-      const ordenados = processosAtivosPorRito.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
-      for (const { rito, tabela } of ordenados) {
+    if (separarPorCompetencia) {
+      const ordenados = processosAtivosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+      for (const { competencia, tabela } of ordenados) {
         if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
-        const bytesTabela = await construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes, [], ` — Rito: ${rito}`, true);
+        const bytesTabela = await construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes, [], ` — Competência: ${competencia}`, true);
         await anexarPaginas(bytesTabela);
       }
     } else if (processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
@@ -5417,11 +5551,11 @@ async function exportarRelatorioGerencialUnidade(
     }
   }
   if (opcoesFinais.suspensos) {
-    if (separarPorRito) {
-      const ordenados = suspensosPorRito.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
-      for (const { rito, tabela } of ordenados) {
+    if (separarPorCompetencia) {
+      const ordenados = suspensosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+      for (const { competencia, tabela } of ordenados) {
         if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
-        const bytesTabela = await construirPdfSuspensos(tabela, nomeUnidade, ` — Rito: ${rito}`);
+        const bytesTabela = await construirPdfSuspensos(tabela, nomeUnidade, ` — Competência: ${competencia}`);
         await anexarPaginas(bytesTabela);
       }
     } else if (suspensos.tabela && suspensos.tabela.linhas.length > 0) {
@@ -5434,11 +5568,11 @@ async function exportarRelatorioGerencialUnidade(
     await anexarPaginas(bytesMandados);
   }
   if (opcoesFinais.paralisados) {
-    if (separarPorRito) {
-      const ordenados = paralisadosPorRito.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
-      for (const { rito, tabela } of ordenados) {
+    if (separarPorCompetencia) {
+      const ordenados = paralisadosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+      for (const { competencia, tabela } of ordenados) {
         if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
-        const bytesTabela = await construirPdfProcessosParalisados(tabela, nomeUnidade, ` — Rito: ${rito}`);
+        const bytesTabela = await construirPdfProcessosParalisados(tabela, nomeUnidade, ` — Competência: ${competencia}`);
         await anexarPaginas(bytesTabela);
       }
     } else if (processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0) {
@@ -5496,7 +5630,7 @@ async function exportarRelatorioGerencialUnidade(
 // da unidade, ver "nomeArquivo" acima). Erro em uma unidade não
 // interrompe as demais: cada resultado carrega seu proprio ok/erro, e a
 // mensagem final ao painel lista sucessos e falhas separadamente.
-async function exportarRelatorioGerencialMultiplasUnidades(unidades, opcoes, aoProgredir, separarPorRito = false) {
+async function exportarRelatorioGerencialMultiplasUnidades(unidades, opcoes, aoProgredir) {
   const resultados = [];
   for (let i = 0; i < unidades.length; i++) {
     const unidade = unidades[i];
@@ -5508,9 +5642,7 @@ async function exportarRelatorioGerencialMultiplasUnidades(unidades, opcoes, aoP
         opcoes,
         (texto) => {
           if (aoProgredir) aoProgredir(`${prefixo}${texto}`);
-        },
-        "Relatório para Correição",
-        separarPorRito
+        }
       );
       resultados.push({ unidade: unidade.nome, ok: true, resultado });
     } catch (e) {
@@ -5714,7 +5846,7 @@ async function exportarComparacaoUnidades(unidades, aoProgredir) {
 // Geral já aplica sozinha para esse perfil - mesmo comportamento que o
 // "relatório rápido" do cartão "Gestão da Unidade" já usa há tempos
 // (também nunca seleciona Órgão/Juízo nenhum).
-async function exportarRelatorioUnidadeAtual(opcoes, aoProgredir) {
+async function exportarRelatorioUnidadeAtual(opcoes, aoProgredir, separarPorCompetencia = false) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
   };
@@ -5737,7 +5869,14 @@ async function exportarRelatorioUnidadeAtual(opcoes, aoProgredir) {
     // Sem resposta do content script (ex.: aba fora do eproc) - segue com o rótulo genérico.
   }
 
-  return exportarRelatorioGerencialUnidade(null, nomeUnidade, opcoes, notificar, "Relatório da Unidade");
+  return exportarRelatorioGerencialUnidade(
+    null,
+    nomeUnidade,
+    opcoes,
+    notificar,
+    "Relatório da Unidade",
+    separarPorCompetencia
+  );
 }
 
 // ---- Localizadores do Órgão (exportar em PDF/Excel) ----
@@ -7732,14 +7871,9 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     // "resultado" que chega em RELATORIO_GERENCIAL_FINALIZADO e' sempre um
     // array "resultados" (1 ou mais unidades, cada uma com seu proprio
     // ok/erro) - ver exportarRelatorioGerencialMultiplasUnidades.
-    exportarRelatorioGerencialMultiplasUnidades(
-      mensagem.unidades,
-      mensagem.opcoes,
-      (texto) => {
-        chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_GERENCIAL", texto }).catch(() => {});
-      },
-      Boolean(mensagem.separarPorRito)
-    )
+    exportarRelatorioGerencialMultiplasUnidades(mensagem.unidades, mensagem.opcoes, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_GERENCIAL", texto }).catch(() => {});
+    })
       .then((resultados) => {
         chrome.runtime
           .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultados })
@@ -7783,9 +7917,13 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
 
   if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_UNIDADE_ATUAL") {
     // Mesmo padrao das demais operacoes em segundo plano.
-    exportarRelatorioUnidadeAtual(mensagem.opcoes, (texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_UNIDADE_ATUAL", texto }).catch(() => {});
-    })
+    exportarRelatorioUnidadeAtual(
+      mensagem.opcoes,
+      (texto) => {
+        chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_UNIDADE_ATUAL", texto }).catch(() => {});
+      },
+      Boolean(mensagem.separarPorCompetencia)
+    )
       .then((resultado) => {
         chrome.runtime
           .sendMessage({ tipo: "RELATORIO_UNIDADE_ATUAL_FINALIZADO", ok: true, resultado })

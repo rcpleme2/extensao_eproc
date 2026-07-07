@@ -72,19 +72,6 @@
 
       <div id="area-unidade-selecionada" class="status" hidden></div>
 
-      <div class="opcoes" id="area-modo-relatorio" hidden>
-        <span class="legenda-opcoes">Como consolidar os dados:</span>
-        <label class="opcao">
-          <input type="radio" name="modo-relatorio-unidade" id="radio-unidade-integral" checked />
-          Unidade integral
-        </label>
-        <label class="opcao">
-          <input type="radio" name="modo-relatorio-unidade" id="radio-separacao-rito" />
-          Separação por rito processual
-        </label>
-        <span class="legenda-opcoes">Com "Separação por rito processual", cada seção do relatório ganha subseções e subtotais por rito - a consulta demora bem mais (uma rodada extra de consultas por rito).</span>
-      </div>
-
       <div class="opcoes" id="area-personalizar-relatorio" hidden>
         <span class="legenda-opcoes">Itens a incluir no PDF:</span>
         <div class="linha-acoes-opcoes">
@@ -162,6 +149,19 @@
       <div id="area-relatorio-unidade-alt-info" class="status">
         Gera o Relatório da Unidade usando a unidade já habilitada nesta
         sessão - não é preciso escolher uma unidade.
+      </div>
+
+      <div class="opcoes" id="area-modo-relatorio-alt">
+        <span class="legenda-opcoes">Como consolidar os dados:</span>
+        <label class="opcao">
+          <input type="radio" name="modo-relatorio-unidade-alt" id="radio-unidade-integral-alt" checked />
+          Unidade integral
+        </label>
+        <label class="opcao">
+          <input type="radio" name="modo-relatorio-unidade-alt" id="radio-separacao-competencia-alt" />
+          Separação por competência
+        </label>
+        <span class="legenda-opcoes">Com "Separação por competência", cada seção do relatório ganha subseções e subtotais por competência - a consulta demora bem mais (uma rodada extra de consultas por competência).</span>
       </div>
 
       <div class="opcoes" id="area-personalizar-relatorio-alt">
