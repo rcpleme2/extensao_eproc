@@ -334,6 +334,8 @@ const chkRelParalisados = document.getElementById("chk-rel-paralisados");
 const chkRelRemessasJuizesLeigos = document.getElementById("chk-rel-remessas-juizes-leigos");
 const chkRelRegrasAutomacao = document.getElementById("chk-rel-regras-automacao");
 const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
+const btnMarcarTudoRelatorio = document.getElementById("btn-marcar-tudo-relatorio");
+const btnDesmarcarTudoRelatorio = document.getElementById("btn-desmarcar-tudo-relatorio");
 const areaBtnExportarGerencial = document.getElementById("area-btn-exportar-gerencial");
 const btnExportarRelatorioGerencial = document.getElementById("btn-exportar-relatorio-gerencial");
 const areaProgressoRelatorioGerencial = document.getElementById("area-progresso-relatorio-gerencial");
@@ -358,7 +360,7 @@ let unidadeSelecionadaCorregedoria = null;
 // de "Cândido de Abreu", já que o último " de " fica DENTRO do próprio
 // nome da comarca). Lista de exceções conhecidas: quando o nome termina
 // com uma delas, a comarca é a exceção inteira, sem tentar nenhum split.
-const COMARCAS_COM_DE_NO_NOME = ["Cândido de Abreu"];
+const COMARCAS_COM_DE_NO_NOME = ["Cândido de Abreu", "Primeiro de Maio"];
 
 // Nomes de unidade do eproc seguem o padrão "<Juízo/Vara> de <Comarca>"
 // (ex.: "Juizado Especial Cível, Criminal e da Fazenda Pública de
@@ -543,6 +545,30 @@ function lerOpcoesRelatorioUnidade() {
     localizadores: chkRelLocalizadores.checked,
   };
 }
+
+const CHECKBOXES_ITENS_RELATORIO_UNIDADE = [
+  chkRelProcessosAtivos,
+  chkRelSuspensos,
+  chkRelConclusosDecisao,
+  chkRelConclusosSentenca,
+  chkRelSemMovimentacao,
+  chkRelParalisados,
+  chkRelRemessasJuizesLeigos,
+  chkRelRegrasAutomacao,
+  chkRelLocalizadores,
+];
+
+btnMarcarTudoRelatorio.addEventListener("click", () => {
+  CHECKBOXES_ITENS_RELATORIO_UNIDADE.forEach((chk) => {
+    chk.checked = true;
+  });
+});
+
+btnDesmarcarTudoRelatorio.addEventListener("click", () => {
+  CHECKBOXES_ITENS_RELATORIO_UNIDADE.forEach((chk) => {
+    chk.checked = false;
+  });
+});
 
 btnExportarRelatorioGerencial.addEventListener("click", async () => {
   areaErrosCorregedoria.hidden = true;
