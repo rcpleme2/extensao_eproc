@@ -221,6 +221,36 @@
     border-radius: 10px;
     padding: 3px 10px;
   }
+  .novidades {
+    border-top: 1px solid var(--cor-borda-suave);
+    padding-top: var(--espaco-2);
+  }
+  .novidades h3 {
+    display: flex;
+    align-items: baseline;
+    gap: var(--espaco-1);
+    flex-wrap: wrap;
+    margin: 0 0 var(--espaco-1);
+    font-size: var(--fonte-base);
+    font-weight: 700;
+    color: var(--cor-texto);
+  }
+  .versao-numero-pequena {
+    font-size: var(--fonte-pequena);
+    font-weight: 500;
+    color: var(--cor-texto-suave);
+  }
+  .novidades ul {
+    margin: 0;
+    padding-left: 1.25em;
+  }
+  .novidades li {
+    margin-bottom: 5px;
+    font-size: var(--fonte-pequena);
+    color: var(--cor-texto-suave);
+  }
+  .novidades li:last-child { margin-bottom: 0; }
+  .novidades li strong { color: var(--cor-texto); }
 
   /* ---- Funcionalidades ---- */
   .lista-funcoes { display: flex; flex-direction: column; gap: var(--espaco-2); }
@@ -321,6 +351,19 @@
         da extensão. Histórico completo de mudanças e o esquema de versionamento estão no
         <a href="https://github.com/rcpleme2/extensao_eproc#readme">README do repositório</a>.
       </p>
+
+      <div class="novidades">
+        <h3>Novidades da v1.1.0 <span class="versao-numero-pequena">desde a v1.0.0</span></h3>
+        <ul>
+          <li>Nova <strong>comparação de dados de resumo entre unidades</strong> (Corregedoria): escolha 2 ou mais unidades e exporte um único PDF comparando os números lado a lado.</li>
+          <li>O Relatório para Correição agora aceita <strong>escolher várias unidades de uma vez</strong>, gerando um PDF separado por unidade, em sequência.</li>
+          <li>Novo <strong>gráfico de distribuição por rito processual</strong> no Relatório da Unidade.</li>
+          <li>Botões <strong>"Marcar tudo"/"Desmarcar tudo"</strong> nos itens do PDF do Relatório para Correição.</li>
+          <li>"Primeiro de Maio" incluída na lista de exceções de comarca (mesmo tratamento de "Cândido de Abreu").</li>
+          <li>Correção: caixas de fluxo com muitos critérios não ultrapassam mais o rodapé da página no PDF de Regras de Automação.</li>
+          <li>Correção: texto sobreposto entre colunas na tabela de processos paralisados do PDF.</li>
+        </ul>
+      </div>
     </div>
   </details>
 
