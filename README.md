@@ -458,14 +458,33 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      tentativa de split.
 3. Ao **escolher um juízo/vara** no segundo menu, o painel mostra
    "Informações serão extraídas de: `<nome completo da unidade>`" e
-   libera a lista **"Itens a incluir no PDF"** (checkboxes, um por seção
-   do relatório — todos marcados por padrão) e o botão **"Exportar
-   Relatório para Correição (PDF)"**. Esse relatório sempre confere se uma
-   unidade foi escolhida antes de rodar — sem isso, mostra o erro
-   "Selecione uma unidade na lista antes de gerar este relatório." em vez
-   de seguir sem saber de onde extrair os dados; e confere se pelo menos
-   1 item está marcado — sem isso, mostra "Marque ao menos um item do
-   relatório antes de exportar.".
+   libera **"Como consolidar os dados"** (dois botões de opção,
+   mutuamente exclusivos):
+   - **Unidade integral** (padrão): cada seção do relatório mostra so' o
+     número total da unidade, exatamente como sempre funcionou.
+   - **Separação por rito processual**: as seções **Relação de
+     processos ativos, Suspensos/sobrestados, Conclusos para decisão,
+     Conclusos para sentença, Processos sem movimentação e Processos
+     paralisados** passam a trazer, além do total da unidade, um
+     **subtotal por rito processual** no resumo (capa) — e as três
+     seções com relação de processos (ativos, suspensos, paralisados)
+     ganham uma **subseção com tabela própria por rito** (em vez de uma
+     tabela única combinada), do rito com mais processos para o com
+     menos. Como isso exige uma rodada extra de consultas (uma por
+     rito, para cada uma das 6 seções), a geração do PDF demora
+     bastante mais nesse modo — o painel avisa isso ao lado da opção.
+     Se a tela não tiver o campo "Rito Processual" disponível, o
+     relatório é interrompido com um erro claro em vez de seguir sem os
+     dados por rito.
+
+   Em seguida, o painel libera a lista **"Itens a incluir no PDF"**
+   (checkboxes, um por seção do relatório — todos marcados por padrão)
+   e o botão **"Exportar Relatório para Correição (PDF)"**. Esse
+   relatório sempre confere se uma unidade foi escolhida antes de rodar
+   — sem isso, mostra o erro "Selecione uma unidade na lista antes de
+   gerar este relatório." em vez de seguir sem saber de onde extrair os
+   dados; e confere se pelo menos 1 item está marcado — sem isso,
+   mostra "Marque ao menos um item do relatório antes de exportar.".
 4. **"Exportar Relatório para Correição (PDF)"** gera, filtrado pela unidade
    escolhida e pelos itens marcados, um único PDF com as seções abaixo
    **nesta ordem** (mesma ordem dos checkboxes "Itens a incluir no PDF"):

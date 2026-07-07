@@ -324,6 +324,9 @@ const selectComarcaRelatorio = document.getElementById("select-comarca-relatorio
 const areaSelectUnidade = document.getElementById("area-select-unidade");
 const selectUnidadeRelatorio = document.getElementById("select-unidade-relatorio");
 const areaUnidadeSelecionada = document.getElementById("area-unidade-selecionada");
+const areaModoRelatorio = document.getElementById("area-modo-relatorio");
+const radioUnidadeIntegral = document.getElementById("radio-unidade-integral");
+const radioSeparacaoRito = document.getElementById("radio-separacao-rito");
 const areaPersonalizarRelatorio = document.getElementById("area-personalizar-relatorio");
 const chkRelProcessosAtivos = document.getElementById("chk-rel-processos-ativos");
 const chkRelSuspensos = document.getElementById("chk-rel-suspensos");
@@ -453,6 +456,7 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
   areaSelectComarca.hidden = true;
   areaSelectUnidade.hidden = true;
   areaUnidadeSelecionada.hidden = true;
+  areaModoRelatorio.hidden = true;
   areaPersonalizarRelatorio.hidden = true;
   areaBtnExportarGerencial.hidden = true;
   areaBtnCompararUnidades.hidden = true;
@@ -486,6 +490,7 @@ selectComarcaRelatorio.addEventListener("change", () => {
   const comarca = selectComarcaRelatorio.value;
   unidadesSelecionadasCorregedoria = [];
   areaUnidadeSelecionada.hidden = true;
+  areaModoRelatorio.hidden = true;
   areaPersonalizarRelatorio.hidden = true;
   areaBtnExportarGerencial.hidden = true;
   areaBtnCompararUnidades.hidden = true;
@@ -519,6 +524,7 @@ selectUnidadeRelatorio.addEventListener("change", () => {
   if (opcoesSelecionadas.length === 0) {
     unidadesSelecionadasCorregedoria = [];
     areaUnidadeSelecionada.hidden = true;
+    areaModoRelatorio.hidden = true;
     areaPersonalizarRelatorio.hidden = true;
     areaBtnExportarGerencial.hidden = true;
     areaBtnCompararUnidades.hidden = true;
@@ -538,6 +544,7 @@ selectUnidadeRelatorio.addEventListener("change", () => {
       : `${unidadesSelecionadasCorregedoria.length} unidades selecionadas: ${unidadesSelecionadasCorregedoria
           .map((u) => u.nome)
           .join("; ")}`;
+  areaModoRelatorio.hidden = false;
   areaPersonalizarRelatorio.hidden = false;
   areaBtnExportarGerencial.hidden = false;
   // A comparação exige pelo menos 2 unidades (não faz sentido "comparar"
@@ -606,6 +613,8 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
     return;
   }
 
+  const separarPorRito = radioSeparacaoRito.checked;
+
   btnExportarRelatorioGerencial.disabled = true;
   areaProgressoRelatorioGerencial.hidden = false;
   textoProgressoRelatorioGerencial.textContent = "Iniciando...";
@@ -626,6 +635,7 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
       tipo: "EXPORTAR_RELATORIO_GERENCIAL_MULTIPLAS_UNIDADES",
       unidades: unidades.map((u) => ({ valor: u.valor, nome: u.nome })),
       opcoes,
+      separarPorRito,
     });
     if (!resposta || !resposta.ok) {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");

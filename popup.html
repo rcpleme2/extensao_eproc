@@ -72,6 +72,19 @@
 
       <div id="area-unidade-selecionada" class="status" hidden></div>
 
+      <div class="opcoes" id="area-modo-relatorio" hidden>
+        <span class="legenda-opcoes">Como consolidar os dados:</span>
+        <label class="opcao">
+          <input type="radio" name="modo-relatorio-unidade" id="radio-unidade-integral" checked />
+          Unidade integral
+        </label>
+        <label class="opcao">
+          <input type="radio" name="modo-relatorio-unidade" id="radio-separacao-rito" />
+          Separação por rito processual
+        </label>
+        <span class="legenda-opcoes">Com "Separação por rito processual", cada seção do relatório ganha subseções e subtotais por rito - a consulta demora bem mais (uma rodada extra de consultas por rito).</span>
+      </div>
+
       <div class="opcoes" id="area-personalizar-relatorio" hidden>
         <span class="legenda-opcoes">Itens a incluir no PDF:</span>
         <div class="linha-acoes-opcoes">
