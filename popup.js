@@ -340,6 +340,10 @@ const areaBtnExportarGerencial = document.getElementById("area-btn-exportar-gere
 const btnExportarRelatorioGerencial = document.getElementById("btn-exportar-relatorio-gerencial");
 const areaProgressoRelatorioGerencial = document.getElementById("area-progresso-relatorio-gerencial");
 const textoProgressoRelatorioGerencial = document.getElementById("texto-progresso-relatorio-gerencial");
+const areaBtnCompararUnidades = document.getElementById("area-btn-comparar-unidades");
+const btnCompararUnidades = document.getElementById("btn-comparar-unidades");
+const areaProgressoComparacaoUnidades = document.getElementById("area-progresso-comparacao-unidades");
+const textoProgressoComparacaoUnidades = document.getElementById("texto-progresso-comparacao-unidades");
 // Relatório Geral (panorama) desativado por enquanto - ver comentário em
 // popup.html no lugar do botão. Refs comentadas junto para não quebrar
 // (document.getElementById de um id que não existe mais no DOM).
@@ -451,6 +455,7 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
   areaUnidadeSelecionada.hidden = true;
   areaPersonalizarRelatorio.hidden = true;
   areaBtnExportarGerencial.hidden = true;
+  areaBtnCompararUnidades.hidden = true;
   unidadesSelecionadasCorregedoria = [];
   areaProgressoUnidades.hidden = false;
   textoProgressoUnidades.textContent = "Iniciando...";
@@ -483,6 +488,7 @@ selectComarcaRelatorio.addEventListener("change", () => {
   areaUnidadeSelecionada.hidden = true;
   areaPersonalizarRelatorio.hidden = true;
   areaBtnExportarGerencial.hidden = true;
+  areaBtnCompararUnidades.hidden = true;
 
   selectUnidadeRelatorio.innerHTML = '<option value="" disabled>Selecione um juízo/vara...</option>';
   if (!comarca) {
@@ -515,6 +521,7 @@ selectUnidadeRelatorio.addEventListener("change", () => {
     areaUnidadeSelecionada.hidden = true;
     areaPersonalizarRelatorio.hidden = true;
     areaBtnExportarGerencial.hidden = true;
+    areaBtnCompararUnidades.hidden = true;
     return;
   }
   unidadesSelecionadasCorregedoria = opcoesSelecionadas.map((opcaoSelecionada) => ({
@@ -533,6 +540,9 @@ selectUnidadeRelatorio.addEventListener("change", () => {
           .join("; ")}`;
   areaPersonalizarRelatorio.hidden = false;
   areaBtnExportarGerencial.hidden = false;
+  // A comparação exige pelo menos 2 unidades (não faz sentido "comparar"
+  // uma so' unidade consigo mesma) - o botão só aparece a partir daí.
+  areaBtnCompararUnidades.hidden = unidadesSelecionadasCorregedoria.length < 2;
 });
 
 // Le' o estado atual dos checkboxes de "Itens a incluir no PDF" - as
@@ -626,6 +636,53 @@ btnExportarRelatorioGerencial.addEventListener("click", async () => {
     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
     areaProgressoRelatorioGerencial.hidden = true;
     btnExportarRelatorioGerencial.disabled = false;
+  }
+});
+
+// Compara so' os dados de RESUMO (contagens - sem tabelas, sem
+// localizadores/remessas/regras) de 2+ unidades escolhidas, num único
+// PDF com uma linha por unidade - não usa os checkboxes de "Itens a
+// incluir no PDF" (esses valem so' para o Relatório da Unidade acima).
+btnCompararUnidades.addEventListener("click", async () => {
+  areaErrosCorregedoria.hidden = true;
+
+  let unidades;
+  try {
+    unidades = exigirUnidadesSelecionadas();
+  } catch (e) {
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+    return;
+  }
+  if (unidades.length < 2) {
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = "Selecione ao menos duas unidades para comparar.";
+    return;
+  }
+
+  btnCompararUnidades.disabled = true;
+  areaProgressoComparacaoUnidades.hidden = false;
+  textoProgressoComparacaoUnidades.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaCorregedoriaInfo);
+  setStatusCorregedoria(`Comparando ${unidades.length} unidades em segundo plano...`);
+
+  // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
+  // comecou; o resultado final chega pela mensagem
+  // COMPARACAO_UNIDADES_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "EXPORTAR_COMPARACAO_UNIDADES",
+      unidades: unidades.map((u) => ({ valor: u.valor, nome: u.nome })),
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a comparação.");
+    }
+  } catch (e) {
+    setStatusCorregedoria("Erro ao gerar a comparação entre unidades.", "erro");
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+    areaProgressoComparacaoUnidades.hidden = true;
+    btnCompararUnidades.disabled = false;
   }
 });
 
@@ -856,6 +913,30 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosCorregedoria.hidden = false;
       areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao gerar o relatório gerencial.";
+    }
+  }
+
+  if (mensagem.tipo === "PROGRESSO_COMPARACAO_UNIDADES") {
+    textoProgressoComparacaoUnidades.textContent = mensagem.texto || "Processando...";
+  }
+
+  if (mensagem.tipo === "COMPARACAO_UNIDADES_FINALIZADO") {
+    areaProgressoComparacaoUnidades.hidden = true;
+    btnCompararUnidades.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      setStatusCorregedoria(
+        `Concluído! Comparação de ${resultado.totalUnidades || 0} unidade(s) salva em Downloads/eproc/${
+          resultado.totalComErro > 0 ? ` (${resultado.totalComErro} com erro na consulta)` : ""
+        }.`,
+        resultado.totalComErro > 0 ? "erro" : "ok"
+      );
+    } else {
+      setStatusCorregedoria("Erro ao gerar a comparação entre unidades.", "erro");
+      areaErrosCorregedoria.hidden = false;
+      areaErrosCorregedoria.textContent =
+        mensagem.erro || "Falha desconhecida ao gerar a comparação entre unidades.";
     }
   }
 

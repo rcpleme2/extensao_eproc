@@ -5237,6 +5237,188 @@ async function exportarRelatorioGerencialMultiplasUnidades(unidades, opcoes, aoP
   return resultados;
 }
 
+// Coleta so' os NÚMEROS de resumo de uma unidade (sem tabelas/linhas, sem
+// localizadores/remessas/regras - essas 3 últimas refletem a unidade
+// HABILITADA na sessão, não a escolhida no filtro Órgão/Juízo, então não
+// fazem sentido numa comparação entre unidades escolhidas livremente).
+// Usado pela função de comparação abaixo - bem mais leve que o Relatório
+// da Unidade completo, ja' que não abre a tabela linha a linha nem monta
+// PDF nenhum sozinha.
+async function obterResumoUnidade(urlBase, valorUnidade, nomeUnidade, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(`${nomeUnidade}: ${texto}`);
+  };
+  const resumo = { unidade: nomeUnidade, erros: [] };
+
+  notificar("consultando processos ativos e suspensos/sobrestados...");
+  const [rAtivos, rSuspensos, rSuspensosAtraso] = await Promise.all([
+    abrirAbaEConsultarUmaVez(urlBase, {
+      gruposSituacaoExcluir: ["B", "S"],
+      urgente: false,
+      diasSituacao: null,
+      valorOrgaoJuizo: valorUnidade,
+    }),
+    abrirAbaEConsultarUmaVez(urlBase, {
+      grupoSituacao: "S",
+      urgente: false,
+      diasSituacao: null,
+      valorOrgaoJuizo: valorUnidade,
+    }),
+    abrirAbaEConsultarUmaVez(urlBase, {
+      grupoSituacao: "S",
+      urgente: false,
+      diasSituacao: DIAS_LIMITE_ATRASO_UNIDADE,
+      valorOrgaoJuizo: valorUnidade,
+    }),
+  ]);
+  resumo.processosAtivos = rAtivos.contagem;
+  if (rAtivos.erro) resumo.erros.push(`processos ativos: ${rAtivos.erro}`);
+  resumo.suspensos = rSuspensos.contagem;
+  resumo.suspensosMais90Dias = rSuspensosAtraso.contagem;
+  if (rSuspensos.erro) resumo.erros.push(`suspensos: ${rSuspensos.erro}`);
+
+  notificar("consultando conclusos para decisão e para sentença...");
+  const [despacho, sentenca] = await Promise.all([
+    consultarBlocoUnidade(urlBase, valorUnidade, "conclusos para decisão", VALOR_SITUACAO_AGUARDA_DESPACHO, () => {}),
+    consultarBlocoUnidade(urlBase, valorUnidade, "conclusos para sentença", VALOR_SITUACAO_AGUARDA_SENTENCA, () => {}),
+  ]);
+  resumo.conclusosDecisao = despacho;
+  resumo.conclusosSentenca = sentenca;
+  resumo.erros.push(...despacho.erros.map((e) => `conclusos p/ decisão - ${e}`));
+  resumo.erros.push(...sentenca.erros.map((e) => `conclusos p/ sentença - ${e}`));
+
+  notificar("consultando processos sem movimentação e paralisados...");
+  const [resultadosFaixas, rParalisados] = await Promise.all([
+    Promise.all(
+      FAIXAS_DIAS_SEM_MOVIMENTACAO.map((dias) =>
+        abrirAbaEConsultarUmaVez(urlBase, {
+          valorSituacao: null,
+          urgente: false,
+          diasSituacao: null,
+          diasSemMovimentacao: dias,
+          valorOrgaoJuizo: valorUnidade,
+        })
+      )
+    ),
+    abrirAbaEConsultarUmaVez(urlBase, {
+      valorSituacao: null,
+      urgente: false,
+      diasSituacao: null,
+      diasSemMovimentacao: DIAS_MINIMO_PARALISADOS,
+      valorOrgaoJuizo: valorUnidade,
+    }),
+  ]);
+  resumo.semMovimentacao = {};
+  FAIXAS_DIAS_SEM_MOVIMENTACAO.forEach((dias, i) => {
+    const r = resultadosFaixas[i];
+    resumo.semMovimentacao[`dias${dias}`] = r.contagem;
+    if (r.erro) resumo.erros.push(`sem movimentação ${dias} dias: ${r.erro}`);
+  });
+  resumo.paralisados = rParalisados.contagem;
+  if (rParalisados.erro) resumo.erros.push(`paralisados: ${rParalisados.erro}`);
+
+  return resumo;
+}
+
+// Monta o PDF de comparação: uma tabela unica, uma LINHA por unidade,
+// paisagem (A4 landscape via construirPdfTabelaDinamica) - assim da'
+// pra' comparar todas as unidades escolhidas lado a lado, coluna a
+// coluna, em vez de um relatório completo por unidade.
+async function construirPdfComparacaoUnidades(resumos) {
+  const num = (v) => (v == null ? "?" : String(v));
+
+  // Largura customizada por coluna (em vez do rateio igual de
+  // "construirPdfTabelaDinamica") - "Unidade" precisa de mais espaço
+  // (nomes longos, ex.: "Juizado Especial Cível... de Cândido de Abreu")
+  // e os cabecalhos das demais colunas sao curtos o bastante pra' caber
+  // numa so' linha nessa largura (o cabecalho nao quebra linha sozinho).
+  const larguraUtil = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const larguraUnidade = 170;
+  const larguraDemais = (larguraUtil - larguraUnidade) / 6;
+  const colunas = [
+    { titulo: "Unidade", largura: larguraUnidade, campo: "unidade" },
+    { titulo: "Proc. ativos", largura: larguraDemais, campo: "ativos" },
+    { titulo: `Susp. (+${DIAS_LIMITE_ATRASO_UNIDADE}d)`, largura: larguraDemais, campo: "suspensos" },
+    { titulo: "Decisão (u/t)", largura: larguraDemais, campo: "decisao" },
+    { titulo: "Sentença (u/t)", largura: larguraDemais, campo: "sentenca" },
+    { titulo: "Sem movimentação", largura: larguraDemais, campo: "semMov" },
+    { titulo: "Paralisados", largura: larguraDemais, campo: "paralisados" },
+  ];
+
+  const itens = resumos.map((r) => {
+    if (r.erro) {
+      return { unidade: r.unidade, ativos: `Falha ao consultar: ${r.erro}`, suspensos: "", decisao: "", sentenca: "", semMov: "", paralisados: "" };
+    }
+    const suspensosTexto =
+      r.suspensosMais90Dias == null || !r.suspensos
+        ? num(r.suspensos)
+        : `${num(r.suspensos)} (${r.suspensosMais90Dias})`;
+    return {
+      unidade: r.unidade,
+      ativos: num(r.processosAtivos),
+      suspensos: suspensosTexto,
+      decisao: `${num(r.conclusosDecisao.urgentes)} / ${num(r.conclusosDecisao.total)}`,
+      sentenca: `${num(r.conclusosSentenca.urgentes)} / ${num(r.conclusosSentenca.total)}`,
+      semMov: `${num(r.semMovimentacao.dias30)} / ${num(r.semMovimentacao.dias90)} / ${num(r.semMovimentacao.dias120)}`,
+      paralisados: num(r.paralisados),
+    };
+  });
+
+  // O título recebe a legenda das abreviações junto (quebra sozinho em
+  // varias linhas, ja' que "novaPagina" dentro de "construirPdfTabela"
+  // usa "quebrarLinhas" pra' desenhar o título) - assim a legenda fica
+  // visivel sem precisar encolher os cabecalhos das colunas mais do que
+  // o necessário.
+  const titulo =
+    `Comparação entre unidades - dados de resumo (${new Date().toLocaleString("pt-BR")}). ` +
+    "u/t = urgentes / total. Sem movimentação: 30 / 90 / 120 dias. Paralisados: a partir de 31 dias sem movimentação.";
+
+  return construirPdfTabela(itens, colunas, titulo);
+}
+
+// Orquestra a comparação: coleta o resumo de CADA unidade escolhida, uma
+// de cada vez (mesma razão do relatório multiplas unidades - todas
+// dividem a mesma aba ativa e as mesmas abas ocultas), e gera um ÚNICO
+// PDF no final com todas lado a lado. Erro numa unidade não interrompe
+// as demais - a linha dela no PDF so' mostra a falha.
+async function exportarComparacaoUnidades(unidades, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  if (!unidades || unidades.length < 2) {
+    throw new Error("Selecione ao menos duas unidades para comparar.");
+  }
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  const resumos = [];
+  for (let i = 0; i < unidades.length; i++) {
+    const unidade = unidades[i];
+    try {
+      const resumo = await obterResumoUnidade(abaAtual.url, unidade.valor, unidade.nome, (texto) =>
+        notificar(`[${i + 1}/${unidades.length}] ${texto}`)
+      );
+      resumos.push(resumo);
+    } catch (e) {
+      resumos.push({ unidade: unidade.nome, erro: e && e.message ? e.message : String(e) });
+    }
+  }
+
+  notificar("Gerando PDF de comparação...");
+  const bytes = await construirPdfComparacaoUnidades(resumos);
+  const nomeArquivo = `eproc/Comparacao_Unidades_${new Date().toISOString().slice(0, 10)}.pdf`;
+  await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytes));
+
+  return {
+    totalUnidades: resumos.length,
+    totalComErro: resumos.filter((r) => r.erro).length,
+  };
+}
+
 // Reaproveita INTEIRAMENTE "exportarRelatorioGerencialUnidade" (mesmas
 // consultas, mesmas seções, mesmo PDF final) para o cartão experimental
 // "Gestão da Unidade (alternativo)": em vez de escolher uma unidade num
@@ -7279,6 +7461,29 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({
             tipo: "RELATORIO_GERENCIAL_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_COMPARACAO_UNIDADES") {
+    // Mesmo padrao das demais operacoes em segundo plano.
+    exportarComparacaoUnidades(mensagem.unidades, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_COMPARACAO_UNIDADES", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "COMPARACAO_UNIDADES_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "COMPARACAO_UNIDADES_FINALIZADO",
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })
