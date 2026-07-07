@@ -4295,9 +4295,9 @@ async function construirPdfSuspensos(tabela, nomeUnidade) {
 // Relação de processos paralisados (a partir de "DIAS_MINIMO_PARALISADOS"
 // dias sem movimentação, numa única tabela - sem separar por faixa como o
 // demonstrativo de 30/90/120 dias): Nº do Processo, Situação, Classe,
-// Localizador(es) e Último Evento/Data - ordenados do processo mais
-// paralisado (Data/Hora do último evento mais ANTIGA) para o menos
-// paralisado.
+// Localizador(es), Último Evento/Data e Dias Parado - ordenados do
+// processo mais paralisado (Data/Hora do último evento mais ANTIGA) para
+// o menos paralisado.
 async function construirPdfProcessosParalisados(tabela, nomeUnidade) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
@@ -4306,10 +4306,17 @@ async function construirPdfProcessosParalisados(tabela, nomeUnidade) {
   const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
   const idxDataHora = indiceColunaPorCabecalho(tabela.cabecalhos, /data\s*\/?\s*hora/i);
 
+  const agora = Date.now();
   const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
   const itens = tabela.linhas
     .map((linha) => {
       const dataHora = valorDe(linha, idxDataHora);
+      const dataHoraOrdenavel = paraDataOrdenavel(dataHora);
+      // "Dias Parado" = diferença entre agora e a Data/Hora do último
+      // evento, em dias corridos completos - so' calculado quando a data
+      // foi reconhecida (dataHoraOrdenavel > 0), senao fica em branco em
+      // vez de mostrar um numero sem sentido a partir de 01/01/1970.
+      const diasParado = dataHoraOrdenavel > 0 ? Math.floor((agora - dataHoraOrdenavel) / 86400000) : null;
       return {
         processo: valorDe(linha, idxProcesso),
         situacao: valorDe(linha, idxSituacao),
@@ -4317,7 +4324,8 @@ async function construirPdfProcessosParalisados(tabela, nomeUnidade) {
         localizador: formatarLocalizadores(valorDe(linha, idxLocalizador), true),
         ultimoEvento: valorDe(linha, idxEvento),
         dataHora,
-        dataHoraOrdenavel: paraDataOrdenavel(dataHora),
+        dataHoraOrdenavel,
+        diasParado: diasParado != null ? String(diasParado) : "",
       };
     })
     // Data/Hora mais antiga primeiro - quanto mais antigo o último
@@ -4326,12 +4334,16 @@ async function construirPdfProcessosParalisados(tabela, nomeUnidade) {
 
   const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
   const colunas = [
-    { titulo: "Nº do Processo", largura: larguraUtil * 0.22, campo: "processo" },
-    { titulo: "Situação", largura: larguraUtil * 0.18, campo: "situacao" },
-    { titulo: "Classe", largura: larguraUtil * 0.18, campo: "classe" },
-    { titulo: "Localizador", largura: larguraUtil * 0.2, campo: "localizador" },
-    { titulo: "Último Evento", largura: larguraUtil * 0.12, campo: "ultimoEvento" },
-    { titulo: "Data/Hora", largura: larguraUtil * 0.1, campo: "dataHora" },
+    { titulo: "Nº do Processo", largura: larguraUtil * 0.2, campo: "processo" },
+    { titulo: "Situação", largura: larguraUtil * 0.15, campo: "situacao" },
+    { titulo: "Classe", largura: larguraUtil * 0.15, campo: "classe" },
+    { titulo: "Localizador", largura: larguraUtil * 0.17, campo: "localizador" },
+    { titulo: "Último Evento", largura: larguraUtil * 0.11, campo: "ultimoEvento" },
+    { titulo: "Data/Hora", largura: larguraUtil * 0.12, campo: "dataHora" },
+    // Rótulo curto de proposito (nao "Dias Parado") - o cabecalho da
+    // coluna nao quebra linha, entao um rotulo mais longo estourava a
+    // largura da coluna e cortava fora da pagina.
+    { titulo: "Dias", largura: larguraUtil * 0.1, campo: "diasParado" },
   ];
 
   return construirPdfTabelaCuradaRetrato(
