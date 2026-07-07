@@ -5208,6 +5208,35 @@ async function exportarRelatorioGerencialUnidade(
   };
 }
 
+// Gera o Relatório para Correição de VÁRIAS unidades em sequência - uma
+// unidade de cada vez (nunca em paralelo, ja' que cada uma navega a
+// mesma aba ativa do usuário e abre várias abas ocultas próprias) -,
+// cada uma em um arquivo PDF separado (nome do arquivo já inclui o nome
+// da unidade, ver "nomeArquivo" acima). Erro em uma unidade não
+// interrompe as demais: cada resultado carrega seu proprio ok/erro, e a
+// mensagem final ao painel lista sucessos e falhas separadamente.
+async function exportarRelatorioGerencialMultiplasUnidades(unidades, opcoes, aoProgredir) {
+  const resultados = [];
+  for (let i = 0; i < unidades.length; i++) {
+    const unidade = unidades[i];
+    const prefixo = unidades.length > 1 ? `[${i + 1}/${unidades.length}] ${unidade.nome} - ` : "";
+    try {
+      const resultado = await exportarRelatorioGerencialUnidade(
+        unidade.valor,
+        unidade.nome,
+        opcoes,
+        (texto) => {
+          if (aoProgredir) aoProgredir(`${prefixo}${texto}`);
+        }
+      );
+      resultados.push({ unidade: unidade.nome, ok: true, resultado });
+    } catch (e) {
+      resultados.push({ unidade: unidade.nome, ok: false, erro: e && e.message ? e.message : String(e) });
+    }
+  }
+  return resultados;
+}
+
 // Reaproveita INTEIRAMENTE "exportarRelatorioGerencialUnidade" (mesmas
 // consultas, mesmas seções, mesmo PDF final) para o cartão experimental
 // "Gestão da Unidade (alternativo)": em vez de escolher uma unidade num
@@ -7218,6 +7247,32 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
       .then((resultado) => {
         chrome.runtime
           .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_GERENCIAL_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_GERENCIAL_MULTIPLAS_UNIDADES") {
+    // Mesmo padrao das demais operacoes em segundo plano, so' que aqui o
+    // "resultado" que chega em RELATORIO_GERENCIAL_FINALIZADO e' sempre um
+    // array "resultados" (1 ou mais unidades, cada uma com seu proprio
+    // ok/erro) - ver exportarRelatorioGerencialMultiplasUnidades.
+    exportarRelatorioGerencialMultiplasUnidades(mensagem.unidades, mensagem.opcoes, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_GERENCIAL", texto }).catch(() => {});
+    })
+      .then((resultados) => {
+        chrome.runtime
+          .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultados })
           .catch(() => {});
       })
       .catch((e) => {
