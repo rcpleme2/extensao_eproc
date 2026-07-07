@@ -693,6 +693,8 @@ btnCompararUnidades.addEventListener("click", async () => {
 // UNIDADE), ja' restrito a' unidade habilitada na sessão - ver
 // "exportarRelatorioUnidadeAtual" em background.js.
 const areaRelatorioUnidadeAltInfo = document.getElementById("area-relatorio-unidade-alt-info");
+const radioUnidadeIntegralAlt = document.getElementById("radio-unidade-integral-alt");
+const radioSeparacaoCompetenciaAlt = document.getElementById("radio-separacao-competencia-alt");
 const chkRelAltProcessosAtivos = document.getElementById("chk-relalt-processos-ativos");
 const chkRelAltSuspensos = document.getElementById("chk-relalt-suspensos");
 const chkRelAltConclusosDecisao = document.getElementById("chk-relalt-conclusos-decisao");
@@ -737,6 +739,8 @@ btnExportarRelatorioUnidadeAlt.addEventListener("click", async () => {
     return;
   }
 
+  const separarPorCompetencia = radioSeparacaoCompetenciaAlt.checked;
+
   btnExportarRelatorioUnidadeAlt.disabled = true;
   areaProgressoRelatorioUnidadeAlt.hidden = false;
   textoProgressoRelatorioUnidadeAlt.textContent = "Iniciando...";
@@ -747,7 +751,11 @@ btnExportarRelatorioUnidadeAlt.addEventListener("click", async () => {
   // comecou; o resultado final chega pela mensagem
   // RELATORIO_UNIDADE_ATUAL_FINALIZADO.
   try {
-    const resposta = await chrome.runtime.sendMessage({ tipo: "EXPORTAR_RELATORIO_UNIDADE_ATUAL", opcoes });
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "EXPORTAR_RELATORIO_UNIDADE_ATUAL",
+      opcoes,
+      separarPorCompetencia,
+    });
     if (!resposta || !resposta.ok) {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
     }
