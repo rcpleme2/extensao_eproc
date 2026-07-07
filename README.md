@@ -1,5 +1,10 @@
 # Extensão Auxiliar eProc
 
+> Página de apresentação (instalação + principais funcionalidades):
+> https://rcpleme2.github.io/extensao_eproc/ (requer o GitHub Pages do
+> repositório habilitado em Settings → Pages → Source: branch `main`,
+> pasta `/docs`).
+
 Extensão para Chrome/Edge com funcionalidades para o sistema **eproc** do
 TJPR, restrita aos endereços `https://eproc1g.tjpr.jus.br/eproc/` e
 `https://eproc1g.tre.tjpr.jus.br/eproc/` (únicos hosts com permissão no
