@@ -70,7 +70,16 @@ O número no início do nome do arquivo é um sequencial global de 4 dígitos
 do primeiro evento do processo (a petição inicial) recebe `0001`, e os
 demais seguem na ordem em que os documentos foram juntados ao processo.
 
-## Instalação (modo desenvolvedor)
+## Instalação
+
+A extensão também está disponível na
+[Chrome Web Store](https://chromewebstore.google.com/detail/gicnjchohekkcoocondkjplhdmkhciog?utm_source=item-share-cb).
+A Google demora para aprovar cada atualização enviada à loja, então a versão
+publicada lá costuma ficar **alguns dias ou semanas atrasada** em relação a
+este repositório — para sempre ter a versão mais recente, prefira o modo
+desenvolvedor abaixo.
+
+### Modo desenvolvedor (versão mais atual)
 
 1. Abra `chrome://extensions` (ou `edge://extensions` no Edge).
 2. Ative o "Modo de desenvolvedor" (canto superior direito).
