@@ -5782,7 +5782,38 @@ async function construirPdfComparacaoUnidades(resumos) {
     `Comparação entre unidades - dados de resumo (${new Date().toLocaleString("pt-BR")}). ` +
     "u/t = urgentes / total. Sem movimentação: 30 / 90 / 120 dias. Paralisados: a partir de 31 dias sem movimentação.";
 
-  return construirPdfTabela(itens, colunas, titulo);
+  const bytesTabela = await construirPdfTabela(itens, colunas, titulo);
+
+  // Além da tabela (que traz todos os números lado a lado, densa mas
+  // completa), um gráfico de barras por métrica - uma barra por unidade -
+  // deixa mais fácil bater o olho e comparar visualmente quem tem mais/
+  // menos processos em cada situação. So' as métricas que já são um
+  // número único por unidade (sem compor "urgentes/total" ou "30/90/120
+  // dias" numa única barra, que exigiria um gráfico de múltiplas séries -
+  // fora do escopo do helper genérico atual).
+  const resumosValidos = resumos.filter((r) => !r.erro);
+  const metricas = [
+    { chave: "processosAtivos", titulo: "Processos ativos por unidade" },
+    { chave: "suspensos", titulo: "Suspensos/sobrestados por unidade" },
+    { chave: "paralisados", titulo: "Processos paralisados por unidade" },
+  ];
+
+  const pdfFinal = await PDFDocument.load(bytesTabela);
+  for (const metrica of metricas) {
+    const dados = resumosValidos
+      .filter((r) => r[metrica.chave] != null)
+      .map((r) => ({ rotulo: r.unidade, contagem: r[metrica.chave] }));
+    if (dados.length === 0) continue;
+    const bytesGrafico = await construirPdfGraficoBarras({
+      titulo: `${metrica.titulo} (${new Date().toLocaleString("pt-BR")})`,
+      itens: dados,
+    });
+    const pdfGrafico = await PDFDocument.load(bytesGrafico);
+    const paginas = await pdfFinal.copyPages(pdfGrafico, pdfGrafico.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+
+  return pdfFinal.save();
 }
 
 // Orquestra a comparação: coleta o resumo de CADA unidade escolhida, uma
