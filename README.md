@@ -564,6 +564,12 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      nome do Localizador seguinte. Valores exatamente **"?"** (localizador
      expirado/inconsistente do próprio eproc) também são descartados por
      completo, em vez de aparecerem como um "?" solto sem significado.
+     Esse detalhamento por situação também vira um **gráfico de barras**
+     (uma barra por situação específica), logo após a tabela de suspensos
+     — só quando o relatório **não** está separado por competência (nesse
+     modo alternativo o detalhamento vira subtotal por competência, sem
+     um único gráfico fazendo sentido para o conjunto).
+
      Esse
      detalhamento por situação é a parte mais demorada do relatório (uma
      consulta por situação), então roda **em paralelo**: a lista de ~40
@@ -603,7 +609,12 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      bloco (total/urgentes/atraso), e os dois blocos (decisão e sentença)
      entre si, rodam **em paralelo**.
    - Processos sem movimentação há mais de 30, 90 e 120 dias — as 3
-     faixas também consultadas **em paralelo**.
+     faixas também consultadas **em paralelo** e, em seguida, desenhadas
+     num **gráfico de barras** com as 3 faixas lado a lado (o subtítulo
+     deixa explícito que as faixas **não são mutuamente exclusivas** —
+     um processo parado há 120 dias também conta nas faixas de 30 e 90 —
+     então a % de cada barra é só relativa à soma das 3, não uma fração
+     exata do total de processos da unidade).
    - **Processos paralisados**: relação **completa** dos processos parados
      **a partir de 31 dias** sem movimentação (mesmo campo "Dias sem
      movimentação" usado no demonstrativo acima, só que numa única
@@ -651,7 +662,11 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
      registro encontrado") em vez de simplesmente não ter linha nenhuma no
      resultado — essa linha é descartada da extração (não é um processo de
      verdade), evitando a contradição de mostrar ao mesmo tempo "Nenhum
-     registro encontrado" e "Total: 1 processo(s)".
+     registro encontrado" e "Total: 1 processo(s)". Ao final dessa
+     relação, um **gráfico de barras** mostra a contagem de processos em
+     remessa por juiz leigo (mesmo agrupamento usado para dividir a
+     relação em blocos, ver acima) — inclusive um "(sem juiz leigo)" para
+     os que não têm nenhum associado.
    - O **nome de cada Localizador** da unidade, em ordem alfabética, em
      páginas próprias no **final do PDF**, depois de todas as demais
      seções — valores exatamente **"?"** (localizador expirado/
@@ -879,7 +894,11 @@ cobertas abaixo.
   frequente, Total por último), e **"MANDADOS POR CUMPRIDOR"**, com a
   contagem de mandados aguardando cumprimento por Responsável (também da
   mais frequente para a menos frequente; só aparece quando algum mandado
-  já tem oficial designado). Não precisa de nenhuma seleção de unidade (a
+  já tem oficial designado). Logo após a relação discriminada, os mesmos
+  dois agrupamentos da capa (por Situação e por Responsável) também viram
+  um **gráfico de barras** cada — o de "por cumpridor" só entra quando
+  algum mandado já tem oficial designado, mesma condição da tabela da
+  capa. Não precisa de nenhuma seleção de unidade (a
   tela já reflete a unidade habilitada, mesma lógica das demais seções
   deste cartão).
 - O nome usado na capa/título do PDF (o texto "Unidade: `<nome>`", diferente
@@ -996,6 +1015,61 @@ Se o link "Automatizar Localizadores do Órgão" não for encontrado na aba
 oculta (ex.: o rótulo do menu mudou), a extensão avisa exatamente qual
 link procurou — nesse caso, pode ser preciso regravar o script de acesso
 para confirmar o caminho atual do menu.
+
+Ao final desses cartões (um por regra), o mesmo PDF traz mais duas seções,
+montadas só a partir dos dados já extraídos acima (sem nenhuma consulta a
+mais):
+
+- **Fluxograma consolidado de tramitação**: encadeia o Localizador Origem
+  e o Destino de **todas** as regras ativas (mais a aresta para o
+  Localizador de Erro, quando houver) numa lista "Origem → Destino",
+  ordenada alfabeticamente — diferente dos cartões acima, que mostram cada
+  regra isolada, esse bloco deixa visível como um processo pode ir
+  passando de localizador em localizador conforme as regras disparam em
+  sequência. Para grafos com muitos localizadores/regras, uma lista de
+  arestas é bem mais simples de paginar corretamente do que um diagrama
+  2D completo — daí a escolha desse formato em vez de um fluxograma
+  gráfico único.
+- **Localizadores sem nenhuma regra de saída**: compara o nome de cada
+  Localizador da unidade (o mesmo que entra na seção "Localizadores",
+  logo mais adiante no relatório) contra o conjunto de Localizadores de
+  Origem de todas as regras ativas — quem tem **processos** mas nunca
+  aparece como origem de nenhuma regra é destacado numa caixa de aviso,
+  como um sinal de possível **gap de automação** (processos que chegam
+  ali e dependem de alguém mover manualmente, sem nenhuma regra levando
+  para frente). Esse é o único sinal de gap calculado, porque é
+  **confiável**: o texto de Destino de uma regra nem sempre bate 1:1 com
+  o nome exato de um Localizador, e movimentações manuais também
+  alimentam Localizadores normalmente — checar "sem regra de entrada"
+  daria falsos positivos demais para ser útil, então o PDF deixa
+  explícito que esse sinal (mais fraco) **não** é verificado. Quando o
+  item "Localizadores" está desmarcado em "Itens a incluir no PDF", essa
+  checagem é pulada (mostra um aviso dizendo que a lista não foi
+  informada) — ela depende da mesma lista de nomes, e não faz sentido
+  consultá-la de novo só para isso.
+
+## Comparação entre Unidades
+
+O botão **"Comparar dados de resumo das unidades (PDF)"** (visível para quem
+pode escolher mais de uma unidade) coleta o mesmo resumo do Relatório da
+Unidade (processos ativos, suspensos, conclusos para decisão/sentença,
+sem movimentação e paralisados) de **cada unidade selecionada, uma de cada
+vez** (mesma restrição das demais rotinas desta extensão — todas dividem a
+mesma aba ativa e as mesmas abas ocultas), e gera um **único PDF** com todas
+lado a lado. Falha ao coletar o resumo de uma unidade não interrompe as
+demais — a linha dela na tabela só mostra a falha, e essa unidade fica de
+fora dos gráficos (ver abaixo).
+
+O PDF traz, primeiro, uma **tabela densa** com uma linha por unidade e uma
+coluna por métrica (a mesma forma mais completa de ver tudo lado a lado,
+incluindo os pares "urgentes/total" e "30/90/120 dias" que não cabem numa
+única barra). Em seguida, três **gráficos de barras** — um por métrica que já
+é um número único por unidade: **Processos ativos**, **Suspensos/sobrestados**
+e **Paralisados** — com uma barra por unidade, para comparar visualmente quem
+tem mais/menos em cada situação sem precisar vasculhar a tabela. As demais
+métricas (urgentes/total, 30/90/120 dias) ficam só na tabela, já que
+comparar cada uma exigiria um gráfico de múltiplas séries por barra, fora do
+escopo do gerador de gráfico genérico usado neste PDF.
 
 ## Localizadores do Órgão (coleta reaproveitada)
 
