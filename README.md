@@ -1016,52 +1016,52 @@ oculta (ex.: o rótulo do menu mudou), a extensão avisa exatamente qual
 link procurou — nesse caso, pode ser preciso regravar o script de acesso
 para confirmar o caminho atual do menu.
 
-Ao final desses cartões (um por regra), o mesmo PDF traz mais duas seções,
-montadas só a partir dos dados já extraídos acima (sem nenhuma consulta a
-mais):
+Ao final desses cartões (um por regra), o mesmo PDF traz um diagrama
+**"Como o processo tramita pela automação"**, montado só a partir dos dados
+já extraídos acima (sem nenhuma consulta a mais) — uma visão de conjunto de
+quais partes do trâmite da unidade já são automatizadas, e onde a
+automação para:
 
-- **Fluxograma consolidado de tramitação**: encadeia o Localizador Origem
-  e o Destino de **todas** as regras ativas (mais a aresta para o
-  Localizador de Erro, quando houver) numa lista "Origem → Destino",
-  ordenada alfabeticamente — diferente dos cartões acima, que mostram cada
-  regra isolada, esse bloco deixa visível como um processo pode ir
-  passando de localizador em localizador conforme as regras disparam em
-  sequência. Essa lista é a versão compacta; logo em seguida, o **mesmo
-  grafo também vira um diagrama 2D de verdade** (caixas por localizador +
-  setas rotuladas com o número da regra), numa página **própria de
-  tamanho customizado** (calculada para caber o diagrama inteiro,
-  normalmente maior que o tamanho padrão das demais páginas — o leitor de
-  PDF dá zoom/scroll nela, como costuma acontecer com diagramas grandes em
-  qualquer ferramenta). O layout é automático, por **camadas**: cada
-  localizador entra numa camada calculada pela maior distância (em
-  "saltos" de regra) desde algum localizador que nunca é destino de
-  ninguém — mesma ideia de ferramentas como Lucidchart/Bizagi, sem
-  cruzamento manual de linhas. Camadas com mais de 6 localizadores quebram
-  em sub-linhas (em vez de deixar a página absurdamente larga). Setas que
-  precisariam apontar para trás ou para o lado (só acontece dentro de um
-  **ciclo** — ex.: uma regra de erro que devolve o processo para um trecho
-  anterior do próprio fluxo) contornam pela lateral direita da página, em
+- Encadeia o Localizador Origem e o Destino de **todas** as regras ativas
+  num diagrama 2D de verdade (caixas por localizador + setas indicando o
+  sentido da movimentação, rotuladas com o número da regra que liga as
+  duas), numa página **própria de tamanho customizado** (calculada para
+  caber o diagrama inteiro, normalmente maior que o tamanho padrão das
+  demais páginas — o leitor de PDF dá zoom/scroll nela, como costuma
+  acontecer com diagramas grandes em qualquer ferramenta). O **Localizador
+  de Erro** de cada regra não entra nesse diagrama (só interessa o caminho
+  normal de tramitação automatizada aqui — o Localizador de Erro continua
+  disponível no cartão detalhado da regra, mais acima no mesmo PDF).
+- O layout é automático, por **camadas**: cada localizador entra numa
+  camada calculada pela maior distância (em "saltos" de regra) desde algum
+  localizador que nunca é destino de ninguém — mesma ideia de ferramentas
+  como Lucidchart/Bizagi, sem precisar posicionar nada manualmente. Camadas
+  com mais de 6 localizadores quebram em sub-linhas (em vez de deixar a
+  página absurdamente larga), e nomes de localizador longos demais para
+  caber em 2 linhas dentro da caixa são cortados com reticências. Setas
+  que precisariam apontar para trás ou para o lado (só acontece dentro de
+  um **ciclo** — caso raro) contornam pela lateral direita da página, em
   linha pontilhada de cor diferente com o rótulo "(retorno)" — uma linha
   reta nesse caso passaria por trás de alguma caixa intermediária no meio
   do caminho e ficaria completamente escondida atrás do preenchimento
   dela.
-- **Localizadores sem nenhuma regra de saída**: compara o nome de cada
-  Localizador da unidade (o mesmo que entra na seção "Localizadores",
-  logo mais adiante no relatório) contra o conjunto de Localizadores de
-  Origem de todas as regras ativas — quem tem **processos** mas nunca
-  aparece como origem de nenhuma regra é destacado numa caixa de aviso,
-  como um sinal de possível **gap de automação** (processos que chegam
-  ali e dependem de alguém mover manualmente, sem nenhuma regra levando
-  para frente). Esse é o único sinal de gap calculado, porque é
-  **confiável**: o texto de Destino de uma regra nem sempre bate 1:1 com
-  o nome exato de um Localizador, e movimentações manuais também
-  alimentam Localizadores normalmente — checar "sem regra de entrada"
-  daria falsos positivos demais para ser útil, então o PDF deixa
-  explícito que esse sinal (mais fraco) **não** é verificado. Quando o
-  item "Localizadores" está desmarcado em "Itens a incluir no PDF", essa
-  checagem é pulada (mostra um aviso dizendo que a lista não foi
-  informada) — ela depende da mesma lista de nomes, e não faz sentido
-  consultá-la de novo só para isso.
+- **Gap de automação**: localizadores com **processos** que nunca aparecem
+  como Localizador Origem de nenhuma regra ativa — ou seja, chegam ali e
+  dependem de alguém mover manualmente, sem nenhuma automação levando para
+  um próximo passo — ganham **contorno e fundo vermelhos direto no
+  diagrama**, em vez de uma lista à parte: a parte do trâmite ainda não
+  coberta por automação fica visualmente óbvia junto do resto do fluxo.
+  Esse é o único sinal de gap calculado, porque é **confiável**: o texto de
+  Destino de uma regra nem sempre bate 1:1 com o nome exato de um
+  Localizador, e movimentações manuais também alimentam Localizadores
+  normalmente — checar "sem regra de entrada" daria falsos positivos
+  demais para ser útil. Uma legenda no topo da página explica o que o
+  contorno vermelho significa (ou avisa quando nenhum gap foi encontrado).
+  Quando o item "Localizadores" está desmarcado em "Itens a incluir no
+  PDF", essa checagem é pulada (a legenda avisa que a lista não foi
+  informada) — ela depende da mesma lista de nomes usada na seção
+  "Localizadores", mais adiante no relatório, e não faz sentido consultá-la
+  de novo só para isso.
 
 ## Comparação entre Unidades
 

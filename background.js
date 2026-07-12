@@ -7558,8 +7558,10 @@ function normalizarNomeLocalizador(texto) {
 // origem -> destino) num grafo de arestas simples, casando o texto de
 // destino de uma regra com o localizador de origem de outra - sem
 // nenhuma consulta nova, só reaproveitando "localizadorOrigem"/
-// "destinoResumo" já coletados. A aresta de erro (quando a regra tem
-// "localizadorErro") entra separada, com "condicao: 'Erro'".
+// "destinoResumo" já coletados. O Localizador de Erro NÃO entra nesse
+// grafo (só interessa o caminho normal de tramitação automatizada, que é
+// o que o diagrama consolidado precisa mostrar) - ele continua
+// aparecendo no cartão detalhado de cada regra, mais acima no PDF.
 function montarGrafoTramitacao(regras) {
   const arestas = [];
   for (const r of regras || []) {
@@ -7567,9 +7569,6 @@ function montarGrafoTramitacao(regras) {
     const destino = (r.destinoResumo || "").trim();
     if (origem && destino) {
       arestas.push({ origem, destino, numeroRegra: r.numero, condicao: r.criterioResumo || "" });
-    }
-    if (r.localizadorErro && origem) {
-      arestas.push({ origem, destino: r.localizadorErro.trim(), numeroRegra: r.numero, condicao: "Erro" });
     }
   }
   return arestas;
@@ -7721,23 +7720,25 @@ function desenharSetaLateralPdf(pagina, { origem, destino, xLateral, cor }) {
 // Desenha o diagrama 2D (caixas + setas) numa página NOVA, de TAMANHO
 // CUSTOMIZADO (calculado para caber o diagrama inteiro, maior que o
 // tamanho padrão das demais páginas deste PDF quando o grafo tem muitos
-// localizadores/regras) - complementa a lista textual "Origem →
-// Destino" já desenhada acima no mesmo PDF (mais compacta, mas sem a
-// visão de conjunto que um diagrama de verdade proporciona). Adiciona a
-// página direto no "pdf" recebido; quem chama ainda precisa rodar
+// localizadores/regras) - visão de conjunto de como o processo tramita
+// pelos localizadores automatizados da unidade. Localizadores com
+// processos mas SEM nenhuma regra de saída (mesmo sinal calculado por
+// "detectarLocalizadoresSemSaida") ganham contorno vermelho - a parte do
+// trâmite ainda não coberta por automação fica visualmente óbvia direto
+// no diagrama, sem precisar de uma lista à parte. Adiciona a página
+// direto no "pdf" recebido; quem chama ainda precisa rodar
 // "desenharRodapePaginas" no final, depois de TODAS as páginas prontas
 // (essa função já lê a largura de CADA página individualmente, então
 // funciona mesmo com essa página de tamanho diferente das demais - ver
 // comentário em "desenharRodapePaginas").
-function desenharDiagramaTramitacao(pdf, { nosPorCamada, arestasDiagrama }, fonteNormal, fonteNegrito, tituloPagina, totalRegras) {
+function desenharDiagramaTramitacao(pdf, { nosPorCamada, arestasDiagrama }, fonteNormal, fonteNegrito, tituloPagina, chavesComGap, temListaLocalizadores) {
   const larguraCaixa = 150;
-  const alturaCaixa = 46;
+  const alturaCaixa = 40;
   const gapH = 22;
-  const gapVEntreCamadas = 56;
+  const gapVEntreCamadas = 50;
   const gapVSubLinha = 14;
   const maxPorLinha = 6;
   const margem = 40;
-  const alturaAreaTitulo = 46;
 
   const camadasOrdenadas = Array.from(nosPorCamada.keys()).sort((a, b) => a - b);
   const subLinhasPorCamada = camadasOrdenadas.map((c) => Math.max(1, Math.ceil(nosPorCamada.get(c).length / maxPorLinha)));
@@ -7747,7 +7748,19 @@ function desenharDiagramaTramitacao(pdf, { nosPorCamada, arestasDiagrama }, font
     Math.max(1, ...camadasOrdenadas.map((c) => nosPorCamada.get(c).length))
   );
   const larguraConteudo = maiorContagemPorLinha * (larguraCaixa + gapH) - gapH;
-  const largura = Math.max(420, larguraConteudo + margem * 2);
+  const largura = Math.max(460, larguraConteudo + margem * 2);
+
+  // Legenda/explicação no topo - texto varia conforme haja (ou não) gap
+  // detectado, e conforme a lista de localizadores tenha sido informada;
+  // calculada ANTES pra' saber quantas linhas reservar no topo da página.
+  const textoLegenda = !temListaLocalizadores
+    ? "Sem a lista de localizadores da unidade, não é possível identificar quais partes do trâmite ainda não têm automação."
+    : chavesComGap.size > 0
+      ? "Contorno vermelho: localizador com processos que NÃO tem nenhuma regra de automação levando a um próximo passo - a tramitação dali em diante depende de ação manual."
+      : "Nenhum gap encontrado: todo localizador com processos tem ao menos uma regra de automação levando a um próximo passo.";
+  const larguraUtilTitulo = largura - margem * 2;
+  const linhasLegenda = quebrarLinhas(sanitizarTextoPdf(textoLegenda), fonteNormal, 9, larguraUtilTitulo);
+  const alturaAreaTitulo = 34 + linhasLegenda.length * 12;
 
   const alturaConteudo = subLinhasPorCamada.reduce(
     (soma, n) => soma + n * alturaCaixa + (n - 1) * gapVSubLinha,
@@ -7761,7 +7774,7 @@ function desenharDiagramaTramitacao(pdf, { nosPorCamada, arestasDiagrama }, font
   desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
 
   let y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
-  pagina.drawText(sanitizarTextoPdf("Fluxograma consolidado de tramitação (diagrama)"), {
+  pagina.drawText(sanitizarTextoPdf("Como o processo tramita pela automação"), {
     x: margem,
     y,
     size: 14,
@@ -7769,13 +7782,15 @@ function desenharDiagramaTramitacao(pdf, { nosPorCamada, arestasDiagrama }, font
     color: COR_PRIMARIA_ESCURA,
   });
   y -= 16;
-  pagina.drawText(
-    sanitizarTextoPdf(`${tituloPagina} — ${totalRegras} regra(s) ativa(s). Layout automático por camadas.`),
-    { x: margem, y, size: 9, font: fonteNormal, color: COR_CINZA_TEXTO }
-  );
-  y -= alturaAreaTitulo - 16;
+  pagina.drawText(sanitizarTextoPdf(tituloPagina), { x: margem, y, size: 9, font: fonteNormal, color: COR_CINZA_TEXTO });
+  y -= 14;
+  linhasLegenda.forEach((linha) => {
+    pagina.drawText(linha, { x: margem, y, size: 9, font: fonteNormal, color: COR_CINZA_TEXTO });
+    y -= 12;
+  });
+  y -= alturaAreaTitulo - (16 + 14 + linhasLegenda.length * 12);
 
-  const posicoes = new Map(); // chave -> {x, yTopo, w, h, rotulo}
+  const posicoes = new Map(); // chave -> {x, yTopo, w, h, rotulo, gap}
 
   camadasOrdenadas.forEach((camada, indiceCamada) => {
     const listaNos = nosPorCamada.get(camada);
@@ -7786,7 +7801,14 @@ function desenharDiagramaTramitacao(pdf, { nosPorCamada, arestasDiagrama }, font
       const col = indice % maxPorLinha;
       const x = margem + col * (larguraCaixa + gapH);
       const yTopo = y - subLinha * (alturaCaixa + gapVSubLinha);
-      posicoes.set(info.chave, { x, yTopo, w: larguraCaixa, h: alturaCaixa, rotulo: info.rotulo });
+      posicoes.set(info.chave, {
+        x,
+        yTopo,
+        w: larguraCaixa,
+        h: alturaCaixa,
+        rotulo: info.rotulo,
+        gap: chavesComGap.has(info.chave),
+      });
     });
 
     y -= subLinhas * alturaCaixa + (subLinhas - 1) * gapVSubLinha + gapVEntreCamadas;
@@ -7814,7 +7836,7 @@ function desenharDiagramaTramitacao(pdf, { nosPorCamada, arestasDiagrama }, font
 
   function rotuloDaAresta(aresta) {
     const numeros = Array.from(new Set(aresta.numerosRegra.map((n) => n || "?")));
-    return `Regra ${numeros.join(", ")}`;
+    return numeros.map((n) => `R${n}`).join(", ");
   }
 
   function desenharRotuloAresta(rotulo, xReferencia, yMeio, cor, alinhamento = "centro") {
@@ -7829,30 +7851,51 @@ function desenharDiagramaTramitacao(pdf, { nosPorCamada, arestasDiagrama }, font
   }
 
   // Setas "para frente" ANTES das caixas, para a caixa cobrir a ponta
-  // solta da linha.
-  const corSeta = rgb(0.55, 0.6, 0.65);
+  // solta da linha. Cor mais forte (azul institucional) do que um cinza
+  // discreto, pra' o sentido da movimentação ficar perceptível de
+  // relance, não só ao aproximar os olhos da página.
   for (const aresta of arestasParaFrente) {
     const x1 = aresta.origem.x + aresta.origem.w / 2;
     const y1 = aresta.origem.yTopo - aresta.origem.h;
     const x2 = aresta.destino.x + aresta.destino.w / 2;
     const y2 = aresta.destino.yTopo;
-    desenharSetaDiagonalPdf(pagina, { x1, y1, x2, y2, cor: corSeta });
+    desenharSetaDiagonalPdf(pagina, { x1, y1, x2, y2, cor: COR_PRIMARIA });
     desenharRotuloAresta(rotuloDaAresta(aresta), (x1 + x2) / 2, (y1 + y2) / 2, COR_CINZA_TEXTO);
   }
 
-  // Caixas por cima das setas "para frente".
+  // Caixas por cima das setas "para frente" - contorno vermelho e fundo
+  // levemente avermelhado para os localizadores sem regra de saída (o
+  // "gap" de automação), estilo padrão para os demais.
+  const corGapFundo = rgb(0xfc / 255, 0xea / 255, 0xe8 / 255);
+  const corGapBorda = rgb(0.75, 0.15, 0.1);
   for (const pos of posicoes.values()) {
     pagina.drawRectangle({
       x: pos.x,
       y: pos.yTopo - pos.h,
       width: pos.w,
       height: pos.h,
-      color: rgb(0xee / 255, 0xf1 / 255, 0xf5 / 255),
-      borderColor: rgb(0x8b / 255, 0x99 / 255, 0xa6 / 255),
-      borderWidth: 1,
+      color: pos.gap ? corGapFundo : rgb(0xee / 255, 0xf1 / 255, 0xf5 / 255),
+      borderColor: pos.gap ? corGapBorda : rgb(0x8b / 255, 0x99 / 255, 0xa6 / 255),
+      borderWidth: pos.gap ? 1.75 : 1,
     });
-    const linhas = quebrarLinhas(sanitizarTextoPdf(pos.rotulo), fonteNormal, 8.5, pos.w - 12).slice(0, 3);
-    let yTexto = pos.yTopo - 14;
+    // No máximo 2 linhas por caixa (nomes de localizador podem ser bem
+    // longos) - quando o nome não cabe inteiro nessas 2 linhas, a última
+    // ganha reticências em vez de simplesmente cortar a palavra no meio.
+    const todasAsLinhas = quebrarLinhas(sanitizarTextoPdf(pos.rotulo), fonteNormal, 8.5, pos.w - 12);
+    const linhas = todasAsLinhas.slice(0, 2);
+    if (todasAsLinhas.length > 2) {
+      const ultimaLinha = linhas[1];
+      let linhaComReticencias = ultimaLinha;
+      while (
+        linhaComReticencias.length > 1 &&
+        fonteNormal.widthOfTextAtSize(`${linhaComReticencias}…`, 8.5) > pos.w - 12
+      ) {
+        linhaComReticencias = linhaComReticencias.slice(0, -1);
+      }
+      linhas[1] = `${linhaComReticencias}…`;
+    }
+    const yInicial = pos.yTopo - pos.h / 2 + (linhas.length > 1 ? 2 : -3);
+    let yTexto = yInicial;
     linhas.forEach((linha) => {
       const larguraLinha = fonteNormal.widthOfTextAtSize(linha, 8.5);
       pagina.drawText(linha, {
@@ -8072,137 +8115,30 @@ async function construirPdfRegras(regras, tituloPagina, localizadores = []) {
     y -= 16;
   }
 
-  // Bloco final: fluxograma consolidado (todas as regras encadeadas
-  // origem -> destino, numa lista - um diagrama 2D completo seria muito
-  // mais difícil de paginar corretamente com pdf-lib pra' um grafo com
-  // dezenas de localizadores/regras) + detecção de gap de automação.
-  novaPagina(false);
-  pagina.drawText(sanitizarTextoPdf("Fluxograma consolidado de tramitação"), {
-    x: margem,
-    y,
-    size: 14,
-    font: fonteNegrito,
-    color: COR_PRIMARIA_ESCURA,
-  });
-  y -= 16;
-  pagina.drawText(
-    sanitizarTextoPdf("Todas as regras acima encadeadas por localizador de origem/destino, numa lista Origem -> Destino."),
-    { x: margem, y, size: 9, font: fonteNormal, color: COR_CINZA_TEXTO }
-  );
-  y -= 20;
-
-  const arestas = montarGrafoTramitacao(regras)
-    .slice()
-    .sort((a, b) => a.origem.localeCompare(b.origem, "pt-BR") || a.destino.localeCompare(b.destino, "pt-BR"));
-
-  if (arestas.length === 0) {
-    garantirEspaco(14);
-    pagina.drawText(sanitizarTextoPdf("Nenhuma aresta encontrada (nenhuma regra com origem e destino definidos)."), {
-      x: margem,
-      y,
-      size: 9.5,
-      font: fonteNormal,
-      color: COR_CINZA_TEXTO,
-    });
-    y -= 14;
-  }
-
-  for (const aresta of arestas) {
-    const linhaPrincipal = `${aresta.origem} -> ${aresta.destino}`;
-    const linhasPrincipais = quebrarLinhas(sanitizarTextoPdf(linhaPrincipal), fonteNegrito, 9.5, larguraUtil);
-    const detalheCondicao = aresta.condicao ? ` — ${aresta.condicao}` : "";
-    const linhaDetalhe = `Regra ${aresta.numeroRegra || "?"}${detalheCondicao}`;
-    const linhasDetalhe = quebrarLinhas(sanitizarTextoPdf(linhaDetalhe), fonteNormal, 8.5, larguraUtil);
-
-    garantirEspaco((linhasPrincipais.length + linhasDetalhe.length) * 12 + 8);
-    linhasPrincipais.forEach((linha) => {
-      pagina.drawText(linha, { x: margem, y, size: 9.5, font: fonteNegrito, color: rgb(0.13, 0.13, 0.13) });
-      y -= 12;
-    });
-    linhasDetalhe.forEach((linha) => {
-      pagina.drawText(linha, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
-      y -= 12;
-    });
-    y -= 6;
-  }
-
-  y -= 10;
-  garantirEspaco(60);
-  pagina.drawText(sanitizarTextoPdf("Localizadores sem nenhuma regra de saída"), {
-    x: margem,
-    y,
-    size: 12,
-    font: fonteNegrito,
-    color: COR_PRIMARIA_ESCURA,
-  });
-  y -= 14;
-  const notaGaps = quebrarLinhas(
-    sanitizarTextoPdf(
-      "Sinal confiável de gap de automação: localizador com processos que nunca aparece como origem de nenhuma regra ativa. " +
-        "O inverso (\"sem regra de entrada\") NÃO é verificado aqui - o texto de destino das regras nem sempre corresponde " +
-        "exatamente ao nome de um localizador, e movimentações manuais também alimentam localizadores, então esse sinal seria pouco confiável."
-    ),
-    fonteNormal,
-    8.5,
-    larguraUtil
-  );
-  garantirEspaco(notaGaps.length * 11 + 6);
-  notaGaps.forEach((linha) => {
-    pagina.drawText(linha, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
-    y -= 11;
-  });
-  y -= 10;
-
-  if (!localizadores || localizadores.length === 0) {
-    garantirEspaco(14);
-    pagina.drawText(sanitizarTextoPdf("Lista de localizadores da unidade não informada - gap não verificado."), {
-      x: margem,
-      y,
-      size: 9.5,
-      font: fonteNormal,
-      color: COR_CINZA_TEXTO,
-    });
-    y -= 14;
-  } else {
-    const localizadoresSemSaida = detectarLocalizadoresSemSaida(localizadores, regras);
-    if (localizadoresSemSaida.length === 0) {
-      garantirEspaco(14);
-      pagina.drawText(sanitizarTextoPdf("Nenhum gap encontrado: todo localizador com processos tem ao menos uma regra de saída."), {
-        x: margem,
-        y,
-        size: 9.5,
-        font: fonteNegrito,
-        color: PDF_REGRAS_CORES.destino.titulo,
-      });
-      y -= 14;
-    } else {
-      const corAviso = PDF_REGRAS_CORES.criterio;
-      for (const loc of localizadoresSemSaida) {
-        const textoLinha = `${loc.nome}${loc.totalProcessos != null ? ` (${loc.totalProcessos} processo(s))` : ""}`;
-        const linhasLoc = quebrarLinhas(sanitizarTextoPdf(textoLinha), fonteNormal, 9.5, larguraUtil - 18);
-        const alturaCaixa = linhasLoc.length * 12 + 10;
-        garantirEspaco(alturaCaixa + 4);
-        pagina.drawRectangle({ x: margem, y: y - alturaCaixa, width: larguraUtil, height: alturaCaixa, color: corAviso.fundo });
-        pagina.drawRectangle({ x: margem, y: y - alturaCaixa, width: 4, height: alturaCaixa, color: corAviso.acento });
-        let yLoc = y - 12;
-        linhasLoc.forEach((linha) => {
-          pagina.drawText(linha, { x: margem + 12, y: yLoc, size: 9.5, font: fonteNormal, color: corAviso.titulo });
-          yLoc -= 12;
-        });
-        y -= alturaCaixa + 4;
-      }
-    }
-  }
-
-  // Além da lista textual acima (mais compacta), um diagrama 2D de
-  // verdade - caixas por localizador e setas ligando origem/destino,
-  // numa página à parte de tamanho customizado (calculado para caber o
-  // grafo inteiro) - complementa com a visão de conjunto que só um
-  // fluxograma gráfico proporciona. Só entra quando há pelo menos uma
-  // aresta (mesma checagem da lista acima).
+  // Bloco final: diagrama consolidado de como o processo tramita pela
+  // automação (todas as regras encadeadas origem -> destino, num
+  // diagrama 2D de verdade em página à parte, com layout automático por
+  // camadas) - inclui direto no diagrama o destaque para localizadores
+  // com processos mas sem nenhuma regra de saída (ver
+  // "detectarLocalizadoresSemSaida"), pra' a parte do trâmite ainda não
+  // coberta por automação ficar visualmente óbvia.
+  const arestas = montarGrafoTramitacao(regras);
   if (arestas.length > 0) {
     const layoutDiagrama = montarLayoutTramitacao(arestas);
-    desenharDiagramaTramitacao(pdf, layoutDiagrama, fonteNormal, fonteNegrito, tituloPagina, regras.length);
+    const chavesComGap = new Set(
+      (localizadores && localizadores.length > 0 ? detectarLocalizadoresSemSaida(localizadores, regras) : []).map((loc) =>
+        normalizarNomeLocalizador(loc.nome)
+      )
+    );
+    desenharDiagramaTramitacao(
+      pdf,
+      layoutDiagrama,
+      fonteNormal,
+      fonteNegrito,
+      tituloPagina,
+      chavesComGap,
+      Boolean(localizadores && localizadores.length > 0)
+    );
   }
 
   desenharRodapePaginas(pdf, fonteNormal, largura, margem);
