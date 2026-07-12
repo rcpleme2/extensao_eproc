@@ -5588,7 +5588,7 @@ async function exportarRelatorioGerencialUnidade(
   // comentário acima sobre essa seção refletir a unidade habilitada, não
   // necessariamente a escolhida para o restante deste relatório).
   if (opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
-    const bytesRegras = await construirPdfRegras(regrasAutomacao.regras, nomeUnidade);
+    const bytesRegras = await construirPdfRegras(regrasAutomacao.regras, nomeUnidade, localizadoresOrdenados);
     const pdfRegras = await PDFDocument.load(bytesRegras);
     const paginas = await pdfFinal.copyPages(pdfRegras, pdfRegras.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
@@ -7542,7 +7542,47 @@ function desenharSetaPdf(pagina, { x, y, comprimento, direcao, cor }) {
   }
 }
 
-async function construirPdfRegras(regras, tituloPagina) {
+function normalizarNomeLocalizador(texto) {
+  return (texto || "").trim().toLocaleUpperCase("pt-BR");
+}
+
+// Transforma a lista de regras (cada uma já raspada com sua aresta
+// origem -> destino) num grafo de arestas simples, casando o texto de
+// destino de uma regra com o localizador de origem de outra - sem
+// nenhuma consulta nova, só reaproveitando "localizadorOrigem"/
+// "destinoResumo" já coletados. A aresta de erro (quando a regra tem
+// "localizadorErro") entra separada, com "condicao: 'Erro'".
+function montarGrafoTramitacao(regras) {
+  const arestas = [];
+  for (const r of regras || []) {
+    const origem = (r.localizadorOrigem || "").trim();
+    const destino = (r.destinoResumo || "").trim();
+    if (origem && destino) {
+      arestas.push({ origem, destino, numeroRegra: r.numero, condicao: r.criterioResumo || "" });
+    }
+    if (r.localizadorErro && origem) {
+      arestas.push({ origem, destino: r.localizadorErro.trim(), numeroRegra: r.numero, condicao: "Erro" });
+    }
+  }
+  return arestas;
+}
+
+// Sinal CONFIÁVEL de gap de automação: localizador com processos mas que
+// nunca aparece como "localizadorOrigem" de nenhuma regra - ou seja,
+// nenhuma automação tira processos de lá. NÃO verifica o inverso ("sem
+// regra de entrada") porque o texto de destino das regras nem sempre bate
+// 1:1 com o nome do localizador, e movimentações manuais também alimentam
+// localizadores - um sinal fraco demais para virar alerta.
+function detectarLocalizadoresSemSaida(localizadores, regras) {
+  const origensComRegra = new Set((regras || []).map((r) => normalizarNomeLocalizador(r.localizadorOrigem)));
+  return (localizadores || []).filter((loc) => {
+    if (!loc || !loc.nome) return false;
+    if (loc.totalProcessos != null && loc.totalProcessos <= 0) return false;
+    return !origensComRegra.has(normalizarNomeLocalizador(loc.nome));
+  });
+}
+
+async function construirPdfRegras(regras, tituloPagina, localizadores = []) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
   const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -7730,6 +7770,128 @@ async function construirPdfRegras(regras, tituloPagina) {
     y -= 6;
     pagina.drawLine({ start: { x: margem, y }, end: { x: margem + larguraUtil, y }, thickness: 0.5, color: COR_CINZA_BORDA });
     y -= 16;
+  }
+
+  // Bloco final: fluxograma consolidado (todas as regras encadeadas
+  // origem -> destino, numa lista - um diagrama 2D completo seria muito
+  // mais difícil de paginar corretamente com pdf-lib pra' um grafo com
+  // dezenas de localizadores/regras) + detecção de gap de automação.
+  novaPagina(false);
+  pagina.drawText(sanitizarTextoPdf("Fluxograma consolidado de tramitação"), {
+    x: margem,
+    y,
+    size: 14,
+    font: fonteNegrito,
+    color: COR_PRIMARIA_ESCURA,
+  });
+  y -= 16;
+  pagina.drawText(
+    sanitizarTextoPdf("Todas as regras acima encadeadas por localizador de origem/destino, numa lista Origem -> Destino."),
+    { x: margem, y, size: 9, font: fonteNormal, color: COR_CINZA_TEXTO }
+  );
+  y -= 20;
+
+  const arestas = montarGrafoTramitacao(regras)
+    .slice()
+    .sort((a, b) => a.origem.localeCompare(b.origem, "pt-BR") || a.destino.localeCompare(b.destino, "pt-BR"));
+
+  if (arestas.length === 0) {
+    garantirEspaco(14);
+    pagina.drawText(sanitizarTextoPdf("Nenhuma aresta encontrada (nenhuma regra com origem e destino definidos)."), {
+      x: margem,
+      y,
+      size: 9.5,
+      font: fonteNormal,
+      color: COR_CINZA_TEXTO,
+    });
+    y -= 14;
+  }
+
+  for (const aresta of arestas) {
+    const linhaPrincipal = `${aresta.origem} -> ${aresta.destino}`;
+    const linhasPrincipais = quebrarLinhas(sanitizarTextoPdf(linhaPrincipal), fonteNegrito, 9.5, larguraUtil);
+    const detalheCondicao = aresta.condicao ? ` — ${aresta.condicao}` : "";
+    const linhaDetalhe = `Regra ${aresta.numeroRegra || "?"}${detalheCondicao}`;
+    const linhasDetalhe = quebrarLinhas(sanitizarTextoPdf(linhaDetalhe), fonteNormal, 8.5, larguraUtil);
+
+    garantirEspaco((linhasPrincipais.length + linhasDetalhe.length) * 12 + 8);
+    linhasPrincipais.forEach((linha) => {
+      pagina.drawText(linha, { x: margem, y, size: 9.5, font: fonteNegrito, color: rgb(0.13, 0.13, 0.13) });
+      y -= 12;
+    });
+    linhasDetalhe.forEach((linha) => {
+      pagina.drawText(linha, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+      y -= 12;
+    });
+    y -= 6;
+  }
+
+  y -= 10;
+  garantirEspaco(60);
+  pagina.drawText(sanitizarTextoPdf("Localizadores sem nenhuma regra de saída"), {
+    x: margem,
+    y,
+    size: 12,
+    font: fonteNegrito,
+    color: COR_PRIMARIA_ESCURA,
+  });
+  y -= 14;
+  const notaGaps = quebrarLinhas(
+    sanitizarTextoPdf(
+      "Sinal confiável de gap de automação: localizador com processos que nunca aparece como origem de nenhuma regra ativa. " +
+        "O inverso (\"sem regra de entrada\") NÃO é verificado aqui - o texto de destino das regras nem sempre corresponde " +
+        "exatamente ao nome de um localizador, e movimentações manuais também alimentam localizadores, então esse sinal seria pouco confiável."
+    ),
+    fonteNormal,
+    8.5,
+    larguraUtil
+  );
+  garantirEspaco(notaGaps.length * 11 + 6);
+  notaGaps.forEach((linha) => {
+    pagina.drawText(linha, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+    y -= 11;
+  });
+  y -= 10;
+
+  if (!localizadores || localizadores.length === 0) {
+    garantirEspaco(14);
+    pagina.drawText(sanitizarTextoPdf("Lista de localizadores da unidade não informada - gap não verificado."), {
+      x: margem,
+      y,
+      size: 9.5,
+      font: fonteNormal,
+      color: COR_CINZA_TEXTO,
+    });
+    y -= 14;
+  } else {
+    const localizadoresSemSaida = detectarLocalizadoresSemSaida(localizadores, regras);
+    if (localizadoresSemSaida.length === 0) {
+      garantirEspaco(14);
+      pagina.drawText(sanitizarTextoPdf("Nenhum gap encontrado: todo localizador com processos tem ao menos uma regra de saída."), {
+        x: margem,
+        y,
+        size: 9.5,
+        font: fonteNegrito,
+        color: PDF_REGRAS_CORES.destino.titulo,
+      });
+      y -= 14;
+    } else {
+      const corAviso = PDF_REGRAS_CORES.criterio;
+      for (const loc of localizadoresSemSaida) {
+        const textoLinha = `${loc.nome}${loc.totalProcessos != null ? ` (${loc.totalProcessos} processo(s))` : ""}`;
+        const linhasLoc = quebrarLinhas(sanitizarTextoPdf(textoLinha), fonteNormal, 9.5, larguraUtil - 18);
+        const alturaCaixa = linhasLoc.length * 12 + 10;
+        garantirEspaco(alturaCaixa + 4);
+        pagina.drawRectangle({ x: margem, y: y - alturaCaixa, width: larguraUtil, height: alturaCaixa, color: corAviso.fundo });
+        pagina.drawRectangle({ x: margem, y: y - alturaCaixa, width: 4, height: alturaCaixa, color: corAviso.acento });
+        let yLoc = y - 12;
+        linhasLoc.forEach((linha) => {
+          pagina.drawText(linha, { x: margem + 12, y: yLoc, size: 9.5, font: fonteNormal, color: corAviso.titulo });
+          yLoc -= 12;
+        });
+        y -= alturaCaixa + 4;
+      }
+    }
   }
 
   desenharRodapePaginas(pdf, fonteNormal, largura, margem);
