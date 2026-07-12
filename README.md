@@ -1026,10 +1026,25 @@ mais):
   ordenada alfabeticamente — diferente dos cartões acima, que mostram cada
   regra isolada, esse bloco deixa visível como um processo pode ir
   passando de localizador em localizador conforme as regras disparam em
-  sequência. Para grafos com muitos localizadores/regras, uma lista de
-  arestas é bem mais simples de paginar corretamente do que um diagrama
-  2D completo — daí a escolha desse formato em vez de um fluxograma
-  gráfico único.
+  sequência. Essa lista é a versão compacta; logo em seguida, o **mesmo
+  grafo também vira um diagrama 2D de verdade** (caixas por localizador +
+  setas rotuladas com o número da regra), numa página **própria de
+  tamanho customizado** (calculada para caber o diagrama inteiro,
+  normalmente maior que o tamanho padrão das demais páginas — o leitor de
+  PDF dá zoom/scroll nela, como costuma acontecer com diagramas grandes em
+  qualquer ferramenta). O layout é automático, por **camadas**: cada
+  localizador entra numa camada calculada pela maior distância (em
+  "saltos" de regra) desde algum localizador que nunca é destino de
+  ninguém — mesma ideia de ferramentas como Lucidchart/Bizagi, sem
+  cruzamento manual de linhas. Camadas com mais de 6 localizadores quebram
+  em sub-linhas (em vez de deixar a página absurdamente larga). Setas que
+  precisariam apontar para trás ou para o lado (só acontece dentro de um
+  **ciclo** — ex.: uma regra de erro que devolve o processo para um trecho
+  anterior do próprio fluxo) contornam pela lateral direita da página, em
+  linha pontilhada de cor diferente com o rótulo "(retorno)" — uma linha
+  reta nesse caso passaria por trás de alguma caixa intermediária no meio
+  do caminho e ficaria completamente escondida atrás do preenchimento
+  dela.
 - **Localizadores sem nenhuma regra de saída**: compara o nome de cada
   Localizador da unidade (o mesmo que entra na seção "Localizadores",
   logo mais adiante no relatório) contra o conjunto de Localizadores de

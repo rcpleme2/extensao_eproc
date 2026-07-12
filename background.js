@@ -6358,10 +6358,18 @@ function desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largu
 function desenharRodapePaginas(pdf, fonteNormal, largura, margem) {
   const paginas = pdf.getPages();
   paginas.forEach((pagina, indice) => {
+    // Usa a largura de CADA página (em vez do parâmetro "largura", igual
+    // para todas) - a maioria dos PDFs desta extensão tem todas as
+    // páginas do mesmo tamanho, mas o fluxograma-diagrama de Regras de
+    // Automação usa uma página de tamanho customizado (calculado para
+    // caber o diagrama inteiro) dentro do mesmo documento - sem isso, o
+    // rodapé dela saía desalinhado (calculado com a largura das demais
+    // páginas, não a própria).
+    const larguraPagina = pagina.getWidth();
     const y = PDF_ALTURA_RODAPE - 10;
     pagina.drawLine({
       start: { x: margem, y: PDF_ALTURA_RODAPE },
-      end: { x: largura - margem, y: PDF_ALTURA_RODAPE },
+      end: { x: larguraPagina - margem, y: PDF_ALTURA_RODAPE },
       thickness: 0.5,
       color: COR_CINZA_BORDA,
     });
@@ -6371,7 +6379,7 @@ function desenharRodapePaginas(pdf, fonteNormal, largura, margem) {
     const textoPagina = `Página ${indice + 1} de ${paginas.length}`;
     const larguraTexto = fonteNormal.widthOfTextAtSize(textoPagina, 7);
     pagina.drawText(textoPagina, {
-      x: (largura - larguraTexto) / 2,
+      x: (larguraPagina - larguraTexto) / 2,
       y,
       size: 7,
       font: fonteNormal,
@@ -7582,6 +7590,298 @@ function detectarLocalizadoresSemSaida(localizadores, regras) {
   });
 }
 
+// Organiza as arestas (montarGrafoTramitacao) num layout de "camadas"
+// (estilo Sugiyama simplificado) para desenhar um diagrama 2D de
+// verdade (caixas + setas), em vez de só uma lista textual: cada
+// localizador único vira UM nó (agrupado pelo nome normalizado, mesmo
+// tratamento de "montarGrafoTramitacao"), e a camada de cada nó é a
+// maior distância (em "saltos" de regra) a partir de algum nó sem
+// nenhuma regra apontando para ele. Como o grafo pode ter ciclos (ex.:
+// uma regra de erro que devolve pro mesmo trecho do fluxo), o cálculo
+// de camada usa relaxamento tipo Bellman-Ford, com no máximo 1 iteração
+// por nó - isso nunca trava num laço infinito mesmo com ciclo, só pode
+// deixar de "separar" perfeitamente os nós que participam do ciclo em
+// camadas distintas (aceitável para fins de desenho; o cartão de cada
+// regra, mais acima no mesmo PDF, já mostra o fluxo exato de cada uma).
+// Arestas com origem === destino (auto-laço) são ignoradas no diagrama -
+// caso raro, e desenhar uma alça exigiria um traçado bem mais complexo.
+function montarLayoutTramitacao(arestas) {
+  const nos = new Map(); // chave normalizada -> { chave, rotulo }
+  const sucessores = new Map(); // chave origem -> Map(chave destino -> [numeroRegra, ...])
+
+  function registrarNo(textoOriginal) {
+    const chave = normalizarNomeLocalizador(textoOriginal);
+    if (!nos.has(chave)) nos.set(chave, { chave, rotulo: (textoOriginal || "").trim() });
+    return chave;
+  }
+
+  for (const a of arestas || []) {
+    const chaveOrigem = registrarNo(a.origem);
+    const chaveDestino = registrarNo(a.destino);
+    if (chaveOrigem === chaveDestino) continue;
+    if (!sucessores.has(chaveOrigem)) sucessores.set(chaveOrigem, new Map());
+    const destinos = sucessores.get(chaveOrigem);
+    if (!destinos.has(chaveDestino)) destinos.set(chaveDestino, []);
+    destinos.get(chaveDestino).push(a.numeroRegra);
+  }
+
+  const camadaPorChave = new Map();
+  for (const chave of nos.keys()) camadaPorChave.set(chave, 0);
+  for (let iteracao = 0; iteracao < nos.size; iteracao++) {
+    let mudou = false;
+    for (const [chaveOrigem, destinos] of sucessores.entries()) {
+      const camadaOrigem = camadaPorChave.get(chaveOrigem);
+      for (const chaveDestino of destinos.keys()) {
+        if (camadaPorChave.get(chaveDestino) < camadaOrigem + 1) {
+          camadaPorChave.set(chaveDestino, camadaOrigem + 1);
+          mudou = true;
+        }
+      }
+    }
+    if (!mudou) break;
+  }
+
+  const nosPorCamada = new Map();
+  for (const info of nos.values()) {
+    const camada = camadaPorChave.get(info.chave) || 0;
+    if (!nosPorCamada.has(camada)) nosPorCamada.set(camada, []);
+    nosPorCamada.get(camada).push(info);
+  }
+  for (const lista of nosPorCamada.values()) {
+    lista.sort((a, b) => a.rotulo.localeCompare(b.rotulo, "pt-BR"));
+  }
+
+  const arestasDiagrama = [];
+  for (const [chaveOrigem, destinos] of sucessores.entries()) {
+    for (const [chaveDestino, numeros] of destinos.entries()) {
+      arestasDiagrama.push({ chaveOrigem, chaveDestino, numerosRegra: numeros });
+    }
+  }
+
+  return { nosPorCamada, arestasDiagrama };
+}
+
+// Ponta de seta triangular (2 tracinhos) num ângulo qualquer - extraído
+// de "desenharSetaDiagonalPdf" para ser reaproveitado também pelas
+// arestas "de volta" (ver "desenharSetaLateralPdf" logo abaixo).
+function desenharPontaSetaPdf(pagina, { x, y, angulo, cor }) {
+  const comprimentoPonta = 7;
+  const aberturaPonta = 0.45; // radianos
+  const anguloA = angulo + Math.PI - aberturaPonta;
+  const anguloB = angulo + Math.PI + aberturaPonta;
+  pagina.drawLine({
+    start: { x, y },
+    end: { x: x + comprimentoPonta * Math.cos(anguloA), y: y + comprimentoPonta * Math.sin(anguloA) },
+    thickness: 1,
+    color: cor,
+  });
+  pagina.drawLine({
+    start: { x, y },
+    end: { x: x + comprimentoPonta * Math.cos(anguloB), y: y + comprimentoPonta * Math.sin(anguloB) },
+    thickness: 1,
+    color: cor,
+  });
+}
+
+// Seta reta entre dois pontos quaisquer (ângulo livre) - usada no
+// diagrama 2D, onde os nós não estão necessariamente alinhados na
+// mesma coluna (diferente de "desenharSetaPdf", que só desenha na
+// vertical/horizontal, usado no fluxo de cada regra individual).
+function desenharSetaDiagonalPdf(pagina, { x1, y1, x2, y2, cor }) {
+  pagina.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness: 1, color: cor });
+  desenharPontaSetaPdf(pagina, { x: x2, y: y2, angulo: Math.atan2(y2 - y1, x2 - x1), cor });
+}
+
+// Seta "de volta" (usada só quando o destino está na mesma altura ou
+// ACIMA da origem - só pode acontecer quando o grafo tem um ciclo, ex.:
+// uma regra de erro que devolve o processo pra' um trecho anterior do
+// próprio fluxo): em vez de uma linha reta (que passaria por trás de
+// alguma caixa intermediária e ficaria com a linha e o rótulo
+// completamente escondidos atrás do preenchimento dela), contorna pela
+// LATERAL DIREITA da página, fora da área de qualquer caixa, com traço
+// pontilhado numa cor diferente (deixa claro que é um "retorno" no
+// fluxo, não a sequência normal) - e é desenhada DEPOIS de todas as
+// caixas (```desenharDiagramaTramitacao``` chama isso num segundo laço),
+// pra' nunca ficar coberta.
+function desenharSetaLateralPdf(pagina, { origem, destino, xLateral, cor }) {
+  const yOrigem = origem.yTopo - origem.h / 2;
+  const yDestino = destino.yTopo - destino.h / 2;
+  const xOrigem = origem.x + origem.w;
+  const xDestino = destino.x + destino.w;
+  const tracejado = { dashArray: [3, 2] };
+
+  pagina.drawLine({ start: { x: xOrigem, y: yOrigem }, end: { x: xLateral, y: yOrigem }, thickness: 1, color: cor, ...tracejado });
+  pagina.drawLine({ start: { x: xLateral, y: yOrigem }, end: { x: xLateral, y: yDestino }, thickness: 1, color: cor, ...tracejado });
+  pagina.drawLine({ start: { x: xLateral, y: yDestino }, end: { x: xDestino, y: yDestino }, thickness: 1, color: cor, ...tracejado });
+  desenharPontaSetaPdf(pagina, { x: xDestino, y: yDestino, angulo: Math.PI, cor });
+
+  return { xMeio: xLateral, yMeio: (yOrigem + yDestino) / 2 };
+}
+
+// Desenha o diagrama 2D (caixas + setas) numa página NOVA, de TAMANHO
+// CUSTOMIZADO (calculado para caber o diagrama inteiro, maior que o
+// tamanho padrão das demais páginas deste PDF quando o grafo tem muitos
+// localizadores/regras) - complementa a lista textual "Origem →
+// Destino" já desenhada acima no mesmo PDF (mais compacta, mas sem a
+// visão de conjunto que um diagrama de verdade proporciona). Adiciona a
+// página direto no "pdf" recebido; quem chama ainda precisa rodar
+// "desenharRodapePaginas" no final, depois de TODAS as páginas prontas
+// (essa função já lê a largura de CADA página individualmente, então
+// funciona mesmo com essa página de tamanho diferente das demais - ver
+// comentário em "desenharRodapePaginas").
+function desenharDiagramaTramitacao(pdf, { nosPorCamada, arestasDiagrama }, fonteNormal, fonteNegrito, tituloPagina, totalRegras) {
+  const larguraCaixa = 150;
+  const alturaCaixa = 46;
+  const gapH = 22;
+  const gapVEntreCamadas = 56;
+  const gapVSubLinha = 14;
+  const maxPorLinha = 6;
+  const margem = 40;
+  const alturaAreaTitulo = 46;
+
+  const camadasOrdenadas = Array.from(nosPorCamada.keys()).sort((a, b) => a - b);
+  const subLinhasPorCamada = camadasOrdenadas.map((c) => Math.max(1, Math.ceil(nosPorCamada.get(c).length / maxPorLinha)));
+
+  const maiorContagemPorLinha = Math.min(
+    maxPorLinha,
+    Math.max(1, ...camadasOrdenadas.map((c) => nosPorCamada.get(c).length))
+  );
+  const larguraConteudo = maiorContagemPorLinha * (larguraCaixa + gapH) - gapH;
+  const largura = Math.max(420, larguraConteudo + margem * 2);
+
+  const alturaConteudo = subLinhasPorCamada.reduce(
+    (soma, n) => soma + n * alturaCaixa + (n - 1) * gapVSubLinha,
+    0
+  ) + Math.max(0, camadasOrdenadas.length - 1) * gapVEntreCamadas;
+
+  const altura =
+    PDF_ALTURA_CABECALHO_INSTITUCIONAL + alturaAreaTitulo + alturaConteudo + margem * 2 + PDF_ALTURA_RODAPE;
+
+  const pagina = pdf.addPage([largura, altura]);
+  desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+
+  let y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
+  pagina.drawText(sanitizarTextoPdf("Fluxograma consolidado de tramitação (diagrama)"), {
+    x: margem,
+    y,
+    size: 14,
+    font: fonteNegrito,
+    color: COR_PRIMARIA_ESCURA,
+  });
+  y -= 16;
+  pagina.drawText(
+    sanitizarTextoPdf(`${tituloPagina} — ${totalRegras} regra(s) ativa(s). Layout automático por camadas.`),
+    { x: margem, y, size: 9, font: fonteNormal, color: COR_CINZA_TEXTO }
+  );
+  y -= alturaAreaTitulo - 16;
+
+  const posicoes = new Map(); // chave -> {x, yTopo, w, h, rotulo}
+
+  camadasOrdenadas.forEach((camada, indiceCamada) => {
+    const listaNos = nosPorCamada.get(camada);
+    const subLinhas = subLinhasPorCamada[indiceCamada];
+
+    listaNos.forEach((info, indice) => {
+      const subLinha = Math.floor(indice / maxPorLinha);
+      const col = indice % maxPorLinha;
+      const x = margem + col * (larguraCaixa + gapH);
+      const yTopo = y - subLinha * (alturaCaixa + gapVSubLinha);
+      posicoes.set(info.chave, { x, yTopo, w: larguraCaixa, h: alturaCaixa, rotulo: info.rotulo });
+    });
+
+    y -= subLinhas * alturaCaixa + (subLinhas - 1) * gapVSubLinha + gapVEntreCamadas;
+  });
+
+  // Separa arestas "para frente" (destino estritamente abaixo da origem
+  // - o caso normal) das "de volta" (destino na mesma altura ou ACIMA -
+  // só ocorre dentro de um ciclo, ver comentário de "desenharSetaLateralPdf"):
+  // uma linha reta "de volta" passaria por trás de alguma caixa
+  // intermediária no meio do caminho e ficaria invisível (a caixa é
+  // desenhada por cima). As "de volta" usam rota lateral e são
+  // desenhadas DEPOIS das caixas.
+  const arestasParaFrente = [];
+  const arestasDeVolta = [];
+  for (const aresta of arestasDiagrama) {
+    const origem = posicoes.get(aresta.chaveOrigem);
+    const destino = posicoes.get(aresta.chaveDestino);
+    if (!origem || !destino) continue;
+    if (origem.yTopo > destino.yTopo) {
+      arestasParaFrente.push({ ...aresta, origem, destino });
+    } else {
+      arestasDeVolta.push({ ...aresta, origem, destino });
+    }
+  }
+
+  function rotuloDaAresta(aresta) {
+    const numeros = Array.from(new Set(aresta.numerosRegra.map((n) => n || "?")));
+    return `Regra ${numeros.join(", ")}`;
+  }
+
+  function desenharRotuloAresta(rotulo, xReferencia, yMeio, cor, alinhamento = "centro") {
+    const larguraTexto = fonteNormal.widthOfTextAtSize(rotulo, 7.5);
+    // "direita": ancora pela borda direita do texto em vez do centro -
+    // usado nas arestas "de volta" (rótulo perto da linha lateral,
+    // rente à margem direita da página - centralizar nela estouraria a
+    // margem).
+    const x = alinhamento === "direita" ? xReferencia - larguraTexto : xReferencia - larguraTexto / 2;
+    pagina.drawRectangle({ x: x - 3, y: yMeio - 5, width: larguraTexto + 6, height: 11, color: COR_BRANCO, opacity: 0.85 });
+    pagina.drawText(sanitizarTextoPdf(rotulo), { x, y: yMeio - 3, size: 7.5, font: fonteNormal, color: cor });
+  }
+
+  // Setas "para frente" ANTES das caixas, para a caixa cobrir a ponta
+  // solta da linha.
+  const corSeta = rgb(0.55, 0.6, 0.65);
+  for (const aresta of arestasParaFrente) {
+    const x1 = aresta.origem.x + aresta.origem.w / 2;
+    const y1 = aresta.origem.yTopo - aresta.origem.h;
+    const x2 = aresta.destino.x + aresta.destino.w / 2;
+    const y2 = aresta.destino.yTopo;
+    desenharSetaDiagonalPdf(pagina, { x1, y1, x2, y2, cor: corSeta });
+    desenharRotuloAresta(rotuloDaAresta(aresta), (x1 + x2) / 2, (y1 + y2) / 2, COR_CINZA_TEXTO);
+  }
+
+  // Caixas por cima das setas "para frente".
+  for (const pos of posicoes.values()) {
+    pagina.drawRectangle({
+      x: pos.x,
+      y: pos.yTopo - pos.h,
+      width: pos.w,
+      height: pos.h,
+      color: rgb(0xee / 255, 0xf1 / 255, 0xf5 / 255),
+      borderColor: rgb(0x8b / 255, 0x99 / 255, 0xa6 / 255),
+      borderWidth: 1,
+    });
+    const linhas = quebrarLinhas(sanitizarTextoPdf(pos.rotulo), fonteNormal, 8.5, pos.w - 12).slice(0, 3);
+    let yTexto = pos.yTopo - 14;
+    linhas.forEach((linha) => {
+      const larguraLinha = fonteNormal.widthOfTextAtSize(linha, 8.5);
+      pagina.drawText(linha, {
+        x: pos.x + (pos.w - larguraLinha) / 2,
+        y: yTexto,
+        size: 8.5,
+        font: fonteNormal,
+        color: rgb(0.13, 0.13, 0.13),
+      });
+      yTexto -= 11;
+    });
+  }
+
+  // Setas "de volta" (ciclo) DEPOIS das caixas, contornando pela lateral
+  // direita da página - fora da área de qualquer caixa - pra' nunca
+  // ficar coberta nem escondida atrás de nenhuma caixa intermediária.
+  const corSetaVolta = rgb(0.7, 0.35, 0.1);
+  arestasDeVolta.forEach((aresta, indice) => {
+    const xLateral = largura - margem / 2 - indice * 8;
+    const { xMeio, yMeio } = desenharSetaLateralPdf(pagina, {
+      origem: aresta.origem,
+      destino: aresta.destino,
+      xLateral,
+      cor: corSetaVolta,
+    });
+    desenharRotuloAresta(`${rotuloDaAresta(aresta)} (retorno)`, xMeio, yMeio + 8, corSetaVolta, "direita");
+  });
+}
+
 async function construirPdfRegras(regras, tituloPagina, localizadores = []) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
@@ -7892,6 +8192,17 @@ async function construirPdfRegras(regras, tituloPagina, localizadores = []) {
         y -= alturaCaixa + 4;
       }
     }
+  }
+
+  // Além da lista textual acima (mais compacta), um diagrama 2D de
+  // verdade - caixas por localizador e setas ligando origem/destino,
+  // numa página à parte de tamanho customizado (calculado para caber o
+  // grafo inteiro) - complementa com a visão de conjunto que só um
+  // fluxograma gráfico proporciona. Só entra quando há pelo menos uma
+  // aresta (mesma checagem da lista acima).
+  if (arestas.length > 0) {
+    const layoutDiagrama = montarLayoutTramitacao(arestas);
+    desenharDiagramaTramitacao(pdf, layoutDiagrama, fonteNormal, fonteNegrito, tituloPagina, regras.length);
   }
 
   desenharRodapePaginas(pdf, fonteNormal, largura, margem);
