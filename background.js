@@ -5491,10 +5491,63 @@ async function exportarRelatorioGerencialUnidade(
       const bytesTabela = await construirPdfSuspensos(suspensos.tabela, nomeUnidade);
       await anexarPaginas(bytesTabela);
     }
+    // Gráfico de distribuição por situação específica - so' no modo
+    // "unidade integral" (é onde o detalhamento por situação é
+    // calculado; no modo "separação por competência" o detalhamento vira
+    // subtotal por competência, ver resumo acima).
+    if (!separarPorCompetencia && suspensos.detalhamento && suspensos.detalhamento.length > 0) {
+      const bytesGrafico = await construirPdfGraficoBarras({
+        titulo: `Suspensos/sobrestados por situação — unidade "${nomeUnidade}"`,
+        subtitulo: `${suspensos.total == null ? "?" : suspensos.total} processo(s) no total`,
+        itens: suspensos.detalhamento.map((item) => ({ rotulo: item.texto, contagem: item.contagem })),
+      });
+      await anexarPaginas(bytesGrafico);
+    }
+  }
+  if (opcoesFinais.semMovimentacao && (semMovimentacao.dias30 || semMovimentacao.dias90 || semMovimentacao.dias120)) {
+    const bytesGraficoSemMovimentacao = await construirPdfGraficoBarras({
+      titulo: `Processos sem movimentação — unidade "${nomeUnidade}"`,
+      subtitulo: "Faixas independentes (não são cumulativas entre si)",
+      itens: [
+        { rotulo: "Há mais de 30 dias", contagem: semMovimentacao.dias30 || 0 },
+        { rotulo: "Há mais de 90 dias", contagem: semMovimentacao.dias90 || 0 },
+        { rotulo: "Há mais de 120 dias", contagem: semMovimentacao.dias120 || 0 },
+      ],
+    });
+    await anexarPaginas(bytesGraficoSemMovimentacao);
   }
   if (opcoesFinais.mandados && mandados.linhas.length > 0) {
     const bytesMandados = await construirPdfMandadosAbertos(mandados.linhas, nomeUnidade);
     await anexarPaginas(bytesMandados);
+
+    // Mesmos agrupamentos já usados no resumo (capa) - recalculados aqui
+    // so' pra' virar gráfico, sem nenhuma consulta nova.
+    const contagemPorSituacao = new Map();
+    const contagemPorOficial = new Map();
+    for (const m of mandados.linhas) {
+      contagemPorSituacao.set(m.situacao, (contagemPorSituacao.get(m.situacao) || 0) + 1);
+      if (m.responsavel) {
+        contagemPorOficial.set(m.responsavel, (contagemPorOficial.get(m.responsavel) || 0) + 1);
+      }
+    }
+    const bytesGraficoSituacao = await construirPdfGraficoBarras({
+      titulo: `Mandados em aberto por situação — unidade "${nomeUnidade}"`,
+      subtitulo: `${mandados.linhas.length} mandado(s) no total`,
+      itens: Array.from(contagemPorSituacao.entries()).map(([situacao, contagem]) => ({
+        rotulo: situacao || "(sem situação)",
+        contagem,
+      })),
+    });
+    await anexarPaginas(bytesGraficoSituacao);
+
+    if (contagemPorOficial.size > 0) {
+      const bytesGraficoOficial = await construirPdfGraficoBarras({
+        titulo: `Mandados por cumpridor — unidade "${nomeUnidade}"`,
+        subtitulo: `${mandados.linhas.length} mandado(s) no total`,
+        itens: Array.from(contagemPorOficial.entries()).map(([nome, contagem]) => ({ rotulo: nome, contagem })),
+      });
+      await anexarPaginas(bytesGraficoOficial);
+    }
   }
   if (opcoesFinais.paralisados) {
     if (separarPorCompetencia) {
@@ -5515,6 +5568,18 @@ async function exportarRelatorioGerencialUnidade(
     const pdfRemessas = await PDFDocument.load(bytesRemessas);
     const paginas = await pdfFinal.copyPages(pdfRemessas, pdfRemessas.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+
+    const contagemPorJuiz = new Map();
+    for (const linha of remessasJuizesLeigos.linhas) {
+      const juiz = linha.juiz || "(sem juiz leigo)";
+      contagemPorJuiz.set(juiz, (contagemPorJuiz.get(juiz) || 0) + 1);
+    }
+    const bytesGraficoRemessas = await construirPdfGraficoBarras({
+      titulo: `Remessas aos juízes leigos por juiz — unidade "${nomeUnidade}"`,
+      subtitulo: `${remessasJuizesLeigos.linhas.length} processo(s) no total`,
+      itens: Array.from(contagemPorJuiz.entries()).map(([juiz, contagem]) => ({ rotulo: juiz, contagem })),
+    });
+    await anexarPaginas(bytesGraficoRemessas);
   }
 
   // Regras de Automação: um "cartão" por regra ativa (fluxograma +
