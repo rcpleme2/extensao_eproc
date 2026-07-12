@@ -4315,7 +4315,16 @@ async function construirPdfProcessosAtivos(
 // restante agrupado em "Outros" (quando houver mais de 15 classes
 // distintas) - da' uma visao rapida do perfil da vara sem precisar somar
 // nada manualmente na tabela linha a linha.
-async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
+// Gráfico de barras horizontais genérico - usado por TODA distribuição
+// desenhada no relatório (classe processual, rito processual, situação
+// de suspensos, faixas de sem movimentação, etc.). Uma barra por
+// "rotulo"/"contagem", da maior para a menor; opcionalmente agrupa o
+// que sobrar depois de "limiteItens" num único item "rotuloOutros"
+// (mesmo padrão do antigo "top 15 + OUTROS" da distribuição por classe
+// processual, generalizado para qualquer chamador). Devolve os bytes do
+// PDF gerado - quem chama anexa essas páginas ao relatório final (mesmo
+// padrão de "anexarPaginas" usado no resto do arquivo).
+async function construirPdfGraficoBarras({ titulo, subtitulo, itens, limiteItens = null, rotuloOutros = "OUTROS" }) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
   const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -4333,24 +4342,17 @@ async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
     desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
     y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
     if (comTitulo) {
-      const linhasTitulo = quebrarLinhas(
-        sanitizarTextoPdf(`Distribuição por classe processual — unidade "${nomeUnidade}"`),
-        fonteNegrito,
-        13,
-        larguraUtil
-      );
+      const linhasTitulo = quebrarLinhas(sanitizarTextoPdf(titulo), fonteNegrito, 13, larguraUtil);
       for (const linhaTitulo of linhasTitulo) {
         pagina.drawText(linhaTitulo, { x: margem, y, size: 13, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
         y -= 17;
       }
-      pagina.drawText(`${itens.length} processo(s) no total`, {
-        x: margem,
-        y,
-        size: 9.5,
-        font: fonteNormal,
-        color: COR_CINZA_TEXTO,
-      });
-      y -= 22;
+      if (subtitulo) {
+        pagina.drawText(sanitizarTextoPdf(subtitulo), { x: margem, y, size: 9.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+        y -= 22;
+      } else {
+        y -= 5;
+      }
     }
   }
 
@@ -4362,25 +4364,15 @@ async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
 
   novaPagina(true);
 
-  // Uniformiza em MAIÚSCULAS antes de agrupar - sem isso, a mesma classe
-  // escrita com capitalização diferente entre processos (ex.:
-  // "Procedimento Comum Cível" vs "PROCEDIMENTO COMUM CÍVEL") virava duas
-  // fatias separadas no gráfico em vez de uma só.
-  const contagemPorClasse = new Map();
-  for (const item of itens) {
-    const chave = (item.classe || "").trim().toLocaleUpperCase("pt-BR") || "(SEM CLASSE)";
-    contagemPorClasse.set(chave, (contagemPorClasse.get(chave) || 0) + 1);
+  const ordenado = itens.slice().sort((a, b) => b.contagem - a.contagem);
+  let dados = ordenado;
+  if (limiteItens != null && ordenado.length > limiteItens) {
+    const topN = ordenado.slice(0, limiteItens);
+    const totalResto = ordenado.slice(limiteItens).reduce((soma, item) => soma + item.contagem, 0);
+    dados = totalResto > 0 ? [...topN, { rotulo: rotuloOutros, contagem: totalResto }] : topN;
   }
-  const ordenado = Array.from(contagemPorClasse.entries())
-    .map(([classe, contagem]) => ({ classe, contagem }))
-    .sort((a, b) => b.contagem - a.contagem);
 
-  const top15 = ordenado.slice(0, 15);
-  const totalOutros = ordenado.slice(15).reduce((soma, item) => soma + item.contagem, 0);
-  const dados = [...top15];
-  if (totalOutros > 0) dados.push({ classe: "OUTROS", contagem: totalOutros });
-
-  const total = itens.length || 1;
+  const total = itens.reduce((soma, item) => soma + item.contagem, 0) || 1;
   const maiorContagem = Math.max(...dados.map((d) => d.contagem), 1);
 
   const larguraRotulo = 200;
@@ -4390,7 +4382,7 @@ async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
   const tamanhoFonte = 8.5;
 
   for (const item of dados) {
-    const linhasRotulo = quebrarLinhas(sanitizarTextoPdf(item.classe), fonteNormal, tamanhoFonte, larguraRotulo - 6);
+    const linhasRotulo = quebrarLinhas(sanitizarTextoPdf(item.rotulo), fonteNormal, tamanhoFonte, larguraRotulo - 6);
     const alturaLinha = Math.max(alturaBarra, linhasRotulo.length * 10) + 8;
     garantirEspaco(alturaLinha);
 
@@ -4407,7 +4399,7 @@ async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
       y: y - alturaBarra,
       width: larguraBarra,
       height: alturaBarra - 3,
-      color: item.classe === "Outros" ? COR_CINZA_BORDA : COR_PRIMARIA,
+      color: item.rotulo === rotuloOutros ? COR_CINZA_BORDA : COR_PRIMARIA,
     });
 
     pagina.drawText(`${percentual.toFixed(1)}% (${item.contagem})`, {
@@ -4425,6 +4417,26 @@ async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
   return pdf.save();
 }
 
+async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
+  // Uniformiza em MAIÚSCULAS antes de agrupar - sem isso, a mesma classe
+  // escrita com capitalização diferente entre processos (ex.:
+  // "Procedimento Comum Cível" vs "PROCEDIMENTO COMUM CÍVEL") virava duas
+  // fatias separadas no gráfico em vez de uma só.
+  const contagemPorClasse = new Map();
+  for (const item of itens) {
+    const chave = (item.classe || "").trim().toLocaleUpperCase("pt-BR") || "(SEM CLASSE)";
+    contagemPorClasse.set(chave, (contagemPorClasse.get(chave) || 0) + 1);
+  }
+  const dados = Array.from(contagemPorClasse.entries()).map(([classe, contagem]) => ({ rotulo: classe, contagem }));
+
+  return construirPdfGraficoBarras({
+    titulo: `Distribuição por classe processual — unidade "${nomeUnidade}"`,
+    subtitulo: `${itens.length} processo(s) no total`,
+    itens: dados,
+    limiteItens: 15,
+  });
+}
+
 // Mesmo grafico de barras horizontais do "Distribuição por classe
 // processual" acima, so' que para o Rito Processual - anexado logo em
 // seguida (mesma secao/lugar no relatório), sem exigir nenhum item novo
@@ -4435,97 +4447,14 @@ async function construirPdfGraficoClassesAtivos(itens, nomeUnidade) {
 // relação de processos já extraída (o Rito não aparece como coluna na
 // tabela de resultados, só como filtro).
 async function construirPdfGraficoRitosAtivos(distribuicao, nomeUnidade) {
-  const pdf = await PDFDocument.create();
-  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
-  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const total = distribuicao.reduce((soma, item) => soma + item.contagem, 0);
+  const dados = distribuicao.map((item) => ({ rotulo: item.rito, contagem: item.contagem }));
 
-  const largura = LARGURA_PAGINA_TEXTO;
-  const altura = ALTURA_PAGINA_TEXTO;
-  const margem = MARGEM_TEXTO;
-  const larguraUtil = largura - margem * 2;
-
-  let pagina = null;
-  let y = 0;
-
-  const total = distribuicao.reduce((soma, item) => soma + item.contagem, 0) || 1;
-
-  function novaPagina(comTitulo) {
-    pagina = pdf.addPage([largura, altura]);
-    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
-    y = altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem;
-    if (comTitulo) {
-      const linhasTitulo = quebrarLinhas(
-        sanitizarTextoPdf(`Distribuição por rito processual — unidade "${nomeUnidade}"`),
-        fonteNegrito,
-        13,
-        larguraUtil
-      );
-      for (const linhaTitulo of linhasTitulo) {
-        pagina.drawText(linhaTitulo, { x: margem, y, size: 13, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
-        y -= 17;
-      }
-      pagina.drawText(`${total} processo(s) no total`, {
-        x: margem,
-        y,
-        size: 9.5,
-        font: fonteNormal,
-        color: COR_CINZA_TEXTO,
-      });
-      y -= 22;
-    }
-  }
-
-  function garantirEspaco(alturaNecessaria) {
-    if (y - alturaNecessaria < PDF_ALTURA_RODAPE + margem) {
-      novaPagina(false);
-    }
-  }
-
-  novaPagina(true);
-
-  const ordenado = [...distribuicao].sort((a, b) => b.contagem - a.contagem);
-  const maiorContagem = Math.max(...ordenado.map((d) => d.contagem), 1);
-
-  const larguraRotulo = 200;
-  const larguraPercentual = 90;
-  const larguraMaxBarra = larguraUtil - larguraRotulo - larguraPercentual;
-  const alturaBarra = 14;
-  const tamanhoFonte = 8.5;
-
-  for (const item of ordenado) {
-    const linhasRotulo = quebrarLinhas(sanitizarTextoPdf(item.rito), fonteNormal, tamanhoFonte, larguraRotulo - 6);
-    const alturaLinha = Math.max(alturaBarra, linhasRotulo.length * 10) + 8;
-    garantirEspaco(alturaLinha);
-
-    let yRotulo = y - 9;
-    for (const linha of linhasRotulo) {
-      pagina.drawText(linha, { x: margem, y: yRotulo, size: tamanhoFonte, font: fonteNormal, color: COR_CINZA_TEXTO });
-      yRotulo -= 10;
-    }
-
-    const percentual = (item.contagem / total) * 100;
-    const larguraBarra = Math.max(2, (item.contagem / maiorContagem) * larguraMaxBarra);
-    pagina.drawRectangle({
-      x: margem + larguraRotulo,
-      y: y - alturaBarra,
-      width: larguraBarra,
-      height: alturaBarra - 3,
-      color: COR_PRIMARIA,
-    });
-
-    pagina.drawText(`${percentual.toFixed(1)}% (${item.contagem})`, {
-      x: margem + larguraRotulo + larguraBarra + 6,
-      y: y - 9,
-      size: tamanhoFonte,
-      font: fonteNegrito,
-      color: COR_PRIMARIA_ESCURA,
-    });
-
-    y -= alturaLinha;
-  }
-
-  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
-  return pdf.save();
+  return construirPdfGraficoBarras({
+    titulo: `Distribuição por rito processual — unidade "${nomeUnidade}"`,
+    subtitulo: `${total} processo(s) no total`,
+    itens: dados,
+  });
 }
 
 // Conta em quantos processos DISTINTOS cada parte aparece no campo
