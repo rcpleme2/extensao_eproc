@@ -5,6 +5,9 @@ const areaProcesso = document.getElementById("area-processo");
 const numeroProcessoEl = document.getElementById("numero-processo");
 const totalDocumentosEl = document.getElementById("total-documentos");
 const listaDocumentosEl = document.getElementById("lista-documentos");
+const areaMarcarDocumentos = document.getElementById("area-marcar-documentos");
+const btnMarcarTudoDocumentos = document.getElementById("btn-marcar-tudo-documentos");
+const btnDesmarcarTudoDocumentos = document.getElementById("btn-desmarcar-tudo-documentos");
 const areaOpcoes = document.getElementById("area-opcoes");
 const radioIndividuais = document.getElementById("radio-individuais");
 const radioPdfUnico = document.getElementById("radio-pdf-unico");
@@ -209,20 +212,76 @@ async function getAbaAtiva() {
   return aba;
 }
 
+// Envia a selecao (documento individual ou "todos") para o content
+// script, que reflete no(s) checkbox(es) injetado(s) na propria pagina
+// do processo - mantem a pagina e o painel em sincronia nos dois
+// sentidos. Silencioso se a aba nao responder (ex.: usuario navegou
+// para outro lugar) - a selecao so' fica desatualizada ate' o proximo
+// "Detectar", sem travar a interacao no painel.
+async function enviarSelecaoDocumentoParaPagina(idDocumento, selecionado) {
+  try {
+    const aba = await getAbaAtiva();
+    await chrome.tabs.sendMessage(aba.id, { tipo: "DEFINIR_SELECAO_DOCUMENTO", idDocumento, selecionado });
+  } catch (e) {
+    /* aba sem content script ativo - segue so' com o estado local */
+  }
+}
+
+async function enviarSelecaoTodosDocumentosParaPagina(selecionado) {
+  try {
+    const aba = await getAbaAtiva();
+    await chrome.tabs.sendMessage(aba.id, { tipo: "DEFINIR_SELECAO_TODOS_DOCUMENTOS", selecionado });
+  } catch (e) {
+    /* aba sem content script ativo - segue so' com o estado local */
+  }
+}
+
 function renderizarLista(documentos) {
   listaDocumentosEl.innerHTML = "";
   for (const doc of documentos) {
     const li = document.createElement("li");
+
+    const rotulo = document.createElement("label");
+    rotulo.className = "item-documento";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = doc.selecionado !== false;
+    checkbox.addEventListener("change", () => {
+      doc.selecionado = checkbox.checked;
+      enviarSelecaoDocumentoParaPagina(doc.idDocumento, checkbox.checked);
+    });
+    rotulo.appendChild(checkbox);
+
     const nome = document.createElement("span");
-    nome.textContent = `${doc.nome}`;
+    nome.textContent = doc.nome;
+    rotulo.appendChild(nome);
+
     const tipo = document.createElement("span");
     tipo.className = "tipo";
     tipo.textContent = doc.mimetype || "";
-    li.appendChild(nome);
+
+    li.appendChild(rotulo);
     li.appendChild(tipo);
     listaDocumentosEl.appendChild(li);
   }
 }
+
+btnMarcarTudoDocumentos.addEventListener("click", () => {
+  estadoAtual.documentos.forEach((doc) => {
+    doc.selecionado = true;
+  });
+  renderizarLista(estadoAtual.documentos);
+  enviarSelecaoTodosDocumentosParaPagina(true);
+});
+
+btnDesmarcarTudoDocumentos.addEventListener("click", () => {
+  estadoAtual.documentos.forEach((doc) => {
+    doc.selecionado = false;
+  });
+  renderizarLista(estadoAtual.documentos);
+  enviarSelecaoTodosDocumentosParaPagina(false);
+});
 
 btnDetectar.addEventListener("click", async () => {
   areaErros.hidden = true;
@@ -242,6 +301,7 @@ btnDetectar.addEventListener("click", async () => {
       atualizarEstadoBotaoBaixar();
       areaProcesso.hidden = true;
       areaOpcoes.hidden = true;
+      areaMarcarDocumentos.hidden = true;
       listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
       return;
@@ -266,8 +326,10 @@ btnDetectar.addEventListener("click", async () => {
     if (semDocumentos) {
       listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
+      areaMarcarDocumentos.hidden = true;
     } else {
       listaDocumentosEl.hidden = false;
+      areaMarcarDocumentos.hidden = false;
       renderizarLista(documentos);
     }
 
@@ -286,11 +348,44 @@ btnDetectar.addEventListener("click", async () => {
 
 btnBaixar.addEventListener("click", async () => {
   if (!estadoAtual.documentos.length && !estadoAtual.movimentacao.length) return;
+
+  // Confere o estado ATUAL dos checkboxes direto na página do processo
+  // antes de baixar - cobre o caso do usuário ter ajustado a seleção lá
+  // (marcar/desmarcar um documento) depois do último "Detectar", sem
+  // precisar clicar em "Detectar" de novo só para isso. Sem resposta da
+  // aba (ex.: usuário navegou para outro lugar), cai para o que já está
+  // marcado no próprio painel, sem travar o download.
+  let idsSelecionados = null;
+  try {
+    const aba = await getAbaAtiva();
+    const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "OBTER_SELECAO_DOCUMENTOS" });
+    if (resposta && Array.isArray(resposta.selecionados)) {
+      idsSelecionados = new Set(resposta.selecionados);
+    }
+  } catch (e) {
+    /* segue com a seleção já conhecida pelo painel */
+  }
+
+  const documentosSelecionados = idsSelecionados
+    ? estadoAtual.documentos.filter((doc) => idsSelecionados.has(doc.idDocumento))
+    : estadoAtual.documentos.filter((doc) => doc.selecionado !== false);
+
   const opcoes = {
     individuais: radioIndividuais.checked,
     pdfUnico: radioPdfUnico.checked,
     mdUnico: radioMdUnico.checked,
   };
+
+  // "MD único" ainda consegue gerar algo só com a movimentação, mesmo
+  // sem nenhum documento selecionado - mas os outros dois modos não têm
+  // o que baixar sem ao menos 1 documento marcado.
+  if (documentosSelecionados.length === 0 && estadoAtual.documentos.length > 0 && !opcoes.mdUnico) {
+    setStatus(
+      'Nenhum documento selecionado. Marque ao menos um documento (na lista abaixo ou na própria página do processo), ou use "MD único" para exportar só a movimentação.',
+      "erro"
+    );
+    return;
+  }
 
   btnBaixar.disabled = true;
   btnDetectar.disabled = true;
@@ -299,8 +394,8 @@ btnBaixar.addEventListener("click", async () => {
   radioMdUnico.disabled = true;
   areaProgresso.hidden = false;
   barraProgresso.value = 0;
-  barraProgresso.max = Math.max(estadoAtual.documentos.length, 1);
-  textoProgresso.textContent = `0 / ${estadoAtual.documentos.length}`;
+  barraProgresso.max = Math.max(documentosSelecionados.length, 1);
+  textoProgresso.textContent = `0 / ${documentosSelecionados.length}`;
   areaErros.hidden = true;
   iniciarCronometroStatus(areaStatus);
   setStatus("Baixando...");
@@ -308,7 +403,7 @@ btnBaixar.addEventListener("click", async () => {
   chrome.runtime.sendMessage({
     tipo: "BAIXAR_DOCUMENTOS",
     numeroProcesso: estadoAtual.numeroProcesso,
-    documentos: estadoAtual.documentos,
+    documentos: documentosSelecionados,
     movimentacao: estadoAtual.movimentacao,
     opcoes,
   });

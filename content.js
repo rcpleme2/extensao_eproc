@@ -92,6 +92,56 @@ function destacarAncoras(anchors) {
   }
 }
 
+// Checkbox de selecao injetado na propria tela de movimentacao, logo
+// antes de cada link de documento - permite escolher direto ali quais
+// documentos entram na exportacao, sem precisar abrir o painel para
+// desmarcar um por um. Marcado por padrao (todo documento reconhecido
+// comeca incluido). Idempotente: chamar de novo (ex.: o usuario clica em
+// "Detectar" mais de uma vez) NAO reseta o estado ja escolhido pelo
+// usuario - so' cria o checkbox na primeira vez que encontra aquele link.
+const CLASSE_CHECKBOX_DOCUMENTO = "eproc-exportador-checkbox-doc";
+
+function garantirCheckboxDocumento(anchorEl, idDoc) {
+  const anterior = anchorEl.previousElementSibling;
+  if (anterior && anterior.classList && anterior.classList.contains(CLASSE_CHECKBOX_DOCUMENTO)) {
+    return anterior;
+  }
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = true;
+  checkbox.className = CLASSE_CHECKBOX_DOCUMENTO;
+  checkbox.title = "Incluir este documento na exportação";
+  checkbox.style.marginRight = "4px";
+  checkbox.setAttribute("data-doc-checkbox", idDoc);
+  anchorEl.parentNode.insertBefore(checkbox, anchorEl);
+  return checkbox;
+}
+
+// Le o estado ATUAL dos checkboxes direto do DOM (sem recriar nada) -
+// usado bem antes de comecar a exportar, para pegar qualquer selecao que
+// o usuario tenha ajustado na propria pagina depois do ultimo "Detectar".
+function obterSelecaoDocumentos() {
+  const selecionados = [];
+  document.querySelectorAll(`.${CLASSE_CHECKBOX_DOCUMENTO}`).forEach((chk) => {
+    if (chk.checked) {
+      const idDoc = chk.getAttribute("data-doc-checkbox");
+      if (idDoc) selecionados.push(idDoc);
+    }
+  });
+  return selecionados;
+}
+
+function definirSelecaoDocumento(idDocumento, selecionado) {
+  const chk = document.querySelector(`.${CLASSE_CHECKBOX_DOCUMENTO}[data-doc-checkbox="${idDocumento}"]`);
+  if (chk) chk.checked = Boolean(selecionado);
+}
+
+function definirSelecaoTodosDocumentos(selecionado) {
+  document.querySelectorAll(`.${CLASSE_CHECKBOX_DOCUMENTO}`).forEach((chk) => {
+    chk.checked = Boolean(selecionado);
+  });
+}
+
 function listarDocumentos() {
   const anchors = Array.from(
     document.querySelectorAll("a.infraLinkDocumento[data-doc]")
@@ -105,6 +155,8 @@ function listarDocumentos() {
     if (!idDoc || vistos.has(idDoc)) continue;
     vistos.add(idDoc);
 
+    const checkbox = garantirCheckboxDocumento(a, idDoc);
+
     documentos.push({
       idDocumento: idDoc,
       nome: (a.textContent || "").trim() || a.getAttribute("data-nome") || idDoc,
@@ -114,6 +166,7 @@ function listarDocumentos() {
       href: a.href,
       evento: extrairNumeroEvento(a),
       ordemDoc: extrairOrdemNoEvento(a),
+      selecionado: checkbox.checked,
     });
   }
 
@@ -941,6 +994,17 @@ function lerPerfilAtual() {
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "LISTAR_DOCUMENTOS") {
     sendResponse(listarDocumentos());
+  }
+  if (mensagem && mensagem.tipo === "OBTER_SELECAO_DOCUMENTOS") {
+    sendResponse({ selecionados: obterSelecaoDocumentos() });
+  }
+  if (mensagem && mensagem.tipo === "DEFINIR_SELECAO_DOCUMENTO") {
+    definirSelecaoDocumento(mensagem.idDocumento, mensagem.selecionado);
+    sendResponse({ ok: true });
+  }
+  if (mensagem && mensagem.tipo === "DEFINIR_SELECAO_TODOS_DOCUMENTOS") {
+    definirSelecaoTodosDocumentos(mensagem.selecionado);
+    sendResponse({ ok: true });
   }
   if (mensagem && mensagem.tipo === "LISTAR_REGRAS_AUTOMACAO") {
     sendResponse(listarRegrasAutomacaoAtivas());

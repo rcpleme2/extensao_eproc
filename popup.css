@@ -546,6 +546,17 @@ progress {
 
 /* ---- Lista de documentos detectados ---- */
 
+.botoes-marcar-documentos {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dica-selecao-documentos {
+  color: var(--cor-texto-suave);
+  font-size: 11px;
+  flex: 1 1 100%;
+}
+
 .lista-documentos {
   list-style: none;
   margin: 0;
@@ -561,15 +572,31 @@ progress {
   border-bottom: 1px solid var(--cor-borda-suave);
   display: flex;
   justify-content: space-between;
+  align-items: center;
 }
 
 .lista-documentos li:last-child {
   border-bottom: none;
 }
 
+.item-documento {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-documento input[type="checkbox"] {
+  flex-shrink: 0;
+}
+
 .tipo {
   color: var(--cor-texto-suave);
   font-size: 11px;
+  flex-shrink: 0;
+  margin-left: 8px;
 }
 
 /* ---- Erros ---- */

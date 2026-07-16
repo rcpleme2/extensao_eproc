@@ -70,6 +70,25 @@ O número no início do nome do arquivo é um sequencial global de 4 dígitos
 do primeiro evento do processo (a petição inicial) recebe `0001`, e os
 demais seguem na ordem em que os documentos foram juntados ao processo.
 
+**Escolher quais documentos exportar**: ao clicar em "Detectar documentos",
+além de listá-los no painel, a extensão insere um **checkbox marcado, direto
+na própria página de movimentação do processo**, logo antes de cada link de
+documento reconhecido — dá para desmarcar ali mesmo, na tela onde os
+documentos já aparecem destacados, sem precisar decorar nomes/números e ir
+procurá-los na lista do painel. A lista do painel também traz um checkbox
+por documento (mesmo estado, nos dois lugares) e dois atalhos **"Marcar
+tudo"**/**"Desmarcar tudo"** para agilizar seleções grandes. Os dois lugares
+ficam sincronizados: desmarcar um documento no painel também desmarca o
+checkbox correspondente na página, e vice-versa — o painel só não sabe
+imediatamente de uma mudança feita na página até o próximo clique em
+"Detectar" ou "Baixar" (que sempre relê o estado atual direto da página antes
+de exportar, então a sincronia nunca fica desatualizada na hora que importa).
+Documentos desmarcados ficam de fora tanto de "Arquivos individuais" quanto
+de "PDF único combinado"; o modo "MD único" continua funcionando mesmo com
+todos os documentos desmarcados, já que ele também gera algo só com a
+movimentação. Clicar em "Baixar" sem nenhum documento marcado (e sem estar no
+modo "MD único") mostra um aviso em vez de gerar uma exportação vazia.
+
 ## Instalação
 
 A extensão também está disponível na
