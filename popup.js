@@ -5,11 +5,16 @@ const areaProcesso = document.getElementById("area-processo");
 const numeroProcessoEl = document.getElementById("numero-processo");
 const totalDocumentosEl = document.getElementById("total-documentos");
 const listaDocumentosEl = document.getElementById("lista-documentos");
+const areaMarcarDocumentos = document.getElementById("area-marcar-documentos");
+const btnMarcarTudoDocumentos = document.getElementById("btn-marcar-tudo-documentos");
+const btnDesmarcarTudoDocumentos = document.getElementById("btn-desmarcar-tudo-documentos");
 const areaOpcoes = document.getElementById("area-opcoes");
 const radioIndividuais = document.getElementById("radio-individuais");
 const radioPdfUnico = document.getElementById("radio-pdf-unico");
 const radioMdUnico = document.getElementById("radio-md-unico");
 const avisoMdUnico = document.getElementById("aviso-md-unico");
+const areaIncluirMovimentacao = document.getElementById("area-incluir-movimentacao");
+const chkIncluirMovimentacao = document.getElementById("chk-incluir-movimentacao");
 const areaProgresso = document.getElementById("area-progresso");
 const barraProgresso = document.getElementById("barra-progresso");
 const textoProgresso = document.getElementById("texto-progresso");
@@ -76,7 +81,7 @@ modalConfigFechar.addEventListener("click", () => {
   modalConfiguracoes.hidden = true;
 });
 
-let estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [] };
+let estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [], movimentacaoIncluida: true };
 
 // Os tres modos sao mutuamente exclusivos (radio buttons), entao sempre
 // ha' exatamente um marcado. O botao "Baixar" fica habilitado se houver
@@ -209,20 +214,104 @@ async function getAbaAtiva() {
   return aba;
 }
 
+// Envia a selecao (documento individual ou "todos") para o content
+// script, que reflete no(s) checkbox(es) injetado(s) na propria pagina
+// do processo - mantem a pagina e o painel em sincronia nos dois
+// sentidos. Silencioso se a aba nao responder (ex.: usuario navegou
+// para outro lugar) - a selecao so' fica desatualizada ate' o proximo
+// "Detectar", sem travar a interacao no painel.
+async function enviarSelecaoDocumentoParaPagina(idDocumento, selecionado) {
+  try {
+    const aba = await getAbaAtiva();
+    await chrome.tabs.sendMessage(aba.id, { tipo: "DEFINIR_SELECAO_DOCUMENTO", idDocumento, selecionado });
+  } catch (e) {
+    /* aba sem content script ativo - segue so' com o estado local */
+  }
+}
+
+async function enviarSelecaoTodosDocumentosParaPagina(selecionado) {
+  try {
+    const aba = await getAbaAtiva();
+    await chrome.tabs.sendMessage(aba.id, { tipo: "DEFINIR_SELECAO_TODOS_DOCUMENTOS", selecionado });
+  } catch (e) {
+    /* aba sem content script ativo - segue so' com o estado local */
+  }
+}
+
 function renderizarLista(documentos) {
   listaDocumentosEl.innerHTML = "";
   for (const doc of documentos) {
     const li = document.createElement("li");
+    li.dataset.idDocumento = doc.idDocumento;
+
+    const rotulo = document.createElement("label");
+    rotulo.className = "item-documento";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = doc.selecionado !== false;
+    checkbox.addEventListener("change", () => {
+      doc.selecionado = checkbox.checked;
+      enviarSelecaoDocumentoParaPagina(doc.idDocumento, checkbox.checked);
+    });
+    rotulo.appendChild(checkbox);
+
     const nome = document.createElement("span");
-    nome.textContent = `${doc.nome}`;
+    nome.textContent = doc.nome;
+    rotulo.appendChild(nome);
+
     const tipo = document.createElement("span");
     tipo.className = "tipo";
     tipo.textContent = doc.mimetype || "";
-    li.appendChild(nome);
+
+    li.appendChild(rotulo);
     li.appendChild(tipo);
     listaDocumentosEl.appendChild(li);
   }
 }
+
+// Atualiza so' o checkbox de UM item da lista (sem reconstruir a lista
+// inteira, o que resetaria a posição do scroll) - usado quando o painel
+// recebe um aviso de que o usuário mudou a seleção direto na página (ver
+// "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA" mais abaixo).
+function atualizarCheckboxNaListaDocumentos(idDocumento, selecionado) {
+  const li = listaDocumentosEl.querySelector(`li[data-id-documento="${CSS.escape(idDocumento)}"]`);
+  const checkbox = li && li.querySelector('input[type="checkbox"]');
+  if (checkbox) checkbox.checked = selecionado;
+}
+
+btnMarcarTudoDocumentos.addEventListener("click", () => {
+  estadoAtual.documentos.forEach((doc) => {
+    doc.selecionado = true;
+  });
+  renderizarLista(estadoAtual.documentos);
+  enviarSelecaoTodosDocumentosParaPagina(true);
+});
+
+btnDesmarcarTudoDocumentos.addEventListener("click", () => {
+  estadoAtual.documentos.forEach((doc) => {
+    doc.selecionado = false;
+  });
+  renderizarLista(estadoAtual.documentos);
+  enviarSelecaoTodosDocumentosParaPagina(false);
+});
+
+// Mesmo padrao de sincronizacao dos documentos, so' que para o
+// checkbox UNICO "incluir a movimentacao" (a linha do tempo entra ou sai
+// da exportacao como um todo, nao evento por evento).
+async function enviarSelecaoMovimentacaoParaPagina(incluida) {
+  try {
+    const aba = await getAbaAtiva();
+    await chrome.tabs.sendMessage(aba.id, { tipo: "DEFINIR_SELECAO_MOVIMENTACAO", incluida });
+  } catch (e) {
+    /* aba sem content script ativo - segue so' com o estado local */
+  }
+}
+
+chkIncluirMovimentacao.addEventListener("change", () => {
+  estadoAtual.movimentacaoIncluida = chkIncluirMovimentacao.checked;
+  enviarSelecaoMovimentacaoParaPagina(chkIncluirMovimentacao.checked);
+});
 
 btnDetectar.addEventListener("click", async () => {
   areaErros.hidden = true;
@@ -238,16 +327,19 @@ btnDetectar.addEventListener("click", async () => {
       setStatus(
         "Nenhum documento nem movimentação encontrados. Confirme que você está na página de detalhes do processo no eproc."
       );
-      estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [] };
+      estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [], movimentacaoIncluida: true };
       atualizarEstadoBotaoBaixar();
       areaProcesso.hidden = true;
       areaOpcoes.hidden = true;
+      areaMarcarDocumentos.hidden = true;
+      areaIncluirMovimentacao.hidden = true;
       listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
       return;
     }
 
-    estadoAtual = { numeroProcesso: resposta.numeroProcesso, documentos, movimentacao };
+    const movimentacaoIncluida = resposta.movimentacaoIncluida !== false;
+    estadoAtual = { numeroProcesso: resposta.numeroProcesso, documentos, movimentacao, movimentacaoIncluida };
     numeroProcessoEl.textContent = resposta.numeroProcesso;
     totalDocumentosEl.textContent = String(documentos.length);
     areaProcesso.hidden = false;
@@ -263,11 +355,18 @@ btnDetectar.addEventListener("click", async () => {
     }
     atualizarAvisoMdUnico();
 
+    // O checkbox so' faz sentido quando ha' movimentação para incluir ou
+    // excluir - sem nenhum evento detectado, não há nada para alternar.
+    areaIncluirMovimentacao.hidden = movimentacao.length === 0;
+    chkIncluirMovimentacao.checked = movimentacaoIncluida;
+
     if (semDocumentos) {
       listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
+      areaMarcarDocumentos.hidden = true;
     } else {
       listaDocumentosEl.hidden = false;
+      areaMarcarDocumentos.hidden = false;
       renderizarLista(documentos);
     }
 
@@ -286,11 +385,69 @@ btnDetectar.addEventListener("click", async () => {
 
 btnBaixar.addEventListener("click", async () => {
   if (!estadoAtual.documentos.length && !estadoAtual.movimentacao.length) return;
+
+  // Confere o estado ATUAL dos checkboxes direto na página do processo
+  // antes de baixar - cobre o caso do usuário ter ajustado a seleção lá
+  // (marcar/desmarcar um documento) depois do último "Detectar", sem
+  // precisar clicar em "Detectar" de novo só para isso. Sem resposta da
+  // aba (ex.: usuário navegou para outro lugar), cai para o que já está
+  // marcado no próprio painel, sem travar o download.
+  let idsSelecionados = null;
+  try {
+    const aba = await getAbaAtiva();
+    const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "OBTER_SELECAO_DOCUMENTOS" });
+    if (resposta && Array.isArray(resposta.selecionados)) {
+      idsSelecionados = new Set(resposta.selecionados);
+    }
+  } catch (e) {
+    /* segue com a seleção já conhecida pelo painel */
+  }
+
+  const documentosSelecionados = idsSelecionados
+    ? estadoAtual.documentos.filter((doc) => idsSelecionados.has(doc.idDocumento))
+    : estadoAtual.documentos.filter((doc) => doc.selecionado !== false);
+
+  // Mesma ideia acima, agora para o checkbox único "incluir a
+  // movimentação" - relê o estado atual direto da página antes de
+  // decidir se a linha do tempo entra ou não na exportação.
+  let movimentacaoIncluida = estadoAtual.movimentacaoIncluida !== false;
+  try {
+    const aba = await getAbaAtiva();
+    const respostaMov = await chrome.tabs.sendMessage(aba.id, { tipo: "OBTER_SELECAO_MOVIMENTACAO" });
+    if (respostaMov && typeof respostaMov.incluida === "boolean") {
+      movimentacaoIncluida = respostaMov.incluida;
+    }
+  } catch (e) {
+    /* segue com a seleção já conhecida pelo painel */
+  }
+  const movimentacaoParaEnviar = movimentacaoIncluida ? estadoAtual.movimentacao : [];
+
   const opcoes = {
     individuais: radioIndividuais.checked,
     pdfUnico: radioPdfUnico.checked,
     mdUnico: radioMdUnico.checked,
   };
+
+  // "MD único" ainda consegue gerar algo só com a movimentação, mesmo
+  // sem nenhum documento selecionado - mas os outros dois modos não têm
+  // o que baixar sem ao menos 1 documento marcado.
+  if (documentosSelecionados.length === 0 && estadoAtual.documentos.length > 0 && !opcoes.mdUnico) {
+    setStatus(
+      'Nenhum documento selecionado. Marque ao menos um documento (na lista abaixo ou na própria página do processo), ou use "MD único" para exportar só a movimentação.',
+      "erro"
+    );
+    return;
+  }
+
+  // Sem nenhum documento selecionado E com a movimentação excluída, "MD
+  // único" também não tem mais nada para gerar.
+  if (documentosSelecionados.length === 0 && !movimentacaoParaEnviar.length && opcoes.mdUnico) {
+    setStatus(
+      "Nada para exportar: nenhum documento selecionado e a movimentação está excluída. Marque ao menos um documento ou inclua a movimentação.",
+      "erro"
+    );
+    return;
+  }
 
   btnBaixar.disabled = true;
   btnDetectar.disabled = true;
@@ -299,8 +456,8 @@ btnBaixar.addEventListener("click", async () => {
   radioMdUnico.disabled = true;
   areaProgresso.hidden = false;
   barraProgresso.value = 0;
-  barraProgresso.max = Math.max(estadoAtual.documentos.length, 1);
-  textoProgresso.textContent = `0 / ${estadoAtual.documentos.length}`;
+  barraProgresso.max = Math.max(documentosSelecionados.length, 1);
+  textoProgresso.textContent = `0 / ${documentosSelecionados.length}`;
   areaErros.hidden = true;
   iniciarCronometroStatus(areaStatus);
   setStatus("Baixando...");
@@ -308,8 +465,8 @@ btnBaixar.addEventListener("click", async () => {
   chrome.runtime.sendMessage({
     tipo: "BAIXAR_DOCUMENTOS",
     numeroProcesso: estadoAtual.numeroProcesso,
-    documentos: estadoAtual.documentos,
-    movimentacao: estadoAtual.movimentacao,
+    documentos: documentosSelecionados,
+    movimentacao: movimentacaoParaEnviar,
     opcoes,
   });
 });
@@ -803,6 +960,25 @@ atualizarCardCorregedoria();
 
 chrome.runtime.onMessage.addListener((mensagem) => {
   if (!mensagem) return;
+
+  // Avisos vindos do content script quando o usuário desmarca/marca um
+  // checkbox DIRETO na página (em vez de pelo painel) - sem isso, o
+  // painel só descobria essa mudança no próximo "Detectar"/"Baixar" (a
+  // exportação em si já respeitava a escolha porque "Baixar" relê o
+  // estado da página antes de exportar; só o CHECKBOX DO PAINEL ficava
+  // visualmente desatualizado até lá).
+  if (mensagem.tipo === "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA") {
+    const doc = estadoAtual.documentos.find((d) => d.idDocumento === mensagem.idDocumento);
+    if (doc) {
+      doc.selecionado = mensagem.selecionado;
+      atualizarCheckboxNaListaDocumentos(mensagem.idDocumento, mensagem.selecionado);
+    }
+  }
+
+  if (mensagem.tipo === "SELECAO_MOVIMENTACAO_ALTERADA_NA_PAGINA") {
+    estadoAtual.movimentacaoIncluida = mensagem.incluida;
+    chkIncluirMovimentacao.checked = mensagem.incluida;
+  }
 
   if (mensagem.tipo === "PROGRESSO_DOWNLOAD") {
     barraProgresso.value = mensagem.concluidos;

@@ -265,12 +265,25 @@
             <strong>Anonimização de melhor esforço — revise antes de
             compartilhar.</strong>
           </div>
+          <label class="opcao" id="area-incluir-movimentacao" hidden>
+            <input type="checkbox" id="chk-incluir-movimentacao" checked />
+            Incluir a movimentação (linha do tempo)
+          </label>
           <button id="btn-baixar" class="btn" disabled>Baixar</button>
         </div>
 
         <div id="area-progresso" class="progresso" hidden>
           <progress id="barra-progresso" value="0" max="100"></progress>
           <span id="texto-progresso"></span>
+        </div>
+
+        <div id="area-marcar-documentos" class="botoes botoes-marcar-documentos" hidden>
+          <span class="dica-selecao-documentos">
+            Desmarque abaixo (ou direto na página do processo) os documentos
+            que não quer exportar.
+          </span>
+          <button type="button" id="btn-marcar-tudo-documentos" class="btn-ghost">Marcar tudo</button>
+          <button type="button" id="btn-desmarcar-tudo-documentos" class="btn-ghost">Desmarcar tudo</button>
         </div>
 
         <ul id="lista-documentos" class="lista-documentos" hidden></ul>
