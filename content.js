@@ -102,18 +102,29 @@ function destacarAncoras(anchors) {
 const CLASSE_CHECKBOX_DOCUMENTO = "eproc-exportador-checkbox-doc";
 
 function garantirCheckboxDocumento(anchorEl, idDoc) {
-  const anterior = anchorEl.previousElementSibling;
-  if (anterior && anterior.classList && anterior.classList.contains(CLASSE_CHECKBOX_DOCUMENTO)) {
-    return anterior;
-  }
+  // A celula do documento normalmente ja vem com varios iconezinhos
+  // nativos do eproc colados antes do link (sigilo, recurso, etc.) -
+  // inserir o checkbox logo antes do link (como na primeira versao) fazia
+  // ele se perder visualmente no meio desse grupo de icones parecidos.
+  // Por isso ele agora vai bem maior, com contorno colorido proprio, e
+  // como PRIMEIRO filho da celula (antes de qualquer icone nativo) -
+  // continua idempotente, mas a busca pelo "ja existe" agora e' pelo
+  // atributo (nao mais so' "o vizinho imediato"), ja' que a posicao
+  // exata dentro da celula deixou de ser garantida.
+  const celula = anchorEl.closest("td") || anchorEl.parentNode;
+  const existente = celula.querySelector(`.${CLASSE_CHECKBOX_DOCUMENTO}[data-doc-checkbox="${idDoc}"]`);
+  if (existente) return existente;
+
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = true;
   checkbox.className = CLASSE_CHECKBOX_DOCUMENTO;
   checkbox.title = "Incluir este documento na exportação";
-  checkbox.style.marginRight = "4px";
   checkbox.setAttribute("data-doc-checkbox", idDoc);
-  anchorEl.parentNode.insertBefore(checkbox, anchorEl);
+  checkbox.style.cssText =
+    "width:15px;height:15px;margin:0 6px 0 2px;vertical-align:middle;cursor:pointer;" +
+    "accent-color:#1a7f37;outline:2px solid #1a7f37;outline-offset:1px;";
+  celula.insertBefore(checkbox, celula.firstChild);
   return checkbox;
 }
 
@@ -185,10 +196,13 @@ function listarDocumentos() {
 
   destacarAncoras(anchors);
 
+  const movimentacao = listarMovimentacaoProcessual();
+
   return {
     numeroProcesso: extrairNumeroProcesso(),
     documentos,
-    movimentacao: listarMovimentacaoProcessual(),
+    movimentacao,
+    movimentacaoIncluida: obterSelecaoMovimentacao(),
   };
 }
 
@@ -221,6 +235,51 @@ function destacarLinhasMovimentacao(linhas) {
   for (const linha of linhas) {
     linha.classList.add(CLASSE_DESTAQUE_MOVIMENTACAO);
   }
+}
+
+// Checkbox ÚNICO (não é um por evento - a movimentação entra ou sai da
+// exportação como um todo) injetado logo ACIMA da tabela de eventos, na
+// própria página - permite excluir a linha do tempo inteira da
+// exportação sem precisar abrir o painel. Marcado por padrão. Idempotente
+// (mesmo padrão dos checkboxes de documento): só cria na primeira vez.
+const ID_CHECKBOX_MOVIMENTACAO = "eproc-exportador-checkbox-movimentacao";
+
+function garantirCheckboxMovimentacao(linhas) {
+  const existente = document.getElementById(ID_CHECKBOX_MOVIMENTACAO);
+  if (existente) return existente;
+  if (!linhas || linhas.length === 0) return null;
+
+  const tabela = linhas[0].closest("table");
+  if (!tabela || !tabela.parentNode) return null;
+
+  const contorno = document.createElement("label");
+  contorno.style.cssText =
+    "display:inline-flex;align-items:center;gap:6px;margin:6px 0;padding:4px 8px;" +
+    "background:#e3f2fd;border:1px solid #1565c0;border-radius:4px;font-size:12px;" +
+    "color:#0d3d70;cursor:pointer;";
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.id = ID_CHECKBOX_MOVIMENTACAO;
+  checkbox.checked = true;
+
+  contorno.appendChild(checkbox);
+  contorno.appendChild(document.createTextNode("Incluir a movimentação (linha do tempo) na exportação"));
+  tabela.parentNode.insertBefore(contorno, tabela);
+  return checkbox;
+}
+
+// Sem checkbox nenhum ainda criado (ex.: pagina sem tabela de eventos
+// reconhecida) nao ha' nada para excluir - considera incluida por padrao,
+// mesmo comportamento de antes desse recurso existir.
+function obterSelecaoMovimentacao() {
+  const chk = document.getElementById(ID_CHECKBOX_MOVIMENTACAO);
+  return chk ? chk.checked : true;
+}
+
+function definirSelecaoMovimentacao(incluida) {
+  const chk = document.getElementById(ID_CHECKBOX_MOVIMENTACAO);
+  if (chk) chk.checked = Boolean(incluida);
 }
 
 // Le' a tabela de movimentação do processo (numero do evento, data/hora e
@@ -317,6 +376,7 @@ function listarMovimentacaoProcessual() {
   });
 
   destacarLinhasMovimentacao(linhasDestacar);
+  garantirCheckboxMovimentacao(linhasDestacar);
 
   return eventos;
 }
@@ -1004,6 +1064,13 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
   if (mensagem && mensagem.tipo === "DEFINIR_SELECAO_TODOS_DOCUMENTOS") {
     definirSelecaoTodosDocumentos(mensagem.selecionado);
+    sendResponse({ ok: true });
+  }
+  if (mensagem && mensagem.tipo === "OBTER_SELECAO_MOVIMENTACAO") {
+    sendResponse({ incluida: obterSelecaoMovimentacao() });
+  }
+  if (mensagem && mensagem.tipo === "DEFINIR_SELECAO_MOVIMENTACAO") {
+    definirSelecaoMovimentacao(mensagem.incluida);
     sendResponse({ ok: true });
   }
   if (mensagem && mensagem.tipo === "LISTAR_REGRAS_AUTOMACAO") {

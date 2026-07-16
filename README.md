@@ -75,7 +75,11 @@ além de listá-los no painel, a extensão insere um **checkbox marcado, direto
 na própria página de movimentação do processo**, logo antes de cada link de
 documento reconhecido — dá para desmarcar ali mesmo, na tela onde os
 documentos já aparecem destacados, sem precisar decorar nomes/números e ir
-procurá-los na lista do painel. A lista do painel também traz um checkbox
+procurá-los na lista do painel. Esse checkbox é propositalmente **maior e com
+contorno verde bem vistoso**, e entra como **primeiro elemento** da célula do
+documento (antes de qualquer ícone nativo do eproc que já viesse colado ali,
+ex.: sigilo, recurso) — sem esse cuidado, ele se perdia visualmente no meio
+desses ícones nativos parecidos. A lista do painel também traz um checkbox
 por documento (mesmo estado, nos dois lugares) e dois atalhos **"Marcar
 tudo"**/**"Desmarcar tudo"** para agilizar seleções grandes. Os dois lugares
 ficam sincronizados: desmarcar um documento no painel também desmarca o
@@ -84,10 +88,22 @@ imediatamente de uma mudança feita na página até o próximo clique em
 "Detectar" ou "Baixar" (que sempre relê o estado atual direto da página antes
 de exportar, então a sincronia nunca fica desatualizada na hora que importa).
 Documentos desmarcados ficam de fora tanto de "Arquivos individuais" quanto
-de "PDF único combinado"; o modo "MD único" continua funcionando mesmo com
-todos os documentos desmarcados, já que ele também gera algo só com a
-movimentação. Clicar em "Baixar" sem nenhum documento marcado (e sem estar no
-modo "MD único") mostra um aviso em vez de gerar uma exportação vazia.
+de "PDF único combinado".
+
+**Incluir ou não a movimentação (linha do tempo)**: do mesmo jeito, um
+checkbox **único** (a movimentação entra ou sai da exportação como um todo,
+não evento por evento) aparece **acima da tabela de eventos**, na própria
+página, e também no painel (marcado por padrão, sincronizado nos dois
+sentidos igual aos documentos) — dá para excluir a linha do tempo inteira da
+exportação quando ela não interessa. Essa escolha afeta tanto o "MD único"
+(que perde a seção de movimentação) quanto o "PDF único combinado" (que deixa
+de agrupar os documentos por evento, já que não há mais em qual evento
+agrupá-los); "Arquivos individuais" não usa a movimentação de qualquer forma,
+então não é afetado por esse checkbox. Clicar em "Baixar" sem nenhum
+documento marcado e sem a movimentação incluída mostra um aviso em vez de
+gerar uma exportação vazia (mesmo no modo "MD único", que só consegue gerar
+algo com pelo menos um dos dois: documento(s) selecionado(s) ou a
+movimentação incluída).
 
 ## Instalação
 
