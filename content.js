@@ -124,6 +124,18 @@ function garantirCheckboxDocumento(anchorEl, idDoc) {
   checkbox.style.cssText =
     "width:15px;height:15px;margin:0 6px 0 2px;vertical-align:middle;cursor:pointer;" +
     "accent-color:#1a7f37;outline:2px solid #1a7f37;outline-offset:1px;";
+  // Avisa o painel (se estiver aberto) que o usuario mudou a selecao
+  // AQUI, direto na pagina - sem isso, o painel so' descobria essa
+  // mudanca no proximo "Detectar"/"Baixar" (que ja releem o DOM antes de
+  // exportar, entao a exportacao em si sempre respeitava a escolha; so'
+  // o CHECKBOX DO PAINEL ficava visualmente desatualizado ate' la').
+  // Sem receptor (painel fechado), a Promise rejeita - descartada de
+  // proposito, e' o caso normal.
+  checkbox.addEventListener("change", () => {
+    chrome.runtime
+      .sendMessage({ tipo: "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA", idDocumento: idDoc, selecionado: checkbox.checked })
+      .catch(() => {});
+  });
   celula.insertBefore(checkbox, celula.firstChild);
   return checkbox;
 }
@@ -262,6 +274,12 @@ function garantirCheckboxMovimentacao(linhas) {
   checkbox.type = "checkbox";
   checkbox.id = ID_CHECKBOX_MOVIMENTACAO;
   checkbox.checked = true;
+  // Mesma ideia do checkbox de documento acima: avisa o painel (se
+  // aberto) da mudança feita direto na página, sem depender só do
+  // próximo "Detectar"/"Baixar" para o CHECKBOX DO PAINEL refletir.
+  checkbox.addEventListener("change", () => {
+    chrome.runtime.sendMessage({ tipo: "SELECAO_MOVIMENTACAO_ALTERADA_NA_PAGINA", incluida: checkbox.checked }).catch(() => {});
+  });
 
   contorno.appendChild(checkbox);
   contorno.appendChild(document.createTextNode("Incluir a movimentação (linha do tempo) na exportação"));

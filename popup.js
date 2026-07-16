@@ -242,6 +242,7 @@ function renderizarLista(documentos) {
   listaDocumentosEl.innerHTML = "";
   for (const doc of documentos) {
     const li = document.createElement("li");
+    li.dataset.idDocumento = doc.idDocumento;
 
     const rotulo = document.createElement("label");
     rotulo.className = "item-documento";
@@ -267,6 +268,16 @@ function renderizarLista(documentos) {
     li.appendChild(tipo);
     listaDocumentosEl.appendChild(li);
   }
+}
+
+// Atualiza so' o checkbox de UM item da lista (sem reconstruir a lista
+// inteira, o que resetaria a posição do scroll) - usado quando o painel
+// recebe um aviso de que o usuário mudou a seleção direto na página (ver
+// "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA" mais abaixo).
+function atualizarCheckboxNaListaDocumentos(idDocumento, selecionado) {
+  const li = listaDocumentosEl.querySelector(`li[data-id-documento="${CSS.escape(idDocumento)}"]`);
+  const checkbox = li && li.querySelector('input[type="checkbox"]');
+  if (checkbox) checkbox.checked = selecionado;
 }
 
 btnMarcarTudoDocumentos.addEventListener("click", () => {
@@ -949,6 +960,25 @@ atualizarCardCorregedoria();
 
 chrome.runtime.onMessage.addListener((mensagem) => {
   if (!mensagem) return;
+
+  // Avisos vindos do content script quando o usuário desmarca/marca um
+  // checkbox DIRETO na página (em vez de pelo painel) - sem isso, o
+  // painel só descobria essa mudança no próximo "Detectar"/"Baixar" (a
+  // exportação em si já respeitava a escolha porque "Baixar" relê o
+  // estado da página antes de exportar; só o CHECKBOX DO PAINEL ficava
+  // visualmente desatualizado até lá).
+  if (mensagem.tipo === "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA") {
+    const doc = estadoAtual.documentos.find((d) => d.idDocumento === mensagem.idDocumento);
+    if (doc) {
+      doc.selecionado = mensagem.selecionado;
+      atualizarCheckboxNaListaDocumentos(mensagem.idDocumento, mensagem.selecionado);
+    }
+  }
+
+  if (mensagem.tipo === "SELECAO_MOVIMENTACAO_ALTERADA_NA_PAGINA") {
+    estadoAtual.movimentacaoIncluida = mensagem.incluida;
+    chkIncluirMovimentacao.checked = mensagem.incluida;
+  }
 
   if (mensagem.tipo === "PROGRESSO_DOWNLOAD") {
     barraProgresso.value = mensagem.concluidos;
