@@ -161,7 +161,7 @@ próprio HTML da página (a informação já existe ali, usada hoje só para o
 tooltip que aparece ao passar o mouse). O tooltip com cargo e lotação
 continua funcionando normalmente.
 
-Esse comportamento pode ser desligado na engrenagem de **Configurações**
+Esse comportamento pode ser desligado na botão **Configurações**
 do painel (ver seção própria abaixo) — desligar não desfaz o que já foi
 trocado numa página já aberta (passa a valer a partir da próxima
 navegação/recarregamento daquela página).
@@ -192,14 +192,15 @@ e conclusão só é procurada no campo "Magistrado(s):" (o último), lendo
 tudo que sobra depois desse rótulo.
 
 Assim como a troca de sigla por nome (acima), esse comportamento pode ser
-desligado na engrenagem de **Configurações** do painel — desligar não
+desligado na botão **Configurações** do painel — desligar não
 desfaz o que já foi acrescentado numa página já aberta.
 
 ## Configurações
 
-O ícone de engrenagem (⚙) no canto superior direito do painel — com um
-fundo sutil para não passar despercebido, mas sem chamar mais atenção que
-os botões de ação — abre um pequeno modal com uma opção, salva em
+O botão **"Configurações"** no canto superior direito do painel — texto
+discreto (fonte pequena, cor neutra) mas com um contorno/fundo sutil que o
+separa do título ao lado, para não passar despercebido nem competir com os
+botões de ação — abre um modal com as opções, salvas em
 `chrome.storage.local`
 (preferência deste navegador, não sincronizada entre máquinas):
 
@@ -536,7 +537,7 @@ conseguir mais recuperar os resultados.
 
 ### Configuração (provedor, modelo e chaves de API)
 
-Nas configurações da extensão (ícone de engrenagem), na seção "Análise com
+Nas configurações da extensão (botão "Configurações"), na seção "Análise com
 IA":
 
 - Escolha o provedor: **Claude (Anthropic)** ou **Gemini (Google)**.
@@ -590,6 +591,23 @@ FIRAC+ (fatos, pedidos, tutela de urgência) com foco em direito de família
 "menor" em favor de "criança"/"adolescente", e perguntas adicionais ao
 final (advogado dativo, tabela de gastos, conta bancária, idade dos
 menores envolvidos).
+
+### Prompt avulso (digitar na hora, sem precisar cadastrar)
+
+Para algo pequeno e pontual que não vale a pena cadastrar, o "Tipo de
+prompt" tem duas opções lado a lado:
+
+- **Usar prompt salvo**: o `<select>` de sempre, com os prompts
+  cadastrados.
+- **Digitar agora**: troca o `<select>` por um campo de texto livre — o
+  que for digitado ali é usado direto naquela análise (imediata ou
+  adicionada à fila em lote), sem entrar no cadastro de prompts.
+
+Se quiser guardar esse prompt avulso para reaproveitar depois, marque
+**"Salvar este prompt para reutilizar depois"** (aparece um campo de
+título) — nesse caso ele é cadastrado antes da análise, passando a
+aparecer também no modo "Usar prompt salvo" dali em diante. Sem marcar
+essa opção, nada é salvo: o texto só existe para aquela chamada.
 
 ### Custos e privacidade
 

@@ -92,23 +92,30 @@ body {
    (fundo sutil + cor de texto normal, nao a mais apagada), mas ainda sem
    competir com os botoes de acao - so' ganha destaque de verdade (cor
    primaria) no hover/foco. */
+/* Texto em vez do ícone de engrenagem antigo - discreto (fonte pequena,
+   cinza-azulado neutro, sem peso de destaque de título), mas com uma
+   "pílula" de fundo sutil + borda que o separa visualmente do resto do
+   cabeçalho, para não se perder ao lado do título da extensão. */
 .btn-config {
   align-self: center;
   flex: none;
-  border: none;
+  border: 1px solid var(--cor-borda);
   background: var(--cor-borda-suave);
   cursor: pointer;
-  padding: 3px 7px;
-  border-radius: var(--raio);
-  font-size: 17px;
-  line-height: 1;
-  color: var(--cor-texto);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: var(--fonte-pequena);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--cor-texto-suave);
+  white-space: nowrap;
 }
 
 .btn-config:hover,
 .btn-config:focus-visible {
   color: var(--cor-primaria);
-  background: var(--cor-borda-suave);
+  background: var(--cor-realce-fundo);
+  border-color: var(--cor-primaria);
 }
 
 /* ---- Cartões colapsáveis ----
@@ -790,7 +797,15 @@ progress {
 
 .modal-caixa {
   width: calc(100% - 48px);
-  max-width: 300px;
+  /* O painel lateral é redimensionável pelo usuário (arrastando a borda) -
+     antes o modal ficava travado em 300px mesmo quando o painel estava
+     bem mais largo, desperdiçando o espaço extra logo que "Configurações"
+     e "Gerenciar prompts" cresceram bastante. 480px aproveita painéis
+     largos sem ficar exageradamente largo em painéis estreitos (onde o
+     "calc(100% - 48px)" acima já limita naturalmente). */
+  max-width: 480px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   background: var(--cor-cartao);
   border-radius: var(--raio-cartao);
   padding: 16px;

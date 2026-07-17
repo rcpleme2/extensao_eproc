@@ -32,7 +32,15 @@ const listaDocumentosIAEl = document.getElementById("lista-documentos-ia");
 const areaIncluirMovimentacaoIA = document.getElementById("area-incluir-movimentacao-ia");
 const chkIncluirMovimentacaoIA = document.getElementById("chk-incluir-movimentacao-ia");
 const areaAnaliseIA = document.getElementById("area-analise-ia");
+const radioPromptSalvo = document.getElementById("radio-prompt-salvo");
+const radioPromptAvulso = document.getElementById("radio-prompt-avulso");
+const areaSelectPromptIA = document.getElementById("area-select-prompt-ia");
 const selectPromptIA = document.getElementById("select-prompt-ia");
+const areaPromptAvulso = document.getElementById("area-prompt-avulso");
+const inputPromptAvulsoTexto = document.getElementById("input-prompt-avulso-texto");
+const chkSalvarPromptAvulso = document.getElementById("chk-salvar-prompt-avulso");
+const areaTituloPromptAvulso = document.getElementById("area-titulo-prompt-avulso");
+const inputTituloPromptAvulso = document.getElementById("input-titulo-prompt-avulso");
 const chkAnonimizarIA = document.getElementById("chk-anonimizar-ia");
 const btnAnalisarIA = document.getElementById("btn-analisar-ia");
 const btnAdicionarFilaIA = document.getElementById("btn-adicionar-fila-ia");
@@ -91,15 +99,64 @@ function nomeAmigavelModelo(modeloId) {
 }
 
 let textoExtraidoParaIA = null;
+// Guarda qual prompt foi de fato usado na extração (fase 1), pra fase 2
+// ("Confirmar e enviar") reenviar EXATAMENTE o mesmo prompt - mesmo que o
+// usuário tenha mexido nos campos de prompt avulso enquanto aguardava a
+// estimativa.
+let promptEmUsoNaAnalise = { promptId: null, promptTextoAvulso: null };
 
 function resetarAnaliseIA() {
   textoExtraidoParaIA = null;
+  promptEmUsoNaAnalise = { promptId: null, promptTextoAvulso: null };
   areaProgressoIA.hidden = true;
   areaEstimativaIA.hidden = true;
   areaErrosIA.hidden = true;
   areaResultadoIA.hidden = true;
   textoResultadoIA.value = "";
   btnAnalisarIA.disabled = false;
+}
+
+function atualizarModoPromptIA() {
+  areaSelectPromptIA.hidden = radioPromptAvulso.checked;
+  areaPromptAvulso.hidden = !radioPromptAvulso.checked;
+}
+radioPromptSalvo.addEventListener("change", atualizarModoPromptIA);
+radioPromptAvulso.addEventListener("change", atualizarModoPromptIA);
+
+chkSalvarPromptAvulso.addEventListener("change", () => {
+  areaTituloPromptAvulso.hidden = !chkSalvarPromptAvulso.checked;
+});
+
+// Resolve qual prompt usar para a análise (imediata ou fila em lote):
+// - modo "prompt salvo": devolve so' o id escolhido no <select>.
+// - modo "digitar agora" SEM marcar "salvar": devolve o texto avulso puro,
+//   sem tocar no cadastro de prompts (nada e' persistido).
+// - modo "digitar agora" COM "salvar" marcado: cadastra o prompt primeiro
+//   (via PROMPTS_IA_SALVAR) e devolve o id do prompt recem-criado - a
+//   partir daí se comporta como um prompt salvo normal.
+// Devolve { erro } se faltar preencher algo obrigatório.
+async function resolverPromptParaEnvio() {
+  if (!radioPromptAvulso.checked) {
+    return { promptId: selectPromptIA.value };
+  }
+
+  const texto = inputPromptAvulsoTexto.value.trim();
+  if (!texto) return { erro: "Digite o texto do prompt." };
+
+  if (!chkSalvarPromptAvulso.checked) {
+    return { promptTextoAvulso: texto };
+  }
+
+  const titulo = inputTituloPromptAvulso.value.trim();
+  if (!titulo) return { erro: "Informe um título para salvar o prompt." };
+
+  const resposta = await chrome.runtime.sendMessage({ tipo: "PROMPTS_IA_SALVAR", prompt: { titulo, texto } });
+  if (!resposta || !resposta.ok) return { erro: (resposta && resposta.erro) || "Falha ao salvar o prompt." };
+
+  PROMPTS_IA_PAINEL = resposta.prompts;
+  atualizarSelectPromptIA();
+  const novoPrompt = PROMPTS_IA_PAINEL[PROMPTS_IA_PAINEL.length - 1];
+  return { promptId: novoPrompt.id };
 }
 
 btnAnalisarIA.addEventListener("click", async () => {
@@ -112,9 +169,17 @@ btnAnalisarIA.addEventListener("click", async () => {
     return;
   }
 
+  const resolucaoPrompt = await resolverPromptParaEnvio();
+  if (resolucaoPrompt.erro) {
+    areaErrosIA.hidden = false;
+    areaErrosIA.textContent = resolucaoPrompt.erro;
+    return;
+  }
+
   const config = await obterConfiguracoes();
 
   resetarAnaliseIA();
+  promptEmUsoNaAnalise = { promptId: resolucaoPrompt.promptId || null, promptTextoAvulso: resolucaoPrompt.promptTextoAvulso || null };
   btnAnalisarIA.disabled = true;
   areaProgressoIA.hidden = false;
   textoProgressoIA.textContent = "Extraindo o conteúdo dos documentos selecionados...";
@@ -126,7 +191,8 @@ btnAnalisarIA.addEventListener("click", async () => {
     anonimizar: chkAnonimizarIA.checked,
     provedor: config.provedorIA,
     modelo: config.provedorIA === "gemini" ? config.modeloGemini : config.modeloClaude,
-    promptId: selectPromptIA.value,
+    promptId: promptEmUsoNaAnalise.promptId,
+    promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
   });
 });
 
@@ -147,7 +213,8 @@ btnConfirmarAnaliseIA.addEventListener("click", async () => {
   chrome.runtime.sendMessage({
     tipo: "ANALISAR_IA_ENVIAR",
     texto: textoExtraidoParaIA,
-    promptId: selectPromptIA.value,
+    promptId: promptEmUsoNaAnalise.promptId,
+    promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
     provedor: config.provedorIA,
     modelo,
     apiKey,
@@ -197,9 +264,10 @@ function renderizarFilaLoteIA(fila) {
   for (const item of itens) {
     const li = document.createElement("li");
     li.className = "item-fila-lote-ia";
-    const prompt = PROMPTS_IA_PAINEL.find((p) => p.id === item.promptId);
+    const prompt = item.promptId ? PROMPTS_IA_PAINEL.find((p) => p.id === item.promptId) : null;
+    const rotuloPrompt = item.promptId ? (prompt ? prompt.titulo : item.promptId) : "Prompt avulso (digitado na hora)";
     li.innerHTML = `
-      <span>${item.numeroProcesso} — ${prompt ? prompt.titulo : item.promptId}
+      <span>${item.numeroProcesso} — ${rotuloPrompt}
         <small>${nomeAmigavelModelo(item.modelo)} — ~${(item.estimativa && item.estimativa.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens, até ${FORMATADOR_USD.format((item.estimativa && item.estimativa.custoEstimadoUsd || 0) * 0.5)} com desconto de lote</small>
       </span>
       <button type="button" class="btn-ghost" data-remover-item="${item.id}">Remover</button>
@@ -289,6 +357,13 @@ btnAdicionarFilaIA.addEventListener("click", async () => {
     return;
   }
 
+  const resolucaoPrompt = await resolverPromptParaEnvio();
+  if (resolucaoPrompt.erro) {
+    areaErrosFilaLoteIA.hidden = false;
+    areaErrosFilaLoteIA.textContent = resolucaoPrompt.erro;
+    return;
+  }
+
   const config = await obterConfiguracoes();
 
   areaErrosFilaLoteIA.hidden = true;
@@ -299,13 +374,20 @@ btnAdicionarFilaIA.addEventListener("click", async () => {
     documentos: documentosSelecionados,
     movimentacao: movimentacaoParaEnviar,
     anonimizar: chkAnonimizarIA.checked,
-    promptId: selectPromptIA.value,
+    promptId: resolucaoPrompt.promptId,
+    promptTextoAvulso: resolucaoPrompt.promptTextoAvulso,
     modelo: config.modeloClaude,
   });
   btnAdicionarFilaIA.disabled = false;
 
   if (resposta && resposta.ok) {
     renderizarFilaLoteIA(resposta.fila);
+    if (radioPromptAvulso.checked) {
+      inputPromptAvulsoTexto.value = "";
+      chkSalvarPromptAvulso.checked = false;
+      inputTituloPromptAvulso.value = "";
+      areaTituloPromptAvulso.hidden = true;
+    }
   } else {
     areaErrosFilaLoteIA.hidden = false;
     areaErrosFilaLoteIA.textContent = (resposta && resposta.erro) || "Falha ao adicionar à fila.";

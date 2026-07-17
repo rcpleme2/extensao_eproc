@@ -1693,18 +1693,15 @@ async function chamarGeminiAPI(apiKey, promptCompleto, modelo) {
 // junto uma ESTIMATIVA de custo, sem chamar a API de IA ainda - a chamada de
 // verdade so' acontece se o usuario confirmar (fase 2, "ANALISAR_IA_ENVIAR"),
 // depois de ver a estimativa.
-async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, modelo, promptId, aoProgredir) {
+async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, modelo, promptId, promptTextoAvulso, aoProgredir) {
   if (aoProgredir) aoProgredir("Extraindo o conteúdo dos documentos selecionados...");
   const obterUrlResolvida = criarResolvedorUrlDocumento();
   const texto = await construirTextoProcessoParaIA(documentos, obterUrlResolvida, movimentacao, anonimizar);
 
   const modeloEscolhido = modelo || modeloPadrao(provedor);
   const precos = obterInfoModelo(provedor, modeloEscolhido);
-  const prompts = await obterPromptsIA();
-  const promptEscolhido = prompts.find((p) => p.id === promptId) || prompts[0];
-  const tokensEntradaEstimados = estimarTokensPorCaracteres(texto) + estimarTokensPorCaracteres(
-    promptEscolhido ? promptEscolhido.texto : ""
-  );
+  const textoPrompt = promptTextoAvulso || (await obterTextoPromptEscolhido(promptId));
+  const tokensEntradaEstimados = estimarTokensPorCaracteres(texto) + estimarTokensPorCaracteres(textoPrompt);
   // Sem ainda saber o tamanho da resposta, usa a propria entrada como
   // aproximacao grosseira do tamanho da saida (relatorios FIRAC costumam
   // ficar na mesma ordem de grandeza do texto de entrada) - so' para dar
@@ -1722,21 +1719,38 @@ async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, p
   };
 }
 
-// Apensa o texto do prompt escolhido ao final do texto do processo -
-// sempre nessa ordem (conteudo do processo primeiro, prompt depois),
-// compartilhado entre o envio imediato e o envio em lote.
-async function montarPromptCompleto(texto, promptId) {
+// Devolve so' o texto do prompt salvo (sem lancar erro se nao encontrar -
+// usado na ESTIMATIVA, onde um promptId ausente/invalido so' acontece no
+// modo "prompt avulso", que nem usa isso: nesse caso a chamada nem
+// acontece, ja' que o texto avulso e' usado direto).
+async function obterTextoPromptEscolhido(promptId) {
   const prompts = await obterPromptsIA();
   const prompt = prompts.find((p) => p.id === promptId);
-  if (!prompt) throw new Error("Tipo de prompt não encontrado (pode ter sido excluído nas configurações).");
-  return `${texto}\n\n---\n\n${prompt.texto}`;
+  return prompt ? prompt.texto : "";
+}
+
+// Apensa o texto do prompt escolhido ao final do texto do processo -
+// sempre nessa ordem (conteudo do processo primeiro, prompt depois),
+// compartilhado entre o envio imediato e o envio em lote. "promptTextoAvulso"
+// (modo "digitar agora" sem salvar, ver popup.js) tem prioridade sobre
+// "promptId" quando presente - nesse caso o texto nunca passa pelo
+// cadastro de prompts, so' e' usado nessa chamada mesmo.
+async function montarPromptCompleto(texto, promptId, promptTextoAvulso) {
+  let textoPrompt = promptTextoAvulso;
+  if (!textoPrompt) {
+    const prompts = await obterPromptsIA();
+    const prompt = prompts.find((p) => p.id === promptId);
+    if (!prompt) throw new Error("Tipo de prompt não encontrado (pode ter sido excluído nas configurações).");
+    textoPrompt = prompt.texto;
+  }
+  return `${texto}\n\n---\n\n${textoPrompt}`;
 }
 
 // Fase 2: chama a API do provedor selecionado, devolvendo tambem o custo
 // REAL (calculado a partir do "usage" que a propria resposta da API traz).
-async function executarAnaliseIA(texto, promptId, provedor, modelo, apiKey) {
+async function executarAnaliseIA(texto, promptId, promptTextoAvulso, provedor, modelo, apiKey) {
   if (!apiKey) throw new Error(`Nenhuma chave de API configurada para "${provedor}". Configure-a nas configurações da extensão.`);
-  const promptCompleto = await montarPromptCompleto(texto, promptId);
+  const promptCompleto = await montarPromptCompleto(texto, promptId, promptTextoAvulso);
   const modeloEscolhido = modelo || modeloPadrao(provedor);
 
   const resultado = provedor === "gemini"
@@ -1802,14 +1816,15 @@ function obterChaveClaudeConfigurada() {
 // adiciona um novo item a' fila, ja' com o texto pronto para ser enviado
 // depois. Devolve a fila atualizada inteira, para o painel so' precisar
 // re-renderizar a lista.
-async function adicionarItemFilaLoteIA(numeroProcesso, documentos, movimentacao, anonimizar, promptId, modelo) {
+async function adicionarItemFilaLoteIA(numeroProcesso, documentos, movimentacao, anonimizar, promptId, promptTextoAvulso, modelo) {
   const modeloEscolhido = modelo || modeloPadrao("claude");
-  const { texto, estimativa } = await extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, "claude", modeloEscolhido, promptId, () => {});
+  const { texto, estimativa } = await extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, "claude", modeloEscolhido, promptId, promptTextoAvulso, () => {});
 
   const item = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     numeroProcesso,
-    promptId,
+    promptId: promptTextoAvulso ? null : promptId,
+    promptTextoAvulso: promptTextoAvulso || null,
     modelo: modeloEscolhido,
     texto,
     estimativa,
@@ -1843,7 +1858,7 @@ async function enviarLoteIA(apiKey) {
       params: {
         model: item.modelo || modeloPadrao("claude"),
         max_tokens: 8192,
-        messages: [{ role: "user", content: await montarPromptCompleto(item.texto, item.promptId) }],
+        messages: [{ role: "user", content: await montarPromptCompleto(item.texto, item.promptId, item.promptTextoAvulso) }],
       },
     });
   }
@@ -8329,6 +8344,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
       mensagem.provedor,
       mensagem.modelo,
       mensagem.promptId,
+      mensagem.promptTextoAvulso,
       (texto) => {
         chrome.runtime.sendMessage({ tipo: "PROGRESSO_ANALISE_IA", fase: "extraindo", texto }).catch(() => {});
       }
@@ -8352,7 +8368,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
 
   if (mensagem && mensagem.tipo === "ANALISAR_IA_ENVIAR") {
-    executarAnaliseIA(mensagem.texto, mensagem.promptId, mensagem.provedor, mensagem.modelo, mensagem.apiKey)
+    executarAnaliseIA(mensagem.texto, mensagem.promptId, mensagem.promptTextoAvulso, mensagem.provedor, mensagem.modelo, mensagem.apiKey)
       .then((resultado) => {
         chrome.runtime
           .sendMessage({ tipo: "ANALISE_IA_RESULTADO", ok: true, ...resultado })
@@ -8378,6 +8394,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
       mensagem.movimentacao,
       !!mensagem.anonimizar,
       mensagem.promptId,
+      mensagem.promptTextoAvulso,
       mensagem.modelo
     )
       .then((fila) => sendResponse({ ok: true, fila }))
