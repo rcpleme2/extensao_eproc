@@ -20,7 +20,17 @@ const barraProgresso = document.getElementById("barra-progresso");
 const textoProgresso = document.getElementById("texto-progresso");
 const areaErros = document.getElementById("area-erros");
 
-const areaAnaliseIAProcesso = document.getElementById("area-analise-ia-processo");
+const areaStatusIA = document.getElementById("area-status-ia");
+const btnDetectarIA = document.getElementById("btn-detectar-ia");
+const areaProcessoIA = document.getElementById("area-processo-ia");
+const numeroProcessoIAEl = document.getElementById("numero-processo-ia");
+const totalDocumentosIAEl = document.getElementById("total-documentos-ia");
+const areaMarcarDocumentosIA = document.getElementById("area-marcar-documentos-ia");
+const btnMarcarTudoDocumentosIA = document.getElementById("btn-marcar-tudo-documentos-ia");
+const btnDesmarcarTudoDocumentosIA = document.getElementById("btn-desmarcar-tudo-documentos-ia");
+const listaDocumentosIAEl = document.getElementById("lista-documentos-ia");
+const areaIncluirMovimentacaoIA = document.getElementById("area-incluir-movimentacao-ia");
+const chkIncluirMovimentacaoIA = document.getElementById("chk-incluir-movimentacao-ia");
 const areaAnaliseIA = document.getElementById("area-analise-ia");
 const selectPromptIA = document.getElementById("select-prompt-ia");
 const chkAnonimizarIA = document.getElementById("chk-anonimizar-ia");
@@ -561,8 +571,12 @@ function abrirCartaoDe(el) {
   }
 }
 
+// Aplica em AMBOS os status ("Exportar Documentos" e "Analisar com IA") -
+// as duas subseções compartilham a mesma detecção/seleção de documentos,
+// então mostram sempre a mesma mensagem.
 function setStatus(texto, tipo) {
   aplicarStatus(areaStatus, texto, tipo);
+  aplicarStatus(areaStatusIA, texto, tipo);
 }
 
 async function getAbaAtiva() {
@@ -594,63 +608,73 @@ async function enviarSelecaoTodosDocumentosParaPagina(selecionado) {
   }
 }
 
+// "Exportar Documentos" e "Analisar com IA" mostram a MESMA lista/seleção
+// de documentos (compartilham "estadoAtual") - só a UI é repetida nas duas
+// subseções, por isso toda renderização/atualização de checkbox acontece
+// nos dois containers ao mesmo tempo.
+const CONTAINERS_LISTA_DOCUMENTOS = [listaDocumentosEl, listaDocumentosIAEl];
+
 function renderizarLista(documentos) {
-  listaDocumentosEl.innerHTML = "";
-  for (const doc of documentos) {
-    const li = document.createElement("li");
-    li.dataset.idDocumento = doc.idDocumento;
+  for (const container of CONTAINERS_LISTA_DOCUMENTOS) {
+    container.innerHTML = "";
+    for (const doc of documentos) {
+      const li = document.createElement("li");
+      li.dataset.idDocumento = doc.idDocumento;
 
-    const rotulo = document.createElement("label");
-    rotulo.className = "item-documento";
+      const rotulo = document.createElement("label");
+      rotulo.className = "item-documento";
 
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = doc.selecionado !== false;
-    checkbox.addEventListener("change", () => {
-      doc.selecionado = checkbox.checked;
-      enviarSelecaoDocumentoParaPagina(doc.idDocumento, checkbox.checked);
-    });
-    rotulo.appendChild(checkbox);
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = doc.selecionado !== false;
+      checkbox.addEventListener("change", () => {
+        doc.selecionado = checkbox.checked;
+        atualizarCheckboxNaListaDocumentos(doc.idDocumento, checkbox.checked);
+        enviarSelecaoDocumentoParaPagina(doc.idDocumento, checkbox.checked);
+      });
+      rotulo.appendChild(checkbox);
 
-    const nome = document.createElement("span");
-    nome.textContent = doc.nome;
-    rotulo.appendChild(nome);
+      const nome = document.createElement("span");
+      nome.textContent = doc.nome;
+      rotulo.appendChild(nome);
 
-    const tipo = document.createElement("span");
-    tipo.className = "tipo";
-    tipo.textContent = doc.mimetype || "";
+      const tipo = document.createElement("span");
+      tipo.className = "tipo";
+      tipo.textContent = doc.mimetype || "";
 
-    li.appendChild(rotulo);
-    li.appendChild(tipo);
-    listaDocumentosEl.appendChild(li);
+      li.appendChild(rotulo);
+      li.appendChild(tipo);
+      container.appendChild(li);
+    }
   }
 }
 
-// Atualiza so' o checkbox de UM item da lista (sem reconstruir a lista
-// inteira, o que resetaria a posição do scroll) - usado quando o painel
-// recebe um aviso de que o usuário mudou a seleção direto na página (ver
-// "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA" mais abaixo).
+// Atualiza so' o checkbox de UM item da lista, nos DOIS containers (sem
+// reconstruir a lista inteira, o que resetaria a posição do scroll) -
+// usado tanto quando o usuário marca/desmarca num dos containers (para
+// refletir no outro) quanto quando o painel recebe um aviso de que a
+// seleção mudou direto na página (ver "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA"
+// mais abaixo).
 function atualizarCheckboxNaListaDocumentos(idDocumento, selecionado) {
-  const li = listaDocumentosEl.querySelector(`li[data-id-documento="${CSS.escape(idDocumento)}"]`);
-  const checkbox = li && li.querySelector('input[type="checkbox"]');
-  if (checkbox) checkbox.checked = selecionado;
+  for (const container of CONTAINERS_LISTA_DOCUMENTOS) {
+    const li = container.querySelector(`li[data-id-documento="${CSS.escape(idDocumento)}"]`);
+    const checkbox = li && li.querySelector('input[type="checkbox"]');
+    if (checkbox) checkbox.checked = selecionado;
+  }
 }
 
-btnMarcarTudoDocumentos.addEventListener("click", () => {
+function marcarTodosDocumentos(selecionado) {
   estadoAtual.documentos.forEach((doc) => {
-    doc.selecionado = true;
+    doc.selecionado = selecionado;
   });
   renderizarLista(estadoAtual.documentos);
-  enviarSelecaoTodosDocumentosParaPagina(true);
-});
+  enviarSelecaoTodosDocumentosParaPagina(selecionado);
+}
 
-btnDesmarcarTudoDocumentos.addEventListener("click", () => {
-  estadoAtual.documentos.forEach((doc) => {
-    doc.selecionado = false;
-  });
-  renderizarLista(estadoAtual.documentos);
-  enviarSelecaoTodosDocumentosParaPagina(false);
-});
+btnMarcarTudoDocumentos.addEventListener("click", () => marcarTodosDocumentos(true));
+btnDesmarcarTudoDocumentos.addEventListener("click", () => marcarTodosDocumentos(false));
+btnMarcarTudoDocumentosIA.addEventListener("click", () => marcarTodosDocumentos(true));
+btnDesmarcarTudoDocumentosIA.addEventListener("click", () => marcarTodosDocumentos(false));
 
 // Mesmo padrao de sincronizacao dos documentos, so' que para o
 // checkbox UNICO "incluir a movimentacao" (a linha do tempo entra ou sai
@@ -664,12 +688,20 @@ async function enviarSelecaoMovimentacaoParaPagina(incluida) {
   }
 }
 
-chkIncluirMovimentacao.addEventListener("change", () => {
-  estadoAtual.movimentacaoIncluida = chkIncluirMovimentacao.checked;
-  enviarSelecaoMovimentacaoParaPagina(chkIncluirMovimentacao.checked);
-});
+function definirMovimentacaoIncluida(incluida) {
+  estadoAtual.movimentacaoIncluida = incluida;
+  chkIncluirMovimentacao.checked = incluida;
+  chkIncluirMovimentacaoIA.checked = incluida;
+  enviarSelecaoMovimentacaoParaPagina(incluida);
+}
 
-btnDetectar.addEventListener("click", async () => {
+chkIncluirMovimentacao.addEventListener("change", () => definirMovimentacaoIncluida(chkIncluirMovimentacao.checked));
+chkIncluirMovimentacaoIA.addEventListener("change", () => definirMovimentacaoIncluida(chkIncluirMovimentacaoIA.checked));
+
+// Compartilhada pelos dois botões "Detectar documentos" ("Exportar
+// Documentos" e "Analisar com IA") - as duas subseções mostram a mesma
+// detecção/seleção, só a UI é repetida.
+async function executarDeteccao() {
   areaErros.hidden = true;
   setStatus("Detectando documentos na pagina...");
   try {
@@ -686,13 +718,17 @@ btnDetectar.addEventListener("click", async () => {
       estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [], movimentacaoIncluida: true };
       atualizarEstadoBotaoBaixar();
       areaProcesso.hidden = true;
+      areaProcessoIA.hidden = true;
       areaOpcoes.hidden = true;
       areaMarcarDocumentos.hidden = true;
+      areaMarcarDocumentosIA.hidden = true;
       areaIncluirMovimentacao.hidden = true;
+      areaIncluirMovimentacaoIA.hidden = true;
       listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
+      listaDocumentosIAEl.hidden = true;
+      listaDocumentosIAEl.innerHTML = "";
       areaAnaliseIA.hidden = true;
-      areaAnaliseIAProcesso.textContent = 'Detecte um processo em "Exportar Documentos" para poder analisá-lo com IA.';
       resetarAnaliseIA();
       return;
     }
@@ -701,10 +737,12 @@ btnDetectar.addEventListener("click", async () => {
     estadoAtual = { numeroProcesso: resposta.numeroProcesso, documentos, movimentacao, movimentacaoIncluida };
     numeroProcessoEl.textContent = resposta.numeroProcesso;
     totalDocumentosEl.textContent = String(documentos.length);
+    numeroProcessoIAEl.textContent = resposta.numeroProcesso;
+    totalDocumentosIAEl.textContent = String(documentos.length);
     areaProcesso.hidden = false;
+    areaProcessoIA.hidden = false;
     areaOpcoes.hidden = false;
     areaAnaliseIA.hidden = false;
-    areaAnaliseIAProcesso.textContent = `Processo: ${resposta.numeroProcesso} (${documentos.length} documento(s)) — usa a mesma seleção de "Exportar Documentos".`;
     resetarAnaliseIA();
 
     // Sem nenhum documento anexado (so' movimentação), os modos
@@ -720,15 +758,22 @@ btnDetectar.addEventListener("click", async () => {
     // O checkbox so' faz sentido quando ha' movimentação para incluir ou
     // excluir - sem nenhum evento detectado, não há nada para alternar.
     areaIncluirMovimentacao.hidden = movimentacao.length === 0;
+    areaIncluirMovimentacaoIA.hidden = movimentacao.length === 0;
     chkIncluirMovimentacao.checked = movimentacaoIncluida;
+    chkIncluirMovimentacaoIA.checked = movimentacaoIncluida;
 
     if (semDocumentos) {
       listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
+      listaDocumentosIAEl.hidden = true;
+      listaDocumentosIAEl.innerHTML = "";
       areaMarcarDocumentos.hidden = true;
+      areaMarcarDocumentosIA.hidden = true;
     } else {
       listaDocumentosEl.hidden = false;
+      listaDocumentosIAEl.hidden = false;
       areaMarcarDocumentos.hidden = false;
+      areaMarcarDocumentosIA.hidden = false;
       renderizarLista(documentos);
     }
 
@@ -743,7 +788,10 @@ btnDetectar.addEventListener("click", async () => {
       "Nao foi possivel ler a pagina. Verifique se voce esta em uma pagina de processo do eproc e tente novamente."
     );
   }
-});
+}
+
+btnDetectar.addEventListener("click", executarDeteccao);
+btnDetectarIA.addEventListener("click", executarDeteccao);
 
 // Confere o estado ATUAL dos checkboxes direto na página do processo antes
 // de usar a seleção - cobre o caso do usuário ter ajustado a seleção lá
@@ -1344,6 +1392,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   if (mensagem.tipo === "SELECAO_MOVIMENTACAO_ALTERADA_NA_PAGINA") {
     estadoAtual.movimentacaoIncluida = mensagem.incluida;
     chkIncluirMovimentacao.checked = mensagem.incluida;
+    chkIncluirMovimentacaoIA.checked = mensagem.incluida;
   }
 
   if (mensagem.tipo === "PROGRESSO_DOWNLOAD") {

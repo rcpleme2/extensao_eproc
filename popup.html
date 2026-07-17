@@ -299,9 +299,34 @@
           Analisar com IA
         </summary>
 
-        <div id="area-analise-ia-processo" class="status">
-          Detecte um processo em "Exportar Documentos" para poder analisá-lo com IA.
+        <div id="area-status-ia" class="status">
+          Abra um processo no eproc e clique em "Detectar documentos".
         </div>
+
+        <div class="botoes">
+          <button id="btn-detectar-ia" class="btn">Detectar documentos</button>
+        </div>
+
+        <div id="area-processo-ia" class="processo" hidden>
+          Processo: <strong id="numero-processo-ia"></strong>
+          (<span id="total-documentos-ia"></span> documento(s))
+        </div>
+
+        <div id="area-marcar-documentos-ia" class="botoes botoes-marcar-documentos" hidden>
+          <span class="dica-selecao-documentos">
+            Desmarque abaixo (ou direto na página do processo) os documentos
+            que não quer incluir na análise.
+          </span>
+          <button type="button" id="btn-marcar-tudo-documentos-ia" class="btn-ghost">Marcar tudo</button>
+          <button type="button" id="btn-desmarcar-tudo-documentos-ia" class="btn-ghost">Desmarcar tudo</button>
+        </div>
+
+        <ul id="lista-documentos-ia" class="lista-documentos" hidden></ul>
+
+        <label class="opcao" id="area-incluir-movimentacao-ia" hidden>
+          <input type="checkbox" id="chk-incluir-movimentacao-ia" checked />
+          Incluir a movimentação (linha do tempo)
+        </label>
 
         <div id="area-analise-ia" hidden>
           <div class="opcoes">

@@ -461,17 +461,18 @@ exportação).
 
 **"Analisar com IA"** é sua própria subseção dentro do cartão "Gestão
 Gabinete" — separada de "Exportar Documentos", com título e recolhimento
-próprios — mas reaproveita o mesmo mecanismo de detecção/seleção: assim
-que "Detectar documentos" (em "Exportar Documentos") encontra um processo,
-essa subseção passa a mostrar o número do processo e o total de
-documentos, e usa a mesma seleção de documentos e o mesmo checkbox de
-"incluir a movimentação" já usados para baixar/exportar — não é preciso
-escolher de novo, nem essa subseção tem sua própria lista de checkboxes.
+próprios — mas com o mesmo botão **"Detectar documentos"**, a mesma lista
+de documentos com checkboxes, os mesmos atalhos "Marcar tudo"/"Desmarcar
+tudo" e o mesmo checkbox de "incluir a movimentação" repetidos aqui, para
+não precisar alternar entre as duas subseções. As duas telas compartilham
+o mesmo estado: detectar ou marcar/desmarcar um documento em qualquer uma
+das duas (ou direto na página do processo) atualiza a outra na hora.
 
 ### Análise imediata
 
-1. Marque quais documentos entram na análise (na lista de "Exportar
-   Documentos" ou direto na página do processo) e se a movimentação deve
+1. Clique em "Detectar documentos" (nesta subseção ou em "Exportar
+   Documentos" — tanto faz) e marque quais documentos entram na análise
+   (na lista ou direto na página do processo) e se a movimentação deve
    ser incluída.
 2. Escolha o **tipo de prompt** (por enquanto só há um cadastrado, ver
    abaixo) e se o conteúdo deve ser **anonimizado antes de enviar** (mesma
