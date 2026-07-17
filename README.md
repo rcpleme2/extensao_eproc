@@ -500,9 +500,12 @@ lote"**, usando a [Message Batches API da
 Claude](https://platform.claude.com/docs/en/api/creating-message-batches):
 o mesmo pedido custa **50% menos**, mas a resposta não sai na hora — o
 lote é processado em segundo plano e pode levar até 24h (a maioria
-termina bem mais rápido). Só funciona com o provedor **Claude** (o Gemini
+termina bem mais rápido). **Só funciona com o provedor Claude** — o Gemini
 não tem uma API de lote assíncrona equivalente cadastrada nesta extensão
-ainda).
+ainda. Isso é independente do rádio "Usar Claude"/"Usar Gemini" nas
+configurações: aquele seletor só afeta a **análise imediata**
+("Analisar agora"); a fila em lote sempre usa a chave/modelo da Claude
+configurados, mesmo que "Gemini" esteja selecionado ali.
 
 Fluxo:
 
