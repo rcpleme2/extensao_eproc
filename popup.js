@@ -57,6 +57,12 @@ for (const prompt of PROMPTS_IA_PAINEL) {
 
 const FORMATADOR_USD = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", minimumFractionDigits: 4 });
 
+function nomeAmigavelModelo(modeloId) {
+  const todos = [...MODELOS_IA_PAINEL.claude, ...MODELOS_IA_PAINEL.gemini];
+  const encontrado = todos.find((m) => m.id === modeloId);
+  return encontrado ? encontrado.nome : modeloId;
+}
+
 let textoExtraidoParaIA = null;
 
 function resetarAnaliseIA() {
@@ -92,6 +98,7 @@ btnAnalisarIA.addEventListener("click", async () => {
     movimentacao: movimentacaoParaEnviar,
     anonimizar: chkAnonimizarIA.checked,
     provedor: config.provedorIA,
+    modelo: config.provedorIA === "gemini" ? config.modeloGemini : config.modeloClaude,
   });
 });
 
@@ -103,6 +110,7 @@ btnConfirmarAnaliseIA.addEventListener("click", async () => {
   if (!textoExtraidoParaIA) return;
   const config = await obterConfiguracoes();
   const apiKey = config.provedorIA === "gemini" ? config.chaveGemini : config.chaveClaude;
+  const modelo = config.provedorIA === "gemini" ? config.modeloGemini : config.modeloClaude;
 
   areaEstimativaIA.hidden = true;
   areaProgressoIA.hidden = false;
@@ -113,6 +121,7 @@ btnConfirmarAnaliseIA.addEventListener("click", async () => {
     texto: textoExtraidoParaIA,
     promptId: selectPromptIA.value,
     provedor: config.provedorIA,
+    modelo,
     apiKey,
   });
 });
@@ -163,7 +172,7 @@ function renderizarFilaLoteIA(fila) {
     const prompt = PROMPTS_IA_PAINEL.find((p) => p.id === item.promptId);
     li.innerHTML = `
       <span>${item.numeroProcesso} — ${prompt ? prompt.titulo : item.promptId}
-        <small>(~${(item.estimativa && item.estimativa.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens, até ${FORMATADOR_USD.format((item.estimativa && item.estimativa.custoEstimadoUsd || 0) * 0.5)} com desconto de lote)</small>
+        <small>${nomeAmigavelModelo(item.modelo)} — ~${(item.estimativa && item.estimativa.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens, até ${FORMATADOR_USD.format((item.estimativa && item.estimativa.custoEstimadoUsd || 0) * 0.5)} com desconto de lote</small>
       </span>
       <button type="button" class="btn-ghost" data-remover-item="${item.id}">Remover</button>
     `;
@@ -252,6 +261,8 @@ btnAdicionarFilaIA.addEventListener("click", async () => {
     return;
   }
 
+  const config = await obterConfiguracoes();
+
   areaErrosFilaLoteIA.hidden = true;
   btnAdicionarFilaIA.disabled = true;
   const resposta = await chrome.runtime.sendMessage({
@@ -261,6 +272,7 @@ btnAdicionarFilaIA.addEventListener("click", async () => {
     movimentacao: movimentacaoParaEnviar,
     anonimizar: chkAnonimizarIA.checked,
     promptId: selectPromptIA.value,
+    modelo: config.modeloClaude,
   });
   btnAdicionarFilaIA.disabled = false;
 
@@ -308,6 +320,22 @@ const ROTULO_FASE = {
 // é configurável - é sempre aplicada, direto onde cada dropdown é
 // preenchido (handlers de UNIDADES_RELATORIO_FINALIZADO e
 // LISTAR_LOCALIZADORES_FINALIZADO mais abaixo).
+// Catálogo de modelos espelhado do MODELOS_IA_DISPONIVEIS em background.js
+// - só id/nome precisam existir aqui (os preços usados na estimativa de
+// custo ficam só no background). O primeiro de cada lista é sempre o mais
+// barato, usado como padrão.
+const MODELOS_IA_PAINEL = {
+  claude: [
+    { id: "claude-haiku-4-5", nome: "Claude Haiku 4.5 (mais barato)" },
+    { id: "claude-sonnet-5", nome: "Claude Sonnet 5" },
+    { id: "claude-opus-4-8", nome: "Claude Opus 4.8" },
+  ],
+  gemini: [
+    { id: "gemini-3.1-flash-lite", nome: "Gemini 3.1 Flash-Lite (mais barato)" },
+    { id: "gemini-3.1-pro", nome: "Gemini 3.1 Pro" },
+  ],
+};
+
 const CONFIG_PADRAO = {
   substituirSigla: true,
   separarOrgaoJuizoPorComarca: false,
@@ -315,6 +343,8 @@ const CONFIG_PADRAO = {
   provedorIA: "claude",
   chaveClaude: "",
   chaveGemini: "",
+  modeloClaude: MODELOS_IA_PAINEL.claude[0].id,
+  modeloGemini: MODELOS_IA_PAINEL.gemini[0].id,
 };
 
 function obterConfiguracoes() {
@@ -337,6 +367,21 @@ const radioConfigProvedorClaude = document.getElementById("radio-config-provedor
 const radioConfigProvedorGemini = document.getElementById("radio-config-provedor-gemini");
 const inputConfigChaveClaude = document.getElementById("config-chave-claude");
 const inputConfigChaveGemini = document.getElementById("config-chave-gemini");
+const selectConfigModeloClaude = document.getElementById("select-config-modelo-claude");
+const selectConfigModeloGemini = document.getElementById("select-config-modelo-gemini");
+
+for (const modelo of MODELOS_IA_PAINEL.claude) {
+  const option = document.createElement("option");
+  option.value = modelo.id;
+  option.textContent = modelo.nome;
+  selectConfigModeloClaude.appendChild(option);
+}
+for (const modelo of MODELOS_IA_PAINEL.gemini) {
+  const option = document.createElement("option");
+  option.value = modelo.id;
+  option.textContent = modelo.nome;
+  selectConfigModeloGemini.appendChild(option);
+}
 
 btnAbrirConfiguracoes.addEventListener("click", async () => {
   const config = await obterConfiguracoes();
@@ -347,7 +392,17 @@ btnAbrirConfiguracoes.addEventListener("click", async () => {
   radioConfigProvedorGemini.checked = config.provedorIA === "gemini";
   inputConfigChaveClaude.value = config.chaveClaude || "";
   inputConfigChaveGemini.value = config.chaveGemini || "";
+  selectConfigModeloClaude.value = config.modeloClaude || CONFIG_PADRAO.modeloClaude;
+  selectConfigModeloGemini.value = config.modeloGemini || CONFIG_PADRAO.modeloGemini;
   modalConfiguracoes.hidden = false;
+});
+
+selectConfigModeloClaude.addEventListener("change", () => {
+  salvarConfiguracao("modeloClaude", selectConfigModeloClaude.value);
+});
+
+selectConfigModeloGemini.addEventListener("change", () => {
+  salvarConfiguracao("modeloGemini", selectConfigModeloGemini.value);
 });
 
 radioConfigProvedorClaude.addEventListener("change", () => {
@@ -1326,7 +1381,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaEstimativaIA.hidden = false;
       textoEstimativaIA.textContent =
         `Tamanho estimado: ~${(est.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens de entrada ` +
-        `(modelo ${est.modelo || "-"}). Custo estimado: até ${FORMATADOR_USD.format(est.custoEstimadoUsd || 0)}. ` +
+        `(modelo ${nomeAmigavelModelo(est.modelo)}). Custo estimado: até ${FORMATADOR_USD.format(est.custoEstimadoUsd || 0)}. ` +
         `Confirme para enviar de verdade à IA.`;
     } else {
       btnAnalisarIA.disabled = false;

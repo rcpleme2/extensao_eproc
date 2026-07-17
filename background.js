@@ -1446,15 +1446,32 @@ const PROMPTS_IA = [
   },
 ];
 
-// Modelo usado em cada provedor e' fixo por enquanto (nao configuravel na
-// UI) - so' o provedor e a chave de API sao escolhidos pelo usuario.
-// Precos em USD por milhao de tokens ("MTok"); usados so' para a
-// ESTIMATIVA previa (heuristica de caracteres/4) e para o custo real
-// (calculado depois, a partir do "usage" que a propria API devolve).
-const CONFIG_MODELOS_IA = {
-  claude: { modelo: "claude-opus-4-8", precoEntradaPorMTok: 5, precoSaidaPorMTok: 25 },
-  gemini: { modelo: "gemini-2.5-pro", precoEntradaPorMTok: 1.25, precoSaidaPorMTok: 10 },
+// Catalogo de modelos escolhiveis por provedor (o usuario escolhe qual
+// usar nas configuracoes da extensao - ver "modeloClaude"/"modeloGemini"
+// em popup.js). O PRIMEIRO de cada lista e' sempre o mais barato, usado
+// como padrao. Precos em USD por milhao de tokens ("MTok"); usados so'
+// para a ESTIMATIVA previa (heuristica de caracteres/4) e para o custo
+// real (calculado depois, a partir do "usage" que a propria API devolve).
+const MODELOS_IA_DISPONIVEIS = {
+  claude: [
+    { id: "claude-haiku-4-5", nome: "Claude Haiku 4.5 (mais barato)", precoEntradaPorMTok: 1, precoSaidaPorMTok: 5 },
+    { id: "claude-sonnet-5", nome: "Claude Sonnet 5", precoEntradaPorMTok: 3, precoSaidaPorMTok: 15 },
+    { id: "claude-opus-4-8", nome: "Claude Opus 4.8", precoEntradaPorMTok: 5, precoSaidaPorMTok: 25 },
+  ],
+  gemini: [
+    { id: "gemini-3.1-flash-lite", nome: "Gemini 3.1 Flash-Lite (mais barato)", precoEntradaPorMTok: 0.25, precoSaidaPorMTok: 1.5 },
+    { id: "gemini-3.1-pro", nome: "Gemini 3.1 Pro", precoEntradaPorMTok: 2, precoSaidaPorMTok: 12 },
+  ],
 };
+
+function modeloPadrao(provedor) {
+  return (MODELOS_IA_DISPONIVEIS[provedor] || MODELOS_IA_DISPONIVEIS.claude)[0].id;
+}
+
+function obterInfoModelo(provedor, modeloId) {
+  const lista = MODELOS_IA_DISPONIVEIS[provedor] || MODELOS_IA_DISPONIVEIS.claude;
+  return lista.find((m) => m.id === modeloId) || lista[0];
+}
 
 // Heuristica grosseira (nao e' o tokenizador real de nenhum dos dois
 // provedores) so' para dar uma ideia de ordem de grandeza ANTES de chamar a
@@ -1539,7 +1556,7 @@ async function construirTextoProcessoParaIA(documentos, resolverUrl, movimentaca
 // de API vaze para qualquer script de uma pagina web); aqui e' seguro porque
 // a chave e' digitada pelo proprio usuario nas configuracoes da extensao e
 // so' e' usada para chamar a API dele mesmo.
-async function chamarClaudeAPI(apiKey, promptCompleto) {
+async function chamarClaudeAPI(apiKey, promptCompleto, modelo) {
   const resposta = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -1549,7 +1566,7 @@ async function chamarClaudeAPI(apiKey, promptCompleto) {
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({
-      model: CONFIG_MODELOS_IA.claude.modelo,
+      model: modelo || modeloPadrao("claude"),
       max_tokens: 8192,
       messages: [{ role: "user", content: promptCompleto }],
     }),
@@ -1566,8 +1583,8 @@ async function chamarClaudeAPI(apiKey, promptCompleto) {
   return { texto, tokensEntrada, tokensSaida };
 }
 
-async function chamarGeminiAPI(apiKey, promptCompleto) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG_MODELOS_IA.gemini.modelo}:generateContent?key=${encodeURIComponent(apiKey)}`;
+async function chamarGeminiAPI(apiKey, promptCompleto, modelo) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo || modeloPadrao("gemini")}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const resposta = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -1592,12 +1609,13 @@ async function chamarGeminiAPI(apiKey, promptCompleto) {
 // junto uma ESTIMATIVA de custo, sem chamar a API de IA ainda - a chamada de
 // verdade so' acontece se o usuario confirmar (fase 2, "ANALISAR_IA_ENVIAR"),
 // depois de ver a estimativa.
-async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, aoProgredir) {
+async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, modelo, aoProgredir) {
   if (aoProgredir) aoProgredir("Extraindo o conteúdo dos documentos selecionados...");
   const obterUrlResolvida = criarResolvedorUrlDocumento();
   const texto = await construirTextoProcessoParaIA(documentos, obterUrlResolvida, movimentacao, anonimizar);
 
-  const precos = CONFIG_MODELOS_IA[provedor] || CONFIG_MODELOS_IA.claude;
+  const modeloEscolhido = modelo || modeloPadrao(provedor);
+  const precos = obterInfoModelo(provedor, modeloEscolhido);
   const tokensEntradaEstimados = estimarTokensPorCaracteres(texto) + estimarTokensPorCaracteres(
     PROMPTS_IA.map((p) => p.texto).join("")
   );
@@ -1611,7 +1629,7 @@ async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, p
     texto,
     estimativa: {
       provedor,
-      modelo: precos.modelo,
+      modelo: modeloEscolhido,
       tokensEntradaEstimados,
       custoEstimadoUsd,
     },
@@ -1629,15 +1647,16 @@ function montarPromptCompleto(texto, promptId) {
 
 // Fase 2: chama a API do provedor selecionado, devolvendo tambem o custo
 // REAL (calculado a partir do "usage" que a propria resposta da API traz).
-async function executarAnaliseIA(texto, promptId, provedor, apiKey) {
+async function executarAnaliseIA(texto, promptId, provedor, modelo, apiKey) {
   if (!apiKey) throw new Error(`Nenhuma chave de API configurada para "${provedor}". Configure-a nas configurações da extensão.`);
   const promptCompleto = montarPromptCompleto(texto, promptId);
+  const modeloEscolhido = modelo || modeloPadrao(provedor);
 
   const resultado = provedor === "gemini"
-    ? await chamarGeminiAPI(apiKey, promptCompleto)
-    : await chamarClaudeAPI(apiKey, promptCompleto);
+    ? await chamarGeminiAPI(apiKey, promptCompleto, modeloEscolhido)
+    : await chamarClaudeAPI(apiKey, promptCompleto, modeloEscolhido);
 
-  const precos = CONFIG_MODELOS_IA[provedor] || CONFIG_MODELOS_IA.claude;
+  const precos = obterInfoModelo(provedor, modeloEscolhido);
   const custoRealUsd = resultado.tokensEntrada != null && resultado.tokensSaida != null
     ? estimarCustoUsd(resultado.tokensEntrada, resultado.tokensSaida, precos)
     : null;
@@ -1696,13 +1715,15 @@ function obterChaveClaudeConfigurada() {
 // adiciona um novo item a' fila, ja' com o texto pronto para ser enviado
 // depois. Devolve a fila atualizada inteira, para o painel so' precisar
 // re-renderizar a lista.
-async function adicionarItemFilaLoteIA(numeroProcesso, documentos, movimentacao, anonimizar, promptId) {
-  const { texto, estimativa } = await extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, "claude", () => {});
+async function adicionarItemFilaLoteIA(numeroProcesso, documentos, movimentacao, anonimizar, promptId, modelo) {
+  const modeloEscolhido = modelo || modeloPadrao("claude");
+  const { texto, estimativa } = await extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, "claude", modeloEscolhido, () => {});
 
   const item = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     numeroProcesso,
     promptId,
+    modelo: modeloEscolhido,
     texto,
     estimativa,
     criadoEm: Date.now(),
@@ -1731,7 +1752,7 @@ async function enviarLoteIA(apiKey) {
   const requests = fila.map((item) => ({
     custom_id: item.id,
     params: {
-      model: CONFIG_MODELOS_IA.claude.modelo,
+      model: item.modelo || modeloPadrao("claude"),
       max_tokens: 8192,
       messages: [{ role: "user", content: montarPromptCompleto(item.texto, item.promptId) }],
     },
@@ -8216,6 +8237,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
       mensagem.movimentacao,
       !!mensagem.anonimizar,
       mensagem.provedor,
+      mensagem.modelo,
       (texto) => {
         chrome.runtime.sendMessage({ tipo: "PROGRESSO_ANALISE_IA", fase: "extraindo", texto }).catch(() => {});
       }
@@ -8239,7 +8261,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
 
   if (mensagem && mensagem.tipo === "ANALISAR_IA_ENVIAR") {
-    executarAnaliseIA(mensagem.texto, mensagem.promptId, mensagem.provedor, mensagem.apiKey)
+    executarAnaliseIA(mensagem.texto, mensagem.promptId, mensagem.provedor, mensagem.modelo, mensagem.apiKey)
       .then((resultado) => {
         chrome.runtime
           .sendMessage({ tipo: "ANALISE_IA_RESULTADO", ok: true, ...resultado })
@@ -8264,7 +8286,8 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
       mensagem.documentos,
       mensagem.movimentacao,
       !!mensagem.anonimizar,
-      mensagem.promptId
+      mensagem.promptId,
+      mensagem.modelo
     )
       .then((fila) => sendResponse({ ok: true, fila }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));

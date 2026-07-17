@@ -530,7 +530,7 @@ Os resultados dos lotes ficam disponíveis por 29 dias na Claude — depois
 disso, um lote muito antigo que ainda não tenha sido verificado pode não
 conseguir mais recuperar os resultados.
 
-### Configuração (provedor e chaves de API)
+### Configuração (provedor, modelo e chaves de API)
 
 Nas configurações da extensão (ícone de engrenagem), na seção "Análise com
 IA":
@@ -542,6 +542,17 @@ IA":
   navegador) e só são enviadas para a API do próprio provedor ao chamar
   "Analisar com IA" — nunca para nenhum servidor da extensão (que não
   existe).
+- Escolha o **modelo** de cada provedor, num select logo abaixo da
+  respectiva chave:
+  - Claude: Haiku 4.5 (padrão, mais barato), Sonnet 5 ou Opus 4.8.
+  - Gemini: Flash-Lite 3.1 (padrão, mais barato) ou Pro 3.1.
+
+  O modelo escolhido é o mesmo usado tanto na análise imediata quanto ao
+  adicionar itens à fila em lote (que sempre usa o modelo Claude
+  configurado, já que o lote só funciona com esse provedor — ver abaixo).
+  O padrão de cada provedor é sempre o modelo **mais barato** da lista;
+  modelos mais caros tendem a produzir relatórios mais elaborados, mas
+  custam mais por chamada.
 
 Sem uma chave configurada para o provedor escolhido, "Confirmar e enviar"
 retorna um erro pedindo para configurá-la.
