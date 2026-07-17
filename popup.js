@@ -314,6 +314,18 @@ function renderizarLotesEnviadosIA(lotes) {
           `;
         })
         .join("");
+    } else {
+      // Enquanto o lote ainda esta' "processando...", nao ha' resultado
+      // nenhum pra mostrar ainda - mas os numeros de processo (ja'
+      // extraidos no momento de "Adicionar a fila em lote") ficam
+      // guardados no proprio lote desde o envio, entao da' pra mostrar
+      // AGORA a quais processos esse lote se refere, sem precisar esperar
+      // a resposta da IA terminar.
+      const listaProcessos = (lote.itens || []).map((item) => `<li>${item.numeroProcesso}</li>`).join("");
+      resultadosHtml = `
+        <p class="legenda-opcoes">Processos neste lote:</p>
+        <ul class="lista-ia-simples">${listaProcessos}</ul>
+      `;
     }
 
     li.innerHTML = `

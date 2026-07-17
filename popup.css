@@ -531,6 +531,18 @@ button {
   border-radius: var(--raio);
 }
 
+/* Item "cru" (sem classe própria, ex.: lista de números de processo de um
+   lote ainda processando) - mesmo espaçamento/separador das demais listas
+   do painel, sem herdar o layout flex dos itens com botões. */
+.lista-ia-simples > li:not([class]) {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--cor-borda-suave);
+}
+
+.lista-ia-simples > li:not([class]):last-child {
+  border-bottom: none;
+}
+
 .item-fila-lote-ia {
   display: flex;
   align-items: flex-start;

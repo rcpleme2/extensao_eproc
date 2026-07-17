@@ -525,7 +525,11 @@ Fluxo:
    ("processando..." ou a contagem de concluídos/com erro) e um botão
    **"Verificar agora"** para checar manualmente sem esperar a checagem
    automática (a extensão também verifica sozinha a cada 10 minutos,
-   mesmo com o painel fechado, via `chrome.alarms`).
+   mesmo com o painel fechado, via `chrome.alarms`). **Mesmo enquanto
+   ainda está "processando..."**, dá pra ver a quais processos aquele
+   lote se refere — a lista de números de processo (já extraídos no
+   momento de "Adicionar à fila em lote") aparece ali embaixo do status,
+   sem precisar esperar a resposta da IA terminar.
 5. Quando o lote termina, cada processo do lote aparece **separado**,
    identificado pelo número do processo, com sua própria resposta num
    campo de texto e um botão "Copiar" individual — nenhuma resposta fica
