@@ -1550,6 +1550,29 @@ async function construirTextoProcessoParaIA(documentos, resolverUrl, movimentaca
   return anonimizar ? anonimizarTexto(corpo) : corpo;
 }
 
+// fetch() rejeita com um TypeError generico ("Failed to fetch" / "NetworkError
+// when attempting to fetch resource", sem mais detalhe nenhum - por design do
+// navegador, pra nao vazar informacao de rede pra scripts) sempre que a
+// requisicao nem chega a sair: host ainda nao liberado em host_permissions
+// (comum logo depois de adicionar um host novo ao manifest.json, ate' a
+// extensao ser RECARREGADA em chrome://extensions - o icone de recarregar no
+// card da extensao; so' salvar o arquivo nao e' suficiente), sem internet, ou
+// o host realmente fora do ar. Troca essa mensagem generica por uma que
+// aponta a causa mais provavel, mantendo a mensagem original do navegador
+// entre parenteses para quem for investigar mais a fundo.
+async function fetchComDiagnostico(url, opcoes, nomeServico) {
+  try {
+    return await fetch(url, opcoes);
+  } catch (e) {
+    console.error(LOG_MD, `Falha de rede chamando ${nomeServico} (${url}):`, e);
+    throw new Error(
+      `Falha de rede ao chamar ${nomeServico} ("${e && e.message}"). Se você acabou de instalar ou atualizar a extensão, ` +
+        `recarregue-a em chrome://extensions (ícone de recarregar no card da extensão) e tente de novo - alterações de ` +
+        `permissão só valem depois disso. Se persistir, confira sua conexão com a internet.`
+    );
+  }
+}
+
 // Chamada direta pela extensao (sem backend proprio) - por isso precisa do
 // cabecalho "anthropic-dangerous-direct-browser-access": a Anthropic bloqueia
 // por padrao chamadas feitas direto do navegador (para evitar que uma chave
@@ -1557,7 +1580,7 @@ async function construirTextoProcessoParaIA(documentos, resolverUrl, movimentaca
 // a chave e' digitada pelo proprio usuario nas configuracoes da extensao e
 // so' e' usada para chamar a API dele mesmo.
 async function chamarClaudeAPI(apiKey, promptCompleto, modelo) {
-  const resposta = await fetch("https://api.anthropic.com/v1/messages", {
+  const resposta = await fetchComDiagnostico("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -1570,7 +1593,7 @@ async function chamarClaudeAPI(apiKey, promptCompleto, modelo) {
       max_tokens: 8192,
       messages: [{ role: "user", content: promptCompleto }],
     }),
-  });
+  }, "API da Claude");
 
   const dados = await resposta.json().catch(() => null);
   if (!resposta.ok) {
@@ -1585,11 +1608,11 @@ async function chamarClaudeAPI(apiKey, promptCompleto, modelo) {
 
 async function chamarGeminiAPI(apiKey, promptCompleto, modelo) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo || modeloPadrao("gemini")}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const resposta = await fetch(url, {
+  const resposta = await fetchComDiagnostico(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ contents: [{ parts: [{ text: promptCompleto }] }] }),
-  });
+  }, "API do Gemini");
 
   const dados = await resposta.json().catch(() => null);
   if (!resposta.ok) {
@@ -1758,7 +1781,7 @@ async function enviarLoteIA(apiKey) {
     },
   }));
 
-  const resposta = await fetch("https://api.anthropic.com/v1/messages/batches", {
+  const resposta = await fetchComDiagnostico("https://api.anthropic.com/v1/messages/batches", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -1767,7 +1790,7 @@ async function enviarLoteIA(apiKey) {
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({ requests }),
-  });
+  }, "API de lotes da Claude");
 
   const dados = await resposta.json().catch(() => null);
   if (!resposta.ok) {
@@ -1803,7 +1826,7 @@ async function consultarStatusLoteIA(batchId, apiKey) {
     "anthropic-dangerous-direct-browser-access": "true",
   };
 
-  const resposta = await fetch(`https://api.anthropic.com/v1/messages/batches/${batchId}`, { headers });
+  const resposta = await fetchComDiagnostico(`https://api.anthropic.com/v1/messages/batches/${batchId}`, { headers }, "API de lotes da Claude");
   const dados = await resposta.json().catch(() => null);
   if (!resposta.ok) {
     throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao consultar o lote.`);
@@ -1813,7 +1836,7 @@ async function consultarStatusLoteIA(batchId, apiKey) {
     return { status: "in_progress", contagens: dados.request_counts || null };
   }
 
-  const respostaResultados = await fetch(dados.results_url, { headers });
+  const respostaResultados = await fetchComDiagnostico(dados.results_url, { headers }, "API de lotes da Claude (resultados)");
   const textoJsonl = await respostaResultados.text();
   const linhas = textoJsonl.split("\n").map((l) => l.trim()).filter(Boolean);
 
