@@ -558,16 +558,35 @@ IA":
 Sem uma chave configurada para o provedor escolhido, "Confirmar e enviar"
 retorna um erro pedindo para configurá-la.
 
-### Prompt cadastrado: "Análise inicial - família"
+### Gerenciar prompts (editar, excluir, cadastrar)
 
-Único prompt disponível por enquanto. É sempre **apensado ao final** do
-conteúdo do processo (documentos selecionados + movimentação, quando
-incluída) — ou seja, a IA recebe primeiro o conteúdo do processo e, depois
-dele, as instruções do prompt. Pede um relatório no formato FIRAC+ (fatos,
-pedidos, tutela de urgência) com foco em direito de família (guarda,
-alimentos, visitas, partilha), linguagem que evita termos como "menor" em
-favor de "criança"/"adolescente", e perguntas adicionais ao final (advogado
-dativo, tabela de gastos, conta bancária, idade dos menores envolvidos).
+O texto de cada prompt é sempre **apensado ao final** do conteúdo do
+processo (documentos selecionados + movimentação, quando incluída) — ou
+seja, a IA recebe primeiro o conteúdo do processo e, depois dele, as
+instruções do prompt.
+
+Nas configurações da extensão, o botão **"Gerenciar prompts de análise"**
+(na seção "Análise com IA") abre uma tela para:
+
+- **Cadastrar** um novo prompt (título + texto).
+- **Editar** o título/texto de qualquer prompt já cadastrado, inclusive o
+  padrão da extensão.
+- **Excluir** qualquer prompt — exceto o último restante (é preciso
+  cadastrar outro antes de poder excluir o único que sobrou, já que a
+  etapa "escolher o tipo de prompt" da análise sempre precisa de ao menos
+  uma opção).
+
+O `<select>` de "Tipo de prompt" na análise (imediata e em lote) reflete
+essa lista automaticamente, sem precisar reabrir o painel.
+
+**Prompt padrão de fábrica: "Análise inicial - família"** — cadastrado
+automaticamente na primeira vez que a extensão roda (mas editável/
+excluível como qualquer outro depois disso). Pede um relatório no formato
+FIRAC+ (fatos, pedidos, tutela de urgência) com foco em direito de família
+(guarda, alimentos, visitas, partilha), linguagem que evita termos como
+"menor" em favor de "criança"/"adolescente", e perguntas adicionais ao
+final (advogado dativo, tabela de gastos, conta bancária, idade dos
+menores envolvidos).
 
 ### Custos e privacidade
 
@@ -601,6 +620,20 @@ Se o erro persistir depois de recarregar, confira sua conexão com a
 internet e, no console do service worker (`chrome://extensions` → link
 "service worker" da extensão → Inspecionar), procure por logs
 `[eproc-md] Falha de rede chamando ...` para mais detalhes.
+
+**Se isso acontece só com UM provedor** (ex.: Gemini funciona normalmente,
+mas Claude sempre falha com esse erro, ou vice-versa) — descarte o motivo
+acima, já que os `host_permissions` são os mesmos para os dois. Isso é um
+forte indício de que a rede/firewall da instituição está bloqueando
+especificamente o domínio daquele provedor (`api.anthropic.com` ou
+`generativelanguage.googleapis.com`), algo comum em redes corporativas ou
+de órgãos públicos que já liberam domínios do Google (usados por diversos
+outros serviços), mas ainda não têm domínios de IA mais novos, como o da
+Anthropic, na lista de liberação. Para confirmar: abra
+`https://api.anthropic.com` (ou o domínio do outro provedor) direto numa
+aba do navegador - se a página também não carregar ali (erro de conexão,
+não uma página de erro 404 da própria Anthropic), o problema é da rede, e
+o suporte de TI da instituição precisa liberar esse domínio especificamente.
 
 ## Corregedoria
 

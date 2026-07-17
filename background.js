@@ -1404,14 +1404,19 @@ async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProces
 // usuario no painel (que podem ser um subconjunto de todos os documentos do
 // processo), e a movimentacao so' entra se o usuario tiver marcado a opcao.
 //
-// Cadastro de prompts: por enquanto so' um ("Análise inicial - família"),
-// mas a estrutura (lista de objetos {id, titulo, texto}) e' pensada para
-// crescer sem precisar mudar o resto do fluxo - o texto de cada prompt e'
-// sempre APENSADO ao final do conteudo do processo (documentos + eventual
-// movimentacao), nunca antes.
-const PROMPTS_IA = [
-  {
-    id: "analise-inicial-familia",
+// Cadastro de prompts: guardado em chrome.storage.local (chave
+// "promptsIA"), editavel/excluivel/cadastravel pelo usuario nas
+// configuracoes da extensao - a lista de objetos {id, titulo, texto} e'
+// carregada sob demanda via "obterPromptsIA()" em vez de uma constante
+// fixa. O texto de cada prompt e' sempre APENSADO ao final do conteudo do
+// processo (documentos + eventual movimentacao), nunca antes. Na primeira
+// vez que a extensao roda (storage ainda vazio), a lista e' semeada com o
+// prompt abaixo ("Análise inicial - família") - que continua editavel e
+// excluivel como qualquer outro depois disso.
+const CHAVE_PROMPTS_IA = "promptsIA";
+
+const PROMPT_PADRAO_ANALISE_FAMILIA = {
+  id: "analise-inicial-familia",
     titulo: "Análise inicial - família",
     texto:
       'Persona: Aja como um juiz de direito especialista em direito de família e sucessões, respondendo com tom profissional e de autoridade.\n\n' +
@@ -1443,8 +1448,60 @@ const PROMPTS_IA = [
       '    Foi apresentada uma tabela de gastos ou rendimentos? Se sim, elabore uma tabela detalhada com as despesas mês a mês.\n\n' +
       '    Foi indicada conta bancária para depósito dos alimentos? Informe a conta e CPF do titular.\n\n' +
       '    Qual o nome e a idade dos menores envolvidos?',
-  },
-];
+};
+
+function obterPromptsIA() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [CHAVE_PROMPTS_IA]: null }, (itens) => {
+      const lista = itens[CHAVE_PROMPTS_IA];
+      resolve(Array.isArray(lista) && lista.length > 0 ? lista : [PROMPT_PADRAO_ANALISE_FAMILIA]);
+    });
+  });
+}
+
+function salvarPromptsIA(lista) {
+  return new Promise((resolve) => chrome.storage.local.set({ [CHAVE_PROMPTS_IA]: lista }, resolve));
+}
+
+// Cadastra (sem "id") ou atualiza (com "id" existente) um prompt. Devolve
+// a lista inteira atualizada, para o painel so' precisar re-renderizar.
+async function salvarOuAtualizarPromptIA(prompt) {
+  const titulo = (prompt && prompt.titulo || "").trim();
+  const texto = (prompt && prompt.texto || "").trim();
+  if (!titulo) throw new Error("Informe um título para o prompt.");
+  if (!texto) throw new Error("Informe o texto do prompt.");
+
+  const lista = await obterPromptsIA();
+
+  if (prompt.id) {
+    const item = lista.find((p) => p.id === prompt.id);
+    if (!item) throw new Error("Prompt não encontrado (pode ter sido excluído).");
+    item.titulo = titulo;
+    item.texto = texto;
+  } else {
+    lista.push({
+      id: `prompt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      titulo,
+      texto,
+    });
+  }
+
+  await salvarPromptsIA(lista);
+  return lista;
+}
+
+// Nunca deixa a lista vazia - sem nenhum prompt cadastrado, a etapa
+// "escolher o tipo de prompt" do fluxo de analise (imediata ou em lote)
+// ficaria sem nenhuma opcao para escolher.
+async function removerPromptIA(id) {
+  const lista = await obterPromptsIA();
+  if (lista.length <= 1) {
+    throw new Error("Não é possível excluir o último prompt cadastrado - cadastre outro antes de excluir este.");
+  }
+  const listaAtualizada = lista.filter((p) => p.id !== id);
+  await salvarPromptsIA(listaAtualizada);
+  return listaAtualizada;
+}
 
 // Catalogo de modelos escolhiveis por provedor (o usuario escolhe qual
 // usar nas configuracoes da extensao - ver "modeloClaude"/"modeloGemini"
@@ -1565,10 +1622,14 @@ async function fetchComDiagnostico(url, opcoes, nomeServico) {
     return await fetch(url, opcoes);
   } catch (e) {
     console.error(LOG_MD, `Falha de rede chamando ${nomeServico} (${url}):`, e);
+    const host = new URL(url).host;
     throw new Error(
       `Falha de rede ao chamar ${nomeServico} ("${e && e.message}"). Se você acabou de instalar ou atualizar a extensão, ` +
         `recarregue-a em chrome://extensions (ícone de recarregar no card da extensão) e tente de novo - alterações de ` +
-        `permissão só valem depois disso. Se persistir, confira sua conexão com a internet.`
+        `permissão só valem depois disso. Se isso acontece só com esse provedor (outro provedor de IA funciona normalmente), ` +
+        `é bem provável que a rede/firewall da instituição esteja bloqueando "${host}" especificamente - tente abrir ` +
+        `https://${host} direto numa aba do navegador: se também não carregar lá, confirme com o suporte de TI se esse ` +
+        `endereço pode ser liberado. Se persistir sem explicação, confira sua conexão com a internet.`
     );
   }
 }
@@ -1632,15 +1693,17 @@ async function chamarGeminiAPI(apiKey, promptCompleto, modelo) {
 // junto uma ESTIMATIVA de custo, sem chamar a API de IA ainda - a chamada de
 // verdade so' acontece se o usuario confirmar (fase 2, "ANALISAR_IA_ENVIAR"),
 // depois de ver a estimativa.
-async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, modelo, aoProgredir) {
+async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, modelo, promptId, aoProgredir) {
   if (aoProgredir) aoProgredir("Extraindo o conteúdo dos documentos selecionados...");
   const obterUrlResolvida = criarResolvedorUrlDocumento();
   const texto = await construirTextoProcessoParaIA(documentos, obterUrlResolvida, movimentacao, anonimizar);
 
   const modeloEscolhido = modelo || modeloPadrao(provedor);
   const precos = obterInfoModelo(provedor, modeloEscolhido);
+  const prompts = await obterPromptsIA();
+  const promptEscolhido = prompts.find((p) => p.id === promptId) || prompts[0];
   const tokensEntradaEstimados = estimarTokensPorCaracteres(texto) + estimarTokensPorCaracteres(
-    PROMPTS_IA.map((p) => p.texto).join("")
+    promptEscolhido ? promptEscolhido.texto : ""
   );
   // Sem ainda saber o tamanho da resposta, usa a propria entrada como
   // aproximacao grosseira do tamanho da saida (relatorios FIRAC costumam
@@ -1662,9 +1725,10 @@ async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, p
 // Apensa o texto do prompt escolhido ao final do texto do processo -
 // sempre nessa ordem (conteudo do processo primeiro, prompt depois),
 // compartilhado entre o envio imediato e o envio em lote.
-function montarPromptCompleto(texto, promptId) {
-  const prompt = PROMPTS_IA.find((p) => p.id === promptId);
-  if (!prompt) throw new Error("Tipo de prompt não encontrado.");
+async function montarPromptCompleto(texto, promptId) {
+  const prompts = await obterPromptsIA();
+  const prompt = prompts.find((p) => p.id === promptId);
+  if (!prompt) throw new Error("Tipo de prompt não encontrado (pode ter sido excluído nas configurações).");
   return `${texto}\n\n---\n\n${prompt.texto}`;
 }
 
@@ -1672,7 +1736,7 @@ function montarPromptCompleto(texto, promptId) {
 // REAL (calculado a partir do "usage" que a propria resposta da API traz).
 async function executarAnaliseIA(texto, promptId, provedor, modelo, apiKey) {
   if (!apiKey) throw new Error(`Nenhuma chave de API configurada para "${provedor}". Configure-a nas configurações da extensão.`);
-  const promptCompleto = montarPromptCompleto(texto, promptId);
+  const promptCompleto = await montarPromptCompleto(texto, promptId);
   const modeloEscolhido = modelo || modeloPadrao(provedor);
 
   const resultado = provedor === "gemini"
@@ -1740,7 +1804,7 @@ function obterChaveClaudeConfigurada() {
 // re-renderizar a lista.
 async function adicionarItemFilaLoteIA(numeroProcesso, documentos, movimentacao, anonimizar, promptId, modelo) {
   const modeloEscolhido = modelo || modeloPadrao("claude");
-  const { texto, estimativa } = await extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, "claude", modeloEscolhido, () => {});
+  const { texto, estimativa } = await extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, "claude", modeloEscolhido, promptId, () => {});
 
   const item = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1772,14 +1836,17 @@ async function enviarLoteIA(apiKey) {
   const fila = await obterFilaLoteIA();
   if (fila.length === 0) throw new Error("A fila está vazia - adicione ao menos um processo antes de enviar.");
 
-  const requests = fila.map((item) => ({
-    custom_id: item.id,
-    params: {
-      model: item.modelo || modeloPadrao("claude"),
-      max_tokens: 8192,
-      messages: [{ role: "user", content: montarPromptCompleto(item.texto, item.promptId) }],
-    },
-  }));
+  const requests = [];
+  for (const item of fila) {
+    requests.push({
+      custom_id: item.id,
+      params: {
+        model: item.modelo || modeloPadrao("claude"),
+        max_tokens: 8192,
+        messages: [{ role: "user", content: await montarPromptCompleto(item.texto, item.promptId) }],
+      },
+    });
+  }
 
   const resposta = await fetchComDiagnostico("https://api.anthropic.com/v1/messages/batches", {
     method: "POST",
@@ -8261,6 +8328,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
       !!mensagem.anonimizar,
       mensagem.provedor,
       mensagem.modelo,
+      mensagem.promptId,
       (texto) => {
         chrome.runtime.sendMessage({ tipo: "PROGRESSO_ANALISE_IA", fase: "extraindo", texto }).catch(() => {});
       }
@@ -8320,6 +8388,27 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "IA_LOTE_REMOVER") {
     removerItemFilaLoteIA(mensagem.id)
       .then((fila) => sendResponse({ ok: true, fila }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "PROMPTS_IA_LISTAR") {
+    obterPromptsIA()
+      .then((prompts) => sendResponse({ ok: true, prompts }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "PROMPTS_IA_SALVAR") {
+    salvarOuAtualizarPromptIA(mensagem.prompt)
+      .then((prompts) => sendResponse({ ok: true, prompts }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "PROMPTS_IA_REMOVER") {
+    removerPromptIA(mensagem.id)
+      .then((prompts) => sendResponse({ ok: true, prompts }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
     return true;
   }

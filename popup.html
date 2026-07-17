@@ -489,9 +489,42 @@
           Modelo do Gemini
           <select id="select-config-modelo-gemini"></select>
         </label>
+        <button type="button" id="btn-abrir-gerenciar-prompts" class="btn-secundario">Gerenciar prompts de análise</button>
       </div>
       <div class="modal-botoes">
         <button id="modal-config-fechar" type="button" class="btn-secundario">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-gerenciar-prompts" class="modal-overlay" hidden>
+    <div class="modal-caixa">
+      <p class="modal-texto">Prompts de análise com IA</p>
+
+      <ul id="lista-prompts-ia" class="lista-ia-simples"></ul>
+
+      <hr class="separador-subsecao" />
+
+      <p class="legenda-opcoes" id="titulo-form-prompt">Novo prompt</p>
+      <div class="opcoes">
+        <label class="campo-config-ia">
+          Título
+          <input type="text" id="input-prompt-titulo" placeholder='Ex.: "Análise inicial - família"' />
+        </label>
+        <label class="campo-config-ia">
+          Texto do prompt (apensado ao final do conteúdo do processo)
+          <textarea id="input-prompt-texto" class="campo-resultado-ia" rows="10"></textarea>
+        </label>
+        <div class="linha-formatos">
+          <button type="button" id="btn-salvar-prompt" class="btn">Salvar</button>
+          <button type="button" id="btn-cancelar-edicao-prompt" class="btn-secundario" hidden>Cancelar edição</button>
+        </div>
+      </div>
+
+      <div id="area-erros-prompt" class="erros" hidden></div>
+
+      <div class="modal-botoes">
+        <button id="modal-gerenciar-prompts-fechar" type="button" class="btn-secundario">Fechar</button>
       </div>
     </div>
   </div>

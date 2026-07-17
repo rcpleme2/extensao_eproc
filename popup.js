@@ -54,15 +54,32 @@ const btnEnviarLoteIA = document.getElementById("btn-enviar-lote-ia");
 const areaLotesEnviadosVazio = document.getElementById("area-lotes-enviados-vazio");
 const listaLotesEnviadosIA = document.getElementById("lista-lotes-enviados-ia");
 
-// Cadastro de prompts espelhado do PROMPTS_IA em background.js - só o
-// id/título precisam existir aqui (o texto completo do prompt fica só no
-// background, que é quem de fato monta a chamada à API).
-const PROMPTS_IA_PAINEL = [{ id: "analise-inicial-familia", titulo: "Análise inicial - família" }];
-for (const prompt of PROMPTS_IA_PAINEL) {
-  const option = document.createElement("option");
-  option.value = prompt.id;
-  option.textContent = prompt.titulo;
-  selectPromptIA.appendChild(option);
+// Cadastro de prompts: guardado em chrome.storage.local pelo background
+// (que é quem de fato monta a chamada à API) - o painel só mantém uma
+// cópia local (id/título/texto) para preencher o <select> e o formulário
+// de gerenciar prompts, carregada no início e atualizada a cada
+// cadastro/edição/exclusão.
+let PROMPTS_IA_PAINEL = [];
+
+function atualizarSelectPromptIA() {
+  const valorAtual = selectPromptIA.value;
+  selectPromptIA.innerHTML = "";
+  for (const prompt of PROMPTS_IA_PAINEL) {
+    const option = document.createElement("option");
+    option.value = prompt.id;
+    option.textContent = prompt.titulo;
+    selectPromptIA.appendChild(option);
+  }
+  if (PROMPTS_IA_PAINEL.some((p) => p.id === valorAtual)) {
+    selectPromptIA.value = valorAtual;
+  }
+}
+
+async function atualizarPromptsIA() {
+  const resposta = await chrome.runtime.sendMessage({ tipo: "PROMPTS_IA_LISTAR" });
+  PROMPTS_IA_PAINEL = (resposta && resposta.prompts) || [];
+  atualizarSelectPromptIA();
+  renderizarListaPromptsIA();
 }
 
 const FORMATADOR_USD = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", minimumFractionDigits: 4 });
@@ -109,6 +126,7 @@ btnAnalisarIA.addEventListener("click", async () => {
     anonimizar: chkAnonimizarIA.checked,
     provedor: config.provedorIA,
     modelo: config.provedorIA === "gemini" ? config.modeloGemini : config.modeloClaude,
+    promptId: selectPromptIA.value,
   });
 });
 
@@ -445,6 +463,116 @@ chkConfigAnexarMagistradoConclusos.addEventListener("change", () => {
 
 modalConfigFechar.addEventListener("click", () => {
   modalConfiguracoes.hidden = true;
+});
+
+// ---- Gerenciar prompts de análise (editar, excluir, cadastrar) ----
+const btnAbrirGerenciarPrompts = document.getElementById("btn-abrir-gerenciar-prompts");
+const modalGerenciarPrompts = document.getElementById("modal-gerenciar-prompts");
+const modalGerenciarPromptsFechar = document.getElementById("modal-gerenciar-prompts-fechar");
+const listaPromptsIA = document.getElementById("lista-prompts-ia");
+const tituloFormPrompt = document.getElementById("titulo-form-prompt");
+const inputPromptTitulo = document.getElementById("input-prompt-titulo");
+const inputPromptTexto = document.getElementById("input-prompt-texto");
+const btnSalvarPrompt = document.getElementById("btn-salvar-prompt");
+const btnCancelarEdicaoPrompt = document.getElementById("btn-cancelar-edicao-prompt");
+const areaErrosPrompt = document.getElementById("area-erros-prompt");
+
+let promptEmEdicaoId = null;
+
+function limparFormularioPrompt() {
+  promptEmEdicaoId = null;
+  tituloFormPrompt.textContent = "Novo prompt";
+  inputPromptTitulo.value = "";
+  inputPromptTexto.value = "";
+  btnCancelarEdicaoPrompt.hidden = true;
+  areaErrosPrompt.hidden = true;
+}
+
+function renderizarListaPromptsIA() {
+  listaPromptsIA.innerHTML = "";
+  for (const prompt of PROMPTS_IA_PAINEL) {
+    const li = document.createElement("li");
+    li.className = "item-fila-lote-ia";
+    li.innerHTML = `
+      <span>${prompt.titulo}</span>
+      <span>
+        <button type="button" class="btn-ghost" data-editar-prompt="${prompt.id}">Editar</button>
+        <button type="button" class="btn-ghost" data-excluir-prompt="${prompt.id}">Excluir</button>
+      </span>
+    `;
+    listaPromptsIA.appendChild(li);
+  }
+
+  listaPromptsIA.querySelectorAll("[data-editar-prompt]").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      const prompt = PROMPTS_IA_PAINEL.find((p) => p.id === botao.dataset.editarPrompt);
+      if (!prompt) return;
+      promptEmEdicaoId = prompt.id;
+      tituloFormPrompt.textContent = `Editando: ${prompt.titulo}`;
+      inputPromptTitulo.value = prompt.titulo;
+      inputPromptTexto.value = prompt.texto;
+      btnCancelarEdicaoPrompt.hidden = false;
+      areaErrosPrompt.hidden = true;
+    });
+  });
+
+  listaPromptsIA.querySelectorAll("[data-excluir-prompt]").forEach((botao) => {
+    botao.addEventListener("click", async () => {
+      const prompt = PROMPTS_IA_PAINEL.find((p) => p.id === botao.dataset.excluirPrompt);
+      if (!prompt) return;
+      if (!confirm(`Excluir o prompt "${prompt.titulo}"? Essa ação não pode ser desfeita.`)) return;
+
+      const resposta = await chrome.runtime.sendMessage({ tipo: "PROMPTS_IA_REMOVER", id: prompt.id });
+      if (resposta && resposta.ok) {
+        PROMPTS_IA_PAINEL = resposta.prompts;
+        atualizarSelectPromptIA();
+        renderizarListaPromptsIA();
+        if (promptEmEdicaoId === prompt.id) limparFormularioPrompt();
+      } else {
+        areaErrosPrompt.hidden = false;
+        areaErrosPrompt.textContent = (resposta && resposta.erro) || "Falha ao excluir o prompt.";
+      }
+    });
+  });
+}
+
+btnAbrirGerenciarPrompts.addEventListener("click", async () => {
+  limparFormularioPrompt();
+  await atualizarPromptsIA();
+  modalGerenciarPrompts.hidden = false;
+});
+
+btnSalvarPrompt.addEventListener("click", async () => {
+  const titulo = inputPromptTitulo.value.trim();
+  const texto = inputPromptTexto.value.trim();
+  if (!titulo || !texto) {
+    areaErrosPrompt.hidden = false;
+    areaErrosPrompt.textContent = "Preencha o título e o texto do prompt.";
+    return;
+  }
+
+  const resposta = await chrome.runtime.sendMessage({
+    tipo: "PROMPTS_IA_SALVAR",
+    prompt: { id: promptEmEdicaoId, titulo, texto },
+  });
+
+  if (resposta && resposta.ok) {
+    PROMPTS_IA_PAINEL = resposta.prompts;
+    atualizarSelectPromptIA();
+    renderizarListaPromptsIA();
+    limparFormularioPrompt();
+  } else {
+    areaErrosPrompt.hidden = false;
+    areaErrosPrompt.textContent = (resposta && resposta.erro) || "Falha ao salvar o prompt.";
+  }
+});
+
+btnCancelarEdicaoPrompt.addEventListener("click", () => {
+  limparFormularioPrompt();
+});
+
+modalGerenciarPromptsFechar.addEventListener("click", () => {
+  modalGerenciarPrompts.hidden = true;
 });
 
 let estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [], movimentacaoIncluida: true };
@@ -2011,4 +2139,5 @@ listaCardsPerfil.querySelectorAll(".card").forEach((card) => {
   });
 });
 
+atualizarPromptsIA();
 atualizarListaCompletaIA();

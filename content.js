@@ -102,15 +102,14 @@ function destacarAncoras(anchors) {
 const CLASSE_CHECKBOX_DOCUMENTO = "eproc-exportador-checkbox-doc";
 
 function garantirCheckboxDocumento(anchorEl, idDoc) {
-  // A celula do documento normalmente ja vem com varios iconezinhos
-  // nativos do eproc colados antes do link (sigilo, recurso, etc.) -
-  // inserir o checkbox logo antes do link (como na primeira versao) fazia
-  // ele se perder visualmente no meio desse grupo de icones parecidos.
-  // Por isso ele agora vai bem maior, com contorno colorido proprio, e
-  // como PRIMEIRO filho da celula (antes de qualquer icone nativo) -
-  // continua idempotente, mas a busca pelo "ja existe" agora e' pelo
-  // atributo (nao mais so' "o vizinho imediato"), ja' que a posicao
-  // exata dentro da celula deixou de ser garantida.
+  // Uma celula pode conter VARIOS documentos lado a lado (varios links
+  // "a.infraLinkDocumento", um por icone) - inserir sempre como primeiro
+  // filho da CELULA (como numa versao anterior) juntava os checkboxes de
+  // todos os documentos daquela celula num bloco so', separados dos
+  // icones a que cada um se refere (ficava tudo "misturado"). Por isso o
+  // checkbox e' inserido logo antes do PROPRIO link do documento (nao da
+  // celula inteira) - continua idempotente, buscando pelo atributo em vez
+  // de depender da posicao exata.
   const celula = anchorEl.closest("td") || anchorEl.parentNode;
   const existente = celula.querySelector(`.${CLASSE_CHECKBOX_DOCUMENTO}[data-doc-checkbox="${idDoc}"]`);
   if (existente) return existente;
@@ -136,7 +135,7 @@ function garantirCheckboxDocumento(anchorEl, idDoc) {
       .sendMessage({ tipo: "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA", idDocumento: idDoc, selecionado: checkbox.checked })
       .catch(() => {});
   });
-  celula.insertBefore(checkbox, celula.firstChild);
+  celula.insertBefore(checkbox, anchorEl);
   return checkbox;
 }
 
