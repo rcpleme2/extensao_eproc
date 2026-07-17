@@ -1,10 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Extensão Auxiliar eProc",
-  "version": "1.2.0",
+  "version": "4.1.2",
   "description": "Extensão para auxiliar no uso e extração de relatórios do eProc",
-  "permissions": ["downloads", "activeTab", "scripting", "tabs", "sidePanel", "storage"],
-  "host_permissions": ["https://eproc1g.tjpr.jus.br/eproc/*", "https://eproc1g.tre.tjpr.jus.br/eproc/*"],
+  "permissions": ["downloads", "activeTab", "scripting", "tabs", "sidePanel", "storage", "alarms"],
+  "host_permissions": [
+    "https://eproc1g.tjpr.jus.br/eproc/*",
+    "https://eproc1g.tre.tjpr.jus.br/eproc/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
   "side_panel": {
     "default_path": "popup.html"
   },

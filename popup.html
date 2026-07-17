@@ -17,7 +17,7 @@
       type="button"
       title="Configurações"
       aria-label="Abrir configurações"
-    >⚙</button>
+    >Configurações</button>
   </header>
 
   <div id="lista-cards-perfil">
@@ -293,6 +293,132 @@
 
       <hr class="separador-subsecao" />
 
+      <details class="subsecao subsecao--colapsavel" id="subsecao-analise-ia">
+        <summary class="subsecao-titulo">
+          <span class="subsecao-icone" aria-hidden="true">🤖</span>
+          Analisar com IA
+        </summary>
+
+        <div id="area-status-ia" class="status">
+          Abra um processo no eproc e clique em "Detectar documentos".
+        </div>
+
+        <div class="botoes">
+          <button id="btn-detectar-ia" class="btn">Detectar documentos</button>
+        </div>
+
+        <div id="area-processo-ia" class="processo" hidden>
+          Processo: <strong id="numero-processo-ia"></strong>
+          (<span id="total-documentos-ia"></span> documento(s))
+        </div>
+
+        <div id="area-marcar-documentos-ia" class="botoes botoes-marcar-documentos" hidden>
+          <span class="dica-selecao-documentos">
+            Desmarque abaixo (ou direto na página do processo) os documentos
+            que não quer incluir na análise.
+          </span>
+          <button type="button" id="btn-marcar-tudo-documentos-ia" class="btn-ghost">Marcar tudo</button>
+          <button type="button" id="btn-desmarcar-tudo-documentos-ia" class="btn-ghost">Desmarcar tudo</button>
+        </div>
+
+        <ul id="lista-documentos-ia" class="lista-documentos" hidden></ul>
+
+        <label class="opcao" id="area-incluir-movimentacao-ia" hidden>
+          <input type="checkbox" id="chk-incluir-movimentacao-ia" checked />
+          Incluir a movimentação (linha do tempo)
+        </label>
+
+        <div id="area-analise-ia" hidden>
+          <div class="opcoes">
+            <p class="legenda-opcoes">Tipo de prompt</p>
+            <label class="opcao">
+              <input type="radio" name="modo-prompt-ia" id="radio-prompt-salvo" checked />
+              Usar prompt salvo
+            </label>
+            <label class="opcao">
+              <input type="radio" name="modo-prompt-ia" id="radio-prompt-avulso" />
+              Digitar agora (rápido, para algo pequeno e pontual)
+            </label>
+
+            <label class="campo-config-ia" id="area-select-prompt-ia">
+              <select id="select-prompt-ia"></select>
+            </label>
+
+            <div id="area-prompt-avulso" hidden>
+              <label class="campo-config-ia">
+                Texto do prompt (apensado ao final do conteúdo do processo)
+                <textarea id="input-prompt-avulso-texto" class="campo-resultado-ia" rows="6"></textarea>
+              </label>
+              <label class="opcao">
+                <input type="checkbox" id="chk-salvar-prompt-avulso" />
+                Salvar este prompt para reutilizar depois
+              </label>
+              <label class="campo-config-ia" id="area-titulo-prompt-avulso" hidden>
+                Título para salvar
+                <input type="text" id="input-titulo-prompt-avulso" placeholder='Ex.: "Resumo rápido"' />
+              </label>
+            </div>
+
+            <label class="opcao">
+              <input type="checkbox" id="chk-anonimizar-ia" checked />
+              Anonimizar antes de enviar (remove CPF/CNPJ, telefone, e-mail, endereços, abrevia nomes)
+            </label>
+            <div class="linha-formatos">
+              <button id="btn-analisar-ia" class="btn">Analisar agora</button>
+              <button id="btn-adicionar-fila-ia" class="btn-secundario">Adicionar à fila em lote</button>
+            </div>
+            <p class="legenda-opcoes">
+              "Analisar agora" usa o provedor escolhido acima (Claude ou Gemini). A fila em lote abaixo
+              sempre usa a Claude, independente do provedor selecionado — o Gemini ainda não tem
+              processamento em lote nesta extensão.
+            </p>
+          </div>
+
+          <div id="area-progresso-ia" class="progresso-spinner" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="texto-progresso-ia"></span>
+          </div>
+
+          <div id="area-estimativa-ia" class="aviso" hidden>
+            <p id="texto-estimativa-ia"></p>
+            <div class="modal-botoes">
+              <button id="btn-confirmar-analise-ia" class="btn">Confirmar e enviar</button>
+              <button id="btn-cancelar-analise-ia" class="btn-secundario">Cancelar</button>
+            </div>
+          </div>
+
+          <div id="area-erros-ia" class="erros" hidden></div>
+
+          <div id="area-resultado-ia" hidden>
+            <label class="legenda-opcoes" for="texto-resultado-ia">Resposta da IA</label>
+            <textarea id="texto-resultado-ia" class="campo-resultado-ia" readonly rows="10"></textarea>
+            <div class="botoes">
+              <button id="btn-copiar-resultado-ia" class="btn-secundario">Copiar</button>
+            </div>
+          </div>
+        </div>
+
+        <hr class="separador-subsecao" />
+
+        <p class="legenda-opcoes">
+          📦 Fila em lote (Claude, 50% mais barato — processado em até 24h)
+        </p>
+        <div id="area-erros-fila-lote-ia" class="erros" hidden></div>
+        <ul id="lista-fila-lote-ia" class="lista-ia-simples" hidden></ul>
+        <div id="area-fila-lote-vazia" class="status">Nenhum item na fila ainda.</div>
+        <div class="botoes">
+          <button id="btn-enviar-lote-ia" class="btn" disabled>Enviar lote</button>
+        </div>
+
+        <hr class="separador-subsecao" />
+
+        <p class="legenda-opcoes">Lotes enviados</p>
+        <div id="area-lotes-enviados-vazio" class="status">Nenhum lote enviado ainda.</div>
+        <ul id="lista-lotes-enviados-ia" class="lista-ia-simples" hidden></ul>
+      </details>
+
+      <hr class="separador-subsecao" />
+
       <details class="subsecao subsecao--colapsavel">
         <summary class="subsecao-titulo">
           <span class="subsecao-icone" aria-hidden="true">🔎</span>
@@ -367,8 +493,68 @@
           Acrescentar o Magistrado aos eventos "Conclusos *" na tela do processo
         </label>
       </div>
+      <div class="opcoes">
+        <p class="legenda-opcoes">Análise com IA</p>
+        <label class="opcao">
+          <input type="radio" name="config-provedor-ia" id="radio-config-provedor-claude" value="claude" />
+          Usar Claude (Anthropic)
+        </label>
+        <label class="opcao">
+          <input type="radio" name="config-provedor-ia" id="radio-config-provedor-gemini" value="gemini" />
+          Usar Gemini (Google)
+        </label>
+        <label class="campo-config-ia">
+          Chave de API da Claude
+          <input type="password" id="config-chave-claude" placeholder="sk-ant-..." autocomplete="off" />
+        </label>
+        <label class="campo-config-ia">
+          Modelo da Claude
+          <select id="select-config-modelo-claude"></select>
+        </label>
+        <label class="campo-config-ia">
+          Chave de API do Gemini
+          <input type="password" id="config-chave-gemini" placeholder="AIza..." autocomplete="off" />
+        </label>
+        <label class="campo-config-ia">
+          Modelo do Gemini
+          <select id="select-config-modelo-gemini"></select>
+        </label>
+        <button type="button" id="btn-abrir-gerenciar-prompts" class="btn-secundario">Gerenciar prompts de análise</button>
+      </div>
       <div class="modal-botoes">
         <button id="modal-config-fechar" type="button" class="btn-secundario">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-gerenciar-prompts" class="modal-overlay" hidden>
+    <div class="modal-caixa">
+      <p class="modal-texto">Prompts de análise com IA</p>
+
+      <ul id="lista-prompts-ia" class="lista-ia-simples"></ul>
+
+      <hr class="separador-subsecao" />
+
+      <p class="legenda-opcoes" id="titulo-form-prompt">Novo prompt</p>
+      <div class="opcoes">
+        <label class="campo-config-ia">
+          Título
+          <input type="text" id="input-prompt-titulo" placeholder='Ex.: "Análise inicial - família"' />
+        </label>
+        <label class="campo-config-ia">
+          Texto do prompt (apensado ao final do conteúdo do processo)
+          <textarea id="input-prompt-texto" class="campo-resultado-ia" rows="10"></textarea>
+        </label>
+        <div class="linha-formatos">
+          <button type="button" id="btn-salvar-prompt" class="btn">Salvar</button>
+          <button type="button" id="btn-cancelar-edicao-prompt" class="btn-secundario" hidden>Cancelar edição</button>
+        </div>
+      </div>
+
+      <div id="area-erros-prompt" class="erros" hidden></div>
+
+      <div class="modal-botoes">
+        <button id="modal-gerenciar-prompts-fechar" type="button" class="btn-secundario">Fechar</button>
       </div>
     </div>
   </div>

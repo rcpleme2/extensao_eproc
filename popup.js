@@ -20,6 +20,414 @@ const barraProgresso = document.getElementById("barra-progresso");
 const textoProgresso = document.getElementById("texto-progresso");
 const areaErros = document.getElementById("area-erros");
 
+const areaStatusIA = document.getElementById("area-status-ia");
+const btnDetectarIA = document.getElementById("btn-detectar-ia");
+const areaProcessoIA = document.getElementById("area-processo-ia");
+const numeroProcessoIAEl = document.getElementById("numero-processo-ia");
+const totalDocumentosIAEl = document.getElementById("total-documentos-ia");
+const areaMarcarDocumentosIA = document.getElementById("area-marcar-documentos-ia");
+const btnMarcarTudoDocumentosIA = document.getElementById("btn-marcar-tudo-documentos-ia");
+const btnDesmarcarTudoDocumentosIA = document.getElementById("btn-desmarcar-tudo-documentos-ia");
+const listaDocumentosIAEl = document.getElementById("lista-documentos-ia");
+const areaIncluirMovimentacaoIA = document.getElementById("area-incluir-movimentacao-ia");
+const chkIncluirMovimentacaoIA = document.getElementById("chk-incluir-movimentacao-ia");
+const areaAnaliseIA = document.getElementById("area-analise-ia");
+const radioPromptSalvo = document.getElementById("radio-prompt-salvo");
+const radioPromptAvulso = document.getElementById("radio-prompt-avulso");
+const areaSelectPromptIA = document.getElementById("area-select-prompt-ia");
+const selectPromptIA = document.getElementById("select-prompt-ia");
+const areaPromptAvulso = document.getElementById("area-prompt-avulso");
+const inputPromptAvulsoTexto = document.getElementById("input-prompt-avulso-texto");
+const chkSalvarPromptAvulso = document.getElementById("chk-salvar-prompt-avulso");
+const areaTituloPromptAvulso = document.getElementById("area-titulo-prompt-avulso");
+const inputTituloPromptAvulso = document.getElementById("input-titulo-prompt-avulso");
+const chkAnonimizarIA = document.getElementById("chk-anonimizar-ia");
+const btnAnalisarIA = document.getElementById("btn-analisar-ia");
+const btnAdicionarFilaIA = document.getElementById("btn-adicionar-fila-ia");
+const areaProgressoIA = document.getElementById("area-progresso-ia");
+const textoProgressoIA = document.getElementById("texto-progresso-ia");
+const areaEstimativaIA = document.getElementById("area-estimativa-ia");
+const textoEstimativaIA = document.getElementById("texto-estimativa-ia");
+const btnConfirmarAnaliseIA = document.getElementById("btn-confirmar-analise-ia");
+const btnCancelarAnaliseIA = document.getElementById("btn-cancelar-analise-ia");
+const areaErrosIA = document.getElementById("area-erros-ia");
+const areaResultadoIA = document.getElementById("area-resultado-ia");
+const textoResultadoIA = document.getElementById("texto-resultado-ia");
+const btnCopiarResultadoIA = document.getElementById("btn-copiar-resultado-ia");
+
+const areaErrosFilaLoteIA = document.getElementById("area-erros-fila-lote-ia");
+const listaFilaLoteIA = document.getElementById("lista-fila-lote-ia");
+const areaFilaLoteVazia = document.getElementById("area-fila-lote-vazia");
+const btnEnviarLoteIA = document.getElementById("btn-enviar-lote-ia");
+const areaLotesEnviadosVazio = document.getElementById("area-lotes-enviados-vazio");
+const listaLotesEnviadosIA = document.getElementById("lista-lotes-enviados-ia");
+
+// Cadastro de prompts: guardado em chrome.storage.local pelo background
+// (que é quem de fato monta a chamada à API) - o painel só mantém uma
+// cópia local (id/título/texto) para preencher o <select> e o formulário
+// de gerenciar prompts, carregada no início e atualizada a cada
+// cadastro/edição/exclusão.
+let PROMPTS_IA_PAINEL = [];
+
+function atualizarSelectPromptIA() {
+  const valorAtual = selectPromptIA.value;
+  selectPromptIA.innerHTML = "";
+  for (const prompt of PROMPTS_IA_PAINEL) {
+    const option = document.createElement("option");
+    option.value = prompt.id;
+    option.textContent = prompt.titulo;
+    selectPromptIA.appendChild(option);
+  }
+  if (PROMPTS_IA_PAINEL.some((p) => p.id === valorAtual)) {
+    selectPromptIA.value = valorAtual;
+  }
+}
+
+async function atualizarPromptsIA() {
+  const resposta = await chrome.runtime.sendMessage({ tipo: "PROMPTS_IA_LISTAR" });
+  PROMPTS_IA_PAINEL = (resposta && resposta.prompts) || [];
+  atualizarSelectPromptIA();
+  renderizarListaPromptsIA();
+}
+
+const FORMATADOR_USD = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", minimumFractionDigits: 4 });
+
+function nomeAmigavelModelo(modeloId) {
+  const todos = [...MODELOS_IA_PAINEL.claude, ...MODELOS_IA_PAINEL.gemini];
+  const encontrado = todos.find((m) => m.id === modeloId);
+  return encontrado ? encontrado.nome : modeloId;
+}
+
+let textoExtraidoParaIA = null;
+// Guarda qual prompt foi de fato usado na extração (fase 1), pra fase 2
+// ("Confirmar e enviar") reenviar EXATAMENTE o mesmo prompt - mesmo que o
+// usuário tenha mexido nos campos de prompt avulso enquanto aguardava a
+// estimativa.
+let promptEmUsoNaAnalise = { promptId: null, promptTextoAvulso: null };
+
+function resetarAnaliseIA() {
+  textoExtraidoParaIA = null;
+  promptEmUsoNaAnalise = { promptId: null, promptTextoAvulso: null };
+  areaProgressoIA.hidden = true;
+  areaEstimativaIA.hidden = true;
+  areaErrosIA.hidden = true;
+  areaResultadoIA.hidden = true;
+  textoResultadoIA.value = "";
+  btnAnalisarIA.disabled = false;
+}
+
+function atualizarModoPromptIA() {
+  areaSelectPromptIA.hidden = radioPromptAvulso.checked;
+  areaPromptAvulso.hidden = !radioPromptAvulso.checked;
+}
+radioPromptSalvo.addEventListener("change", atualizarModoPromptIA);
+radioPromptAvulso.addEventListener("change", atualizarModoPromptIA);
+
+chkSalvarPromptAvulso.addEventListener("change", () => {
+  areaTituloPromptAvulso.hidden = !chkSalvarPromptAvulso.checked;
+});
+
+// Resolve qual prompt usar para a análise (imediata ou fila em lote):
+// - modo "prompt salvo": devolve so' o id escolhido no <select>.
+// - modo "digitar agora" SEM marcar "salvar": devolve o texto avulso puro,
+//   sem tocar no cadastro de prompts (nada e' persistido).
+// - modo "digitar agora" COM "salvar" marcado: cadastra o prompt primeiro
+//   (via PROMPTS_IA_SALVAR) e devolve o id do prompt recem-criado - a
+//   partir daí se comporta como um prompt salvo normal.
+// Devolve { erro } se faltar preencher algo obrigatório.
+async function resolverPromptParaEnvio() {
+  if (!radioPromptAvulso.checked) {
+    return { promptId: selectPromptIA.value };
+  }
+
+  const texto = inputPromptAvulsoTexto.value.trim();
+  if (!texto) return { erro: "Digite o texto do prompt." };
+
+  if (!chkSalvarPromptAvulso.checked) {
+    return { promptTextoAvulso: texto };
+  }
+
+  const titulo = inputTituloPromptAvulso.value.trim();
+  if (!titulo) return { erro: "Informe um título para salvar o prompt." };
+
+  const resposta = await chrome.runtime.sendMessage({ tipo: "PROMPTS_IA_SALVAR", prompt: { titulo, texto } });
+  if (!resposta || !resposta.ok) return { erro: (resposta && resposta.erro) || "Falha ao salvar o prompt." };
+
+  PROMPTS_IA_PAINEL = resposta.prompts;
+  atualizarSelectPromptIA();
+  const novoPrompt = PROMPTS_IA_PAINEL[PROMPTS_IA_PAINEL.length - 1];
+  return { promptId: novoPrompt.id };
+}
+
+btnAnalisarIA.addEventListener("click", async () => {
+  const { documentosSelecionados, movimentacaoParaEnviar } = await obterSelecaoAtualParaEnvio();
+
+  if (documentosSelecionados.length === 0 && movimentacaoParaEnviar.length === 0) {
+    areaErrosIA.hidden = false;
+    areaErrosIA.textContent =
+      "Nada para analisar: nenhum documento selecionado e a movimentação está excluída. Marque ao menos um documento ou inclua a movimentação.";
+    return;
+  }
+
+  const resolucaoPrompt = await resolverPromptParaEnvio();
+  if (resolucaoPrompt.erro) {
+    areaErrosIA.hidden = false;
+    areaErrosIA.textContent = resolucaoPrompt.erro;
+    return;
+  }
+
+  const config = await obterConfiguracoes();
+
+  resetarAnaliseIA();
+  promptEmUsoNaAnalise = { promptId: resolucaoPrompt.promptId || null, promptTextoAvulso: resolucaoPrompt.promptTextoAvulso || null };
+  btnAnalisarIA.disabled = true;
+  areaProgressoIA.hidden = false;
+  textoProgressoIA.textContent = "Extraindo o conteúdo dos documentos selecionados...";
+
+  chrome.runtime.sendMessage({
+    tipo: "ANALISAR_IA_EXTRAIR",
+    documentos: documentosSelecionados,
+    movimentacao: movimentacaoParaEnviar,
+    anonimizar: chkAnonimizarIA.checked,
+    provedor: config.provedorIA,
+    modelo: config.provedorIA === "gemini" ? config.modeloGemini : config.modeloClaude,
+    promptId: promptEmUsoNaAnalise.promptId,
+    promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
+  });
+});
+
+btnCancelarAnaliseIA.addEventListener("click", () => {
+  resetarAnaliseIA();
+});
+
+btnConfirmarAnaliseIA.addEventListener("click", async () => {
+  if (!textoExtraidoParaIA) return;
+  const config = await obterConfiguracoes();
+  const apiKey = config.provedorIA === "gemini" ? config.chaveGemini : config.chaveClaude;
+  const modelo = config.provedorIA === "gemini" ? config.modeloGemini : config.modeloClaude;
+
+  areaEstimativaIA.hidden = true;
+  areaProgressoIA.hidden = false;
+  textoProgressoIA.textContent = "Aguardando a resposta da IA...";
+
+  chrome.runtime.sendMessage({
+    tipo: "ANALISAR_IA_ENVIAR",
+    texto: textoExtraidoParaIA,
+    promptId: promptEmUsoNaAnalise.promptId,
+    promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
+    provedor: config.provedorIA,
+    modelo,
+    apiKey,
+  });
+});
+
+btnCopiarResultadoIA.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(textoResultadoIA.value);
+  } catch (e) {
+    textoResultadoIA.select();
+    document.execCommand("copy");
+  }
+});
+
+// ---- Fila em lote (Claude Batches API - processa em até 24h, 50% mais
+// barato) ----
+//
+// Diferente da análise imediata, aqui o TEXTO já é extraído no momento de
+// "Adicionar à fila" (o processo pode não estar mais aberto quando o lote
+// for de fato enviado) - o background guarda a fila em
+// chrome.storage.local, então ela sobrevive a fechar o painel e trocar de
+// processo. Só funciona com o provedor Claude (Gemini não tem uma API de
+// lote assíncrona equivalente cadastrada aqui ainda).
+
+async function copiarTexto(texto) {
+  try {
+    await navigator.clipboard.writeText(texto);
+  } catch (e) {
+    const area = document.createElement("textarea");
+    area.value = texto;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+}
+
+function renderizarFilaLoteIA(fila) {
+  listaFilaLoteIA.innerHTML = "";
+  const itens = fila || [];
+  areaFilaLoteVazia.hidden = itens.length > 0;
+  listaFilaLoteIA.hidden = itens.length === 0;
+  btnEnviarLoteIA.disabled = itens.length === 0;
+  btnEnviarLoteIA.textContent = `Enviar lote${itens.length > 0 ? ` (${itens.length})` : ""}`;
+
+  for (const item of itens) {
+    const li = document.createElement("li");
+    li.className = "item-fila-lote-ia";
+    const prompt = item.promptId ? PROMPTS_IA_PAINEL.find((p) => p.id === item.promptId) : null;
+    const rotuloPrompt = item.promptId ? (prompt ? prompt.titulo : item.promptId) : "Prompt avulso (digitado na hora)";
+    li.innerHTML = `
+      <span>${item.numeroProcesso} — ${rotuloPrompt}
+        <small>${nomeAmigavelModelo(item.modelo)} — ~${(item.estimativa && item.estimativa.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens, até ${FORMATADOR_USD.format((item.estimativa && item.estimativa.custoEstimadoUsd || 0) * 0.5)} com desconto de lote</small>
+      </span>
+      <button type="button" class="btn-ghost" data-remover-item="${item.id}">Remover</button>
+    `;
+    listaFilaLoteIA.appendChild(li);
+  }
+
+  listaFilaLoteIA.querySelectorAll("[data-remover-item]").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ tipo: "IA_LOTE_REMOVER", id: botao.dataset.removerItem });
+    });
+  });
+}
+
+function renderizarLotesEnviadosIA(lotes) {
+  listaLotesEnviadosIA.innerHTML = "";
+  const itens = lotes || [];
+  areaLotesEnviadosVazio.hidden = itens.length > 0;
+  listaLotesEnviadosIA.hidden = itens.length === 0;
+
+  for (const lote of [...itens].reverse()) {
+    const li = document.createElement("li");
+    li.className = "item-lote-ia";
+
+    const contagens = lote.contagens || {};
+    const resumoContagens = lote.status === "ended"
+      ? `${contagens.succeeded || 0} concluído(s), ${contagens.errored || 0} com erro(s)`
+      : "processando...";
+
+    let resultadosHtml = "";
+    if (lote.status === "ended") {
+      resultadosHtml = (lote.itens || [])
+        .map((item) => {
+          const resultado = (lote.resultadosPorItem || {})[item.customId];
+          if (!resultado) return "";
+          const textoResultado = resultado.erro ? `Erro: ${resultado.erro}` : resultado.resposta || "";
+          const idResultado = `resultado-lote-${lote.batchId}-${item.customId}`;
+          return `
+            <div class="resultado-lote-item">
+              <p><strong>${item.numeroProcesso}</strong></p>
+              <textarea id="${idResultado}" class="campo-resultado-ia" readonly rows="6">${textoResultado.replace(/</g, "&lt;")}</textarea>
+              <button type="button" class="btn-secundario" data-copiar-resultado="${idResultado}">Copiar</button>
+            </div>
+          `;
+        })
+        .join("");
+    } else {
+      // Enquanto o lote ainda esta' "processando...", nao ha' resultado
+      // nenhum pra mostrar ainda - mas os numeros de processo (ja'
+      // extraidos no momento de "Adicionar a fila em lote") ficam
+      // guardados no proprio lote desde o envio, entao da' pra mostrar
+      // AGORA a quais processos esse lote se refere, sem precisar esperar
+      // a resposta da IA terminar.
+      const listaProcessos = (lote.itens || []).map((item) => `<li>${item.numeroProcesso}</li>`).join("");
+      resultadosHtml = `
+        <p class="legenda-opcoes">Processos neste lote:</p>
+        <ul class="lista-ia-simples">${listaProcessos}</ul>
+      `;
+    }
+
+    li.innerHTML = `
+      <details>
+        <summary>Lote ${lote.batchId} — ${new Date(lote.criadoEm).toLocaleString("pt-BR")} (${resumoContagens})</summary>
+        ${lote.status !== "ended" ? '<button type="button" class="btn-ghost" data-verificar-lote="' + lote.batchId + '">Verificar agora</button>' : ""}
+        ${resultadosHtml}
+      </details>
+    `;
+    listaLotesEnviadosIA.appendChild(li);
+  }
+
+  listaLotesEnviadosIA.querySelectorAll("[data-verificar-lote]").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ tipo: "IA_LOTE_VERIFICAR", batchId: botao.dataset.verificarLote });
+    });
+  });
+  listaLotesEnviadosIA.querySelectorAll("[data-copiar-resultado]").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      const area = document.getElementById(botao.dataset.copiarResultado);
+      if (area) copiarTexto(area.value);
+    });
+  });
+}
+
+function atualizarListaCompletaIA() {
+  chrome.runtime.sendMessage({ tipo: "IA_LOTE_LISTAR" }).then((resposta) => {
+    if (!resposta) return;
+    renderizarFilaLoteIA(resposta.fila);
+    renderizarLotesEnviadosIA(resposta.lotes);
+  });
+}
+
+btnAdicionarFilaIA.addEventListener("click", async () => {
+  const { documentosSelecionados, movimentacaoParaEnviar } = await obterSelecaoAtualParaEnvio();
+
+  if (documentosSelecionados.length === 0 && movimentacaoParaEnviar.length === 0) {
+    areaErrosFilaLoteIA.hidden = false;
+    areaErrosFilaLoteIA.textContent =
+      "Nada para adicionar à fila: nenhum documento selecionado e a movimentação está excluída.";
+    return;
+  }
+
+  const resolucaoPrompt = await resolverPromptParaEnvio();
+  if (resolucaoPrompt.erro) {
+    areaErrosFilaLoteIA.hidden = false;
+    areaErrosFilaLoteIA.textContent = resolucaoPrompt.erro;
+    return;
+  }
+
+  const config = await obterConfiguracoes();
+
+  areaErrosFilaLoteIA.hidden = true;
+  btnAdicionarFilaIA.disabled = true;
+  const resposta = await chrome.runtime.sendMessage({
+    tipo: "IA_LOTE_ADICIONAR",
+    numeroProcesso: estadoAtual.numeroProcesso,
+    documentos: documentosSelecionados,
+    movimentacao: movimentacaoParaEnviar,
+    anonimizar: chkAnonimizarIA.checked,
+    promptId: resolucaoPrompt.promptId,
+    promptTextoAvulso: resolucaoPrompt.promptTextoAvulso,
+    modelo: config.modeloClaude,
+  });
+  btnAdicionarFilaIA.disabled = false;
+
+  if (resposta && resposta.ok) {
+    renderizarFilaLoteIA(resposta.fila);
+    if (radioPromptAvulso.checked) {
+      inputPromptAvulsoTexto.value = "";
+      chkSalvarPromptAvulso.checked = false;
+      inputTituloPromptAvulso.value = "";
+      areaTituloPromptAvulso.hidden = true;
+    }
+  } else {
+    areaErrosFilaLoteIA.hidden = false;
+    areaErrosFilaLoteIA.textContent = (resposta && resposta.erro) || "Falha ao adicionar à fila.";
+  }
+});
+
+btnEnviarLoteIA.addEventListener("click", async () => {
+  const config = await obterConfiguracoes();
+  if (!config.chaveClaude) {
+    areaErrosFilaLoteIA.hidden = false;
+    areaErrosFilaLoteIA.textContent = 'A fila em lote usa a API da Claude - configure a "Chave de API da Claude" nas configurações.';
+    return;
+  }
+
+  areaErrosFilaLoteIA.hidden = true;
+  btnEnviarLoteIA.disabled = true;
+  const resposta = await chrome.runtime.sendMessage({ tipo: "IA_LOTE_ENVIAR", apiKey: config.chaveClaude });
+
+  if (resposta && resposta.ok) {
+    renderizarFilaLoteIA([]);
+    atualizarListaCompletaIA();
+  } else {
+    areaErrosFilaLoteIA.hidden = false;
+    areaErrosFilaLoteIA.textContent = (resposta && resposta.erro) || "Falha ao enviar o lote.";
+    btnEnviarLoteIA.disabled = false;
+  }
+});
+
 const ROTULO_FASE = {
   individuais: "Arquivos individuais",
   "pdf-unico": "PDF único",
@@ -34,10 +442,31 @@ const ROTULO_FASE = {
 // é configurável - é sempre aplicada, direto onde cada dropdown é
 // preenchido (handlers de UNIDADES_RELATORIO_FINALIZADO e
 // LISTAR_LOCALIZADORES_FINALIZADO mais abaixo).
+// Catálogo de modelos espelhado do MODELOS_IA_DISPONIVEIS em background.js
+// - só id/nome precisam existir aqui (os preços usados na estimativa de
+// custo ficam só no background). O primeiro de cada lista é sempre o mais
+// barato, usado como padrão.
+const MODELOS_IA_PAINEL = {
+  claude: [
+    { id: "claude-haiku-4-5", nome: "Claude Haiku 4.5 (mais barato)" },
+    { id: "claude-sonnet-5", nome: "Claude Sonnet 5" },
+    { id: "claude-sonnet-4-6", nome: "Claude Sonnet 4.6" },
+  ],
+  gemini: [
+    { id: "gemini-3.1-flash-lite", nome: "Gemini 3.1 Flash-Lite (mais barato)" },
+    { id: "gemini-3.1-pro", nome: "Gemini 3.1 Pro" },
+  ],
+};
+
 const CONFIG_PADRAO = {
   substituirSigla: true,
   separarOrgaoJuizoPorComarca: false,
   anexarMagistradoConclusos: true,
+  provedorIA: "claude",
+  chaveClaude: "",
+  chaveGemini: "",
+  modeloClaude: MODELOS_IA_PAINEL.claude[0].id,
+  modeloGemini: MODELOS_IA_PAINEL.gemini[0].id,
 };
 
 function obterConfiguracoes() {
@@ -56,13 +485,62 @@ const chkConfigSubstituirSigla = document.getElementById("chk-config-substituir-
 const chkConfigSepararOrgaoJuizo = document.getElementById("chk-config-separar-orgao-juizo");
 const chkConfigAnexarMagistradoConclusos = document.getElementById("chk-config-anexar-magistrado-conclusos");
 const modalConfigFechar = document.getElementById("modal-config-fechar");
+const radioConfigProvedorClaude = document.getElementById("radio-config-provedor-claude");
+const radioConfigProvedorGemini = document.getElementById("radio-config-provedor-gemini");
+const inputConfigChaveClaude = document.getElementById("config-chave-claude");
+const inputConfigChaveGemini = document.getElementById("config-chave-gemini");
+const selectConfigModeloClaude = document.getElementById("select-config-modelo-claude");
+const selectConfigModeloGemini = document.getElementById("select-config-modelo-gemini");
+
+for (const modelo of MODELOS_IA_PAINEL.claude) {
+  const option = document.createElement("option");
+  option.value = modelo.id;
+  option.textContent = modelo.nome;
+  selectConfigModeloClaude.appendChild(option);
+}
+for (const modelo of MODELOS_IA_PAINEL.gemini) {
+  const option = document.createElement("option");
+  option.value = modelo.id;
+  option.textContent = modelo.nome;
+  selectConfigModeloGemini.appendChild(option);
+}
 
 btnAbrirConfiguracoes.addEventListener("click", async () => {
   const config = await obterConfiguracoes();
   chkConfigSubstituirSigla.checked = config.substituirSigla;
   chkConfigSepararOrgaoJuizo.checked = config.separarOrgaoJuizoPorComarca;
   chkConfigAnexarMagistradoConclusos.checked = config.anexarMagistradoConclusos;
+  radioConfigProvedorClaude.checked = config.provedorIA !== "gemini";
+  radioConfigProvedorGemini.checked = config.provedorIA === "gemini";
+  inputConfigChaveClaude.value = config.chaveClaude || "";
+  inputConfigChaveGemini.value = config.chaveGemini || "";
+  selectConfigModeloClaude.value = config.modeloClaude || CONFIG_PADRAO.modeloClaude;
+  selectConfigModeloGemini.value = config.modeloGemini || CONFIG_PADRAO.modeloGemini;
   modalConfiguracoes.hidden = false;
+});
+
+selectConfigModeloClaude.addEventListener("change", () => {
+  salvarConfiguracao("modeloClaude", selectConfigModeloClaude.value);
+});
+
+selectConfigModeloGemini.addEventListener("change", () => {
+  salvarConfiguracao("modeloGemini", selectConfigModeloGemini.value);
+});
+
+radioConfigProvedorClaude.addEventListener("change", () => {
+  if (radioConfigProvedorClaude.checked) salvarConfiguracao("provedorIA", "claude");
+});
+
+radioConfigProvedorGemini.addEventListener("change", () => {
+  if (radioConfigProvedorGemini.checked) salvarConfiguracao("provedorIA", "gemini");
+});
+
+inputConfigChaveClaude.addEventListener("change", () => {
+  salvarConfiguracao("chaveClaude", inputConfigChaveClaude.value.trim());
+});
+
+inputConfigChaveGemini.addEventListener("change", () => {
+  salvarConfiguracao("chaveGemini", inputConfigChaveGemini.value.trim());
 });
 
 chkConfigSubstituirSigla.addEventListener("change", () => {
@@ -79,6 +557,116 @@ chkConfigAnexarMagistradoConclusos.addEventListener("change", () => {
 
 modalConfigFechar.addEventListener("click", () => {
   modalConfiguracoes.hidden = true;
+});
+
+// ---- Gerenciar prompts de análise (editar, excluir, cadastrar) ----
+const btnAbrirGerenciarPrompts = document.getElementById("btn-abrir-gerenciar-prompts");
+const modalGerenciarPrompts = document.getElementById("modal-gerenciar-prompts");
+const modalGerenciarPromptsFechar = document.getElementById("modal-gerenciar-prompts-fechar");
+const listaPromptsIA = document.getElementById("lista-prompts-ia");
+const tituloFormPrompt = document.getElementById("titulo-form-prompt");
+const inputPromptTitulo = document.getElementById("input-prompt-titulo");
+const inputPromptTexto = document.getElementById("input-prompt-texto");
+const btnSalvarPrompt = document.getElementById("btn-salvar-prompt");
+const btnCancelarEdicaoPrompt = document.getElementById("btn-cancelar-edicao-prompt");
+const areaErrosPrompt = document.getElementById("area-erros-prompt");
+
+let promptEmEdicaoId = null;
+
+function limparFormularioPrompt() {
+  promptEmEdicaoId = null;
+  tituloFormPrompt.textContent = "Novo prompt";
+  inputPromptTitulo.value = "";
+  inputPromptTexto.value = "";
+  btnCancelarEdicaoPrompt.hidden = true;
+  areaErrosPrompt.hidden = true;
+}
+
+function renderizarListaPromptsIA() {
+  listaPromptsIA.innerHTML = "";
+  for (const prompt of PROMPTS_IA_PAINEL) {
+    const li = document.createElement("li");
+    li.className = "item-fila-lote-ia";
+    li.innerHTML = `
+      <span>${prompt.titulo}</span>
+      <span>
+        <button type="button" class="btn-ghost" data-editar-prompt="${prompt.id}">Editar</button>
+        <button type="button" class="btn-ghost" data-excluir-prompt="${prompt.id}">Excluir</button>
+      </span>
+    `;
+    listaPromptsIA.appendChild(li);
+  }
+
+  listaPromptsIA.querySelectorAll("[data-editar-prompt]").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      const prompt = PROMPTS_IA_PAINEL.find((p) => p.id === botao.dataset.editarPrompt);
+      if (!prompt) return;
+      promptEmEdicaoId = prompt.id;
+      tituloFormPrompt.textContent = `Editando: ${prompt.titulo}`;
+      inputPromptTitulo.value = prompt.titulo;
+      inputPromptTexto.value = prompt.texto;
+      btnCancelarEdicaoPrompt.hidden = false;
+      areaErrosPrompt.hidden = true;
+    });
+  });
+
+  listaPromptsIA.querySelectorAll("[data-excluir-prompt]").forEach((botao) => {
+    botao.addEventListener("click", async () => {
+      const prompt = PROMPTS_IA_PAINEL.find((p) => p.id === botao.dataset.excluirPrompt);
+      if (!prompt) return;
+      if (!confirm(`Excluir o prompt "${prompt.titulo}"? Essa ação não pode ser desfeita.`)) return;
+
+      const resposta = await chrome.runtime.sendMessage({ tipo: "PROMPTS_IA_REMOVER", id: prompt.id });
+      if (resposta && resposta.ok) {
+        PROMPTS_IA_PAINEL = resposta.prompts;
+        atualizarSelectPromptIA();
+        renderizarListaPromptsIA();
+        if (promptEmEdicaoId === prompt.id) limparFormularioPrompt();
+      } else {
+        areaErrosPrompt.hidden = false;
+        areaErrosPrompt.textContent = (resposta && resposta.erro) || "Falha ao excluir o prompt.";
+      }
+    });
+  });
+}
+
+btnAbrirGerenciarPrompts.addEventListener("click", async () => {
+  limparFormularioPrompt();
+  await atualizarPromptsIA();
+  modalGerenciarPrompts.hidden = false;
+});
+
+btnSalvarPrompt.addEventListener("click", async () => {
+  const titulo = inputPromptTitulo.value.trim();
+  const texto = inputPromptTexto.value.trim();
+  if (!titulo || !texto) {
+    areaErrosPrompt.hidden = false;
+    areaErrosPrompt.textContent = "Preencha o título e o texto do prompt.";
+    return;
+  }
+
+  const resposta = await chrome.runtime.sendMessage({
+    tipo: "PROMPTS_IA_SALVAR",
+    prompt: { id: promptEmEdicaoId, titulo, texto },
+  });
+
+  if (resposta && resposta.ok) {
+    PROMPTS_IA_PAINEL = resposta.prompts;
+    atualizarSelectPromptIA();
+    renderizarListaPromptsIA();
+    limparFormularioPrompt();
+  } else {
+    areaErrosPrompt.hidden = false;
+    areaErrosPrompt.textContent = (resposta && resposta.erro) || "Falha ao salvar o prompt.";
+  }
+});
+
+btnCancelarEdicaoPrompt.addEventListener("click", () => {
+  limparFormularioPrompt();
+});
+
+modalGerenciarPromptsFechar.addEventListener("click", () => {
+  modalGerenciarPrompts.hidden = true;
 });
 
 let estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [], movimentacaoIncluida: true };
@@ -172,7 +760,7 @@ function iniciarCronometroStatus(el) {
 // DESLIGAR (mostrando o total decorrido) quando chega um "ok"/"erro" e
 // havia um rodando - nunca liga um cronometro sozinho (ver
 // "iniciarCronometroStatus").
-function aplicarStatus(el, texto, tipo) {
+function aplicarStatus(el, texto, tipo, abrirCartao = true) {
   const finalizado = tipo === "ok" || tipo === "erro";
   el.dataset.statusTexto = texto;
 
@@ -186,8 +774,11 @@ function aplicarStatus(el, texto, tipo) {
   el.classList.toggle("status--ok", tipo === "ok");
   el.classList.toggle("status--erro", tipo === "erro");
   // Atividade numa secao (progresso/resultado/erro) abre o cartao dela,
-  // para nada acontecer escondido atras de um cartao colapsado.
-  abrirCartaoDe(el);
+  // para nada acontecer escondido atras de um cartao colapsado - so'
+  // quando "abrirCartao" nao foi explicitamente desligado (ver "setStatus",
+  // que atualiza DUAS areas de status ao mesmo tempo mas so' deve abrir o
+  // cartao de quem realmente originou a acao).
+  if (abrirCartao) abrirCartaoDe(el);
 }
 
 // Garante que o cartao (details) que contem o elemento esteja aberto -
@@ -205,8 +796,16 @@ function abrirCartaoDe(el) {
   }
 }
 
-function setStatus(texto, tipo) {
-  aplicarStatus(areaStatus, texto, tipo);
+// Aplica em AMBOS os status ("Exportar Documentos" e "Analisar com IA") -
+// as duas subseções compartilham a mesma detecção/seleção de documentos,
+// então mostram sempre a mesma mensagem. So' abre o CARTAO de quem
+// originou a acao ("origem": "exportar", padrão, ou "ia") - sem isso,
+// detectar pela subseção "Analisar com IA" abriria também "Exportar
+// Documentos" (e vice-versa), já que as duas áreas de status são
+// atualizadas juntas.
+function setStatus(texto, tipo, origem = "exportar") {
+  aplicarStatus(areaStatus, texto, tipo, origem !== "ia");
+  aplicarStatus(areaStatusIA, texto, tipo, origem === "ia");
 }
 
 async function getAbaAtiva() {
@@ -238,63 +837,73 @@ async function enviarSelecaoTodosDocumentosParaPagina(selecionado) {
   }
 }
 
+// "Exportar Documentos" e "Analisar com IA" mostram a MESMA lista/seleção
+// de documentos (compartilham "estadoAtual") - só a UI é repetida nas duas
+// subseções, por isso toda renderização/atualização de checkbox acontece
+// nos dois containers ao mesmo tempo.
+const CONTAINERS_LISTA_DOCUMENTOS = [listaDocumentosEl, listaDocumentosIAEl];
+
 function renderizarLista(documentos) {
-  listaDocumentosEl.innerHTML = "";
-  for (const doc of documentos) {
-    const li = document.createElement("li");
-    li.dataset.idDocumento = doc.idDocumento;
+  for (const container of CONTAINERS_LISTA_DOCUMENTOS) {
+    container.innerHTML = "";
+    for (const doc of documentos) {
+      const li = document.createElement("li");
+      li.dataset.idDocumento = doc.idDocumento;
 
-    const rotulo = document.createElement("label");
-    rotulo.className = "item-documento";
+      const rotulo = document.createElement("label");
+      rotulo.className = "item-documento";
 
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = doc.selecionado !== false;
-    checkbox.addEventListener("change", () => {
-      doc.selecionado = checkbox.checked;
-      enviarSelecaoDocumentoParaPagina(doc.idDocumento, checkbox.checked);
-    });
-    rotulo.appendChild(checkbox);
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = doc.selecionado !== false;
+      checkbox.addEventListener("change", () => {
+        doc.selecionado = checkbox.checked;
+        atualizarCheckboxNaListaDocumentos(doc.idDocumento, checkbox.checked);
+        enviarSelecaoDocumentoParaPagina(doc.idDocumento, checkbox.checked);
+      });
+      rotulo.appendChild(checkbox);
 
-    const nome = document.createElement("span");
-    nome.textContent = doc.nome;
-    rotulo.appendChild(nome);
+      const nome = document.createElement("span");
+      nome.textContent = doc.nome;
+      rotulo.appendChild(nome);
 
-    const tipo = document.createElement("span");
-    tipo.className = "tipo";
-    tipo.textContent = doc.mimetype || "";
+      const tipo = document.createElement("span");
+      tipo.className = "tipo";
+      tipo.textContent = doc.mimetype || "";
 
-    li.appendChild(rotulo);
-    li.appendChild(tipo);
-    listaDocumentosEl.appendChild(li);
+      li.appendChild(rotulo);
+      li.appendChild(tipo);
+      container.appendChild(li);
+    }
   }
 }
 
-// Atualiza so' o checkbox de UM item da lista (sem reconstruir a lista
-// inteira, o que resetaria a posição do scroll) - usado quando o painel
-// recebe um aviso de que o usuário mudou a seleção direto na página (ver
-// "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA" mais abaixo).
+// Atualiza so' o checkbox de UM item da lista, nos DOIS containers (sem
+// reconstruir a lista inteira, o que resetaria a posição do scroll) -
+// usado tanto quando o usuário marca/desmarca num dos containers (para
+// refletir no outro) quanto quando o painel recebe um aviso de que a
+// seleção mudou direto na página (ver "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA"
+// mais abaixo).
 function atualizarCheckboxNaListaDocumentos(idDocumento, selecionado) {
-  const li = listaDocumentosEl.querySelector(`li[data-id-documento="${CSS.escape(idDocumento)}"]`);
-  const checkbox = li && li.querySelector('input[type="checkbox"]');
-  if (checkbox) checkbox.checked = selecionado;
+  for (const container of CONTAINERS_LISTA_DOCUMENTOS) {
+    const li = container.querySelector(`li[data-id-documento="${CSS.escape(idDocumento)}"]`);
+    const checkbox = li && li.querySelector('input[type="checkbox"]');
+    if (checkbox) checkbox.checked = selecionado;
+  }
 }
 
-btnMarcarTudoDocumentos.addEventListener("click", () => {
+function marcarTodosDocumentos(selecionado) {
   estadoAtual.documentos.forEach((doc) => {
-    doc.selecionado = true;
+    doc.selecionado = selecionado;
   });
   renderizarLista(estadoAtual.documentos);
-  enviarSelecaoTodosDocumentosParaPagina(true);
-});
+  enviarSelecaoTodosDocumentosParaPagina(selecionado);
+}
 
-btnDesmarcarTudoDocumentos.addEventListener("click", () => {
-  estadoAtual.documentos.forEach((doc) => {
-    doc.selecionado = false;
-  });
-  renderizarLista(estadoAtual.documentos);
-  enviarSelecaoTodosDocumentosParaPagina(false);
-});
+btnMarcarTudoDocumentos.addEventListener("click", () => marcarTodosDocumentos(true));
+btnDesmarcarTudoDocumentos.addEventListener("click", () => marcarTodosDocumentos(false));
+btnMarcarTudoDocumentosIA.addEventListener("click", () => marcarTodosDocumentos(true));
+btnDesmarcarTudoDocumentosIA.addEventListener("click", () => marcarTodosDocumentos(false));
 
 // Mesmo padrao de sincronizacao dos documentos, so' que para o
 // checkbox UNICO "incluir a movimentacao" (a linha do tempo entra ou sai
@@ -308,14 +917,22 @@ async function enviarSelecaoMovimentacaoParaPagina(incluida) {
   }
 }
 
-chkIncluirMovimentacao.addEventListener("change", () => {
-  estadoAtual.movimentacaoIncluida = chkIncluirMovimentacao.checked;
-  enviarSelecaoMovimentacaoParaPagina(chkIncluirMovimentacao.checked);
-});
+function definirMovimentacaoIncluida(incluida) {
+  estadoAtual.movimentacaoIncluida = incluida;
+  chkIncluirMovimentacao.checked = incluida;
+  chkIncluirMovimentacaoIA.checked = incluida;
+  enviarSelecaoMovimentacaoParaPagina(incluida);
+}
 
-btnDetectar.addEventListener("click", async () => {
+chkIncluirMovimentacao.addEventListener("change", () => definirMovimentacaoIncluida(chkIncluirMovimentacao.checked));
+chkIncluirMovimentacaoIA.addEventListener("change", () => definirMovimentacaoIncluida(chkIncluirMovimentacaoIA.checked));
+
+// Compartilhada pelos dois botões "Detectar documentos" ("Exportar
+// Documentos" e "Analisar com IA") - as duas subseções mostram a mesma
+// detecção/seleção, só a UI é repetida.
+async function executarDeteccao(origem = "exportar") {
   areaErros.hidden = true;
-  setStatus("Detectando documentos na pagina...");
+  setStatus("Detectando documentos na pagina...", undefined, origem);
   try {
     const aba = await getAbaAtiva();
     const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_DOCUMENTOS" });
@@ -325,16 +942,25 @@ btnDetectar.addEventListener("click", async () => {
 
     if (!resposta || (documentos.length === 0 && movimentacao.length === 0)) {
       setStatus(
-        "Nenhum documento nem movimentação encontrados. Confirme que você está na página de detalhes do processo no eproc."
+        "Nenhum documento nem movimentação encontrados. Confirme que você está na página de detalhes do processo no eproc.",
+        undefined,
+        origem
       );
       estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [], movimentacaoIncluida: true };
       atualizarEstadoBotaoBaixar();
       areaProcesso.hidden = true;
+      areaProcessoIA.hidden = true;
       areaOpcoes.hidden = true;
       areaMarcarDocumentos.hidden = true;
+      areaMarcarDocumentosIA.hidden = true;
       areaIncluirMovimentacao.hidden = true;
+      areaIncluirMovimentacaoIA.hidden = true;
       listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
+      listaDocumentosIAEl.hidden = true;
+      listaDocumentosIAEl.innerHTML = "";
+      areaAnaliseIA.hidden = true;
+      resetarAnaliseIA();
       return;
     }
 
@@ -342,8 +968,13 @@ btnDetectar.addEventListener("click", async () => {
     estadoAtual = { numeroProcesso: resposta.numeroProcesso, documentos, movimentacao, movimentacaoIncluida };
     numeroProcessoEl.textContent = resposta.numeroProcesso;
     totalDocumentosEl.textContent = String(documentos.length);
+    numeroProcessoIAEl.textContent = resposta.numeroProcesso;
+    totalDocumentosIAEl.textContent = String(documentos.length);
     areaProcesso.hidden = false;
+    areaProcessoIA.hidden = false;
     areaOpcoes.hidden = false;
+    areaAnaliseIA.hidden = false;
+    resetarAnaliseIA();
 
     // Sem nenhum documento anexado (so' movimentação), os modos
     // "Arquivos individuais" e "PDF único" não têm o que gerar - só "MD
@@ -358,15 +989,22 @@ btnDetectar.addEventListener("click", async () => {
     // O checkbox so' faz sentido quando ha' movimentação para incluir ou
     // excluir - sem nenhum evento detectado, não há nada para alternar.
     areaIncluirMovimentacao.hidden = movimentacao.length === 0;
+    areaIncluirMovimentacaoIA.hidden = movimentacao.length === 0;
     chkIncluirMovimentacao.checked = movimentacaoIncluida;
+    chkIncluirMovimentacaoIA.checked = movimentacaoIncluida;
 
     if (semDocumentos) {
       listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
+      listaDocumentosIAEl.hidden = true;
+      listaDocumentosIAEl.innerHTML = "";
       areaMarcarDocumentos.hidden = true;
+      areaMarcarDocumentosIA.hidden = true;
     } else {
       listaDocumentosEl.hidden = false;
+      listaDocumentosIAEl.hidden = false;
       areaMarcarDocumentos.hidden = false;
+      areaMarcarDocumentosIA.hidden = false;
       renderizarLista(documentos);
     }
 
@@ -374,24 +1012,30 @@ btnDetectar.addEventListener("click", async () => {
     setStatus(
       semDocumentos
         ? `Nenhum documento anexado, mas ${movimentacao.length} evento(s) de movimentação encontrado(s) - só "MD único" está disponível.`
-        : 'Documentos detectados. Escolha o que baixar e clique em "Baixar".'
+        : 'Documentos detectados. Escolha o que baixar e clique em "Baixar".',
+      undefined,
+      origem
     );
   } catch (e) {
     setStatus(
-      "Nao foi possivel ler a pagina. Verifique se voce esta em uma pagina de processo do eproc e tente novamente."
+      "Nao foi possivel ler a pagina. Verifique se voce esta em uma pagina de processo do eproc e tente novamente.",
+      undefined,
+      origem
     );
   }
-});
+}
 
-btnBaixar.addEventListener("click", async () => {
-  if (!estadoAtual.documentos.length && !estadoAtual.movimentacao.length) return;
+btnDetectar.addEventListener("click", () => executarDeteccao("exportar"));
+btnDetectarIA.addEventListener("click", () => executarDeteccao("ia"));
 
-  // Confere o estado ATUAL dos checkboxes direto na página do processo
-  // antes de baixar - cobre o caso do usuário ter ajustado a seleção lá
-  // (marcar/desmarcar um documento) depois do último "Detectar", sem
-  // precisar clicar em "Detectar" de novo só para isso. Sem resposta da
-  // aba (ex.: usuário navegou para outro lugar), cai para o que já está
-  // marcado no próprio painel, sem travar o download.
+// Confere o estado ATUAL dos checkboxes direto na página do processo antes
+// de usar a seleção - cobre o caso do usuário ter ajustado a seleção lá
+// (marcar/desmarcar um documento, ou o checkbox de movimentação) depois do
+// último "Detectar", sem precisar clicar em "Detectar" de novo só para
+// isso. Sem resposta da aba (ex.: usuário navegou para outro lugar), cai
+// para o que já está marcado no próprio painel. Compartilhada entre
+// "Baixar" e "Analisar com IA", que partem da mesma seleção de documentos.
+async function obterSelecaoAtualParaEnvio() {
   let idsSelecionados = null;
   try {
     const aba = await getAbaAtiva();
@@ -407,9 +1051,6 @@ btnBaixar.addEventListener("click", async () => {
     ? estadoAtual.documentos.filter((doc) => idsSelecionados.has(doc.idDocumento))
     : estadoAtual.documentos.filter((doc) => doc.selecionado !== false);
 
-  // Mesma ideia acima, agora para o checkbox único "incluir a
-  // movimentação" - relê o estado atual direto da página antes de
-  // decidir se a linha do tempo entra ou não na exportação.
   let movimentacaoIncluida = estadoAtual.movimentacaoIncluida !== false;
   try {
     const aba = await getAbaAtiva();
@@ -421,6 +1062,14 @@ btnBaixar.addEventListener("click", async () => {
     /* segue com a seleção já conhecida pelo painel */
   }
   const movimentacaoParaEnviar = movimentacaoIncluida ? estadoAtual.movimentacao : [];
+
+  return { documentosSelecionados, movimentacaoParaEnviar };
+}
+
+btnBaixar.addEventListener("click", async () => {
+  if (!estadoAtual.documentos.length && !estadoAtual.movimentacao.length) return;
+
+  const { documentosSelecionados, movimentacaoParaEnviar } = await obterSelecaoAtualParaEnvio();
 
   const opcoes = {
     individuais: radioIndividuais.checked,
@@ -978,6 +1627,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   if (mensagem.tipo === "SELECAO_MOVIMENTACAO_ALTERADA_NA_PAGINA") {
     estadoAtual.movimentacaoIncluida = mensagem.incluida;
     chkIncluirMovimentacao.checked = mensagem.incluida;
+    chkIncluirMovimentacaoIA.checked = mensagem.incluida;
   }
 
   if (mensagem.tipo === "PROGRESSO_DOWNLOAD") {
@@ -1001,6 +1651,49 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         `${mensagem.erros.length} erro(s): ` +
         mensagem.erros.map((e) => `${e.nome} (${e.mensagem})`).join("; ");
     }
+  }
+
+  if (mensagem.tipo === "PROGRESSO_ANALISE_IA") {
+    textoProgressoIA.textContent = mensagem.texto || "Processando...";
+  }
+
+  if (mensagem.tipo === "ANALISE_IA_TEXTO_PRONTO") {
+    areaProgressoIA.hidden = true;
+    if (mensagem.ok) {
+      textoExtraidoParaIA = mensagem.texto;
+      const est = mensagem.estimativa || {};
+      areaEstimativaIA.hidden = false;
+      textoEstimativaIA.textContent =
+        `Tamanho estimado: ~${(est.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens de entrada ` +
+        `(modelo ${nomeAmigavelModelo(est.modelo)}). Custo estimado: até ${FORMATADOR_USD.format(est.custoEstimadoUsd || 0)}. ` +
+        `Confirme para enviar de verdade à IA.`;
+    } else {
+      btnAnalisarIA.disabled = false;
+      areaErrosIA.hidden = false;
+      areaErrosIA.textContent = mensagem.erro || "Falha desconhecida ao extrair o conteúdo dos documentos.";
+    }
+  }
+
+  if (mensagem.tipo === "ANALISE_IA_RESULTADO") {
+    areaProgressoIA.hidden = true;
+    btnAnalisarIA.disabled = false;
+    if (mensagem.ok) {
+      areaResultadoIA.hidden = false;
+      textoResultadoIA.value = mensagem.resposta || "";
+      if (mensagem.custoRealUsd != null) {
+        textoProgressoIA.textContent = "";
+        areaEstimativaIA.hidden = false;
+        areaEstimativaIA.querySelector(".modal-botoes").hidden = true;
+        textoEstimativaIA.textContent = `Custo real desta chamada: ${FORMATADOR_USD.format(mensagem.custoRealUsd)}.`;
+      }
+    } else {
+      areaErrosIA.hidden = false;
+      areaErrosIA.textContent = mensagem.erro || "Falha desconhecida ao consultar a IA.";
+    }
+  }
+
+  if (mensagem.tipo === "IA_LOTE_ATUALIZADA_STATUS") {
+    atualizarListaCompletaIA();
   }
 
   if (mensagem.tipo === "PROGRESSO_UNIDADES_RELATORIO") {
@@ -1539,3 +2232,6 @@ listaCardsPerfil.querySelectorAll(".card").forEach((card) => {
     salvarOrdemCards();
   });
 });
+
+atualizarPromptsIA();
+atualizarListaCompletaIA();

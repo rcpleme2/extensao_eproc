@@ -161,7 +161,7 @@ próprio HTML da página (a informação já existe ali, usada hoje só para o
 tooltip que aparece ao passar o mouse). O tooltip com cargo e lotação
 continua funcionando normalmente.
 
-Esse comportamento pode ser desligado na engrenagem de **Configurações**
+Esse comportamento pode ser desligado na botão **Configurações**
 do painel (ver seção própria abaixo) — desligar não desfaz o que já foi
 trocado numa página já aberta (passa a valer a partir da próxima
 navegação/recarregamento daquela página).
@@ -192,14 +192,15 @@ e conclusão só é procurada no campo "Magistrado(s):" (o último), lendo
 tudo que sobra depois desse rótulo.
 
 Assim como a troca de sigla por nome (acima), esse comportamento pode ser
-desligado na engrenagem de **Configurações** do painel — desligar não
+desligado na botão **Configurações** do painel — desligar não
 desfaz o que já foi acrescentado numa página já aberta.
 
 ## Configurações
 
-O ícone de engrenagem (⚙) no canto superior direito do painel — com um
-fundo sutil para não passar despercebido, mas sem chamar mais atenção que
-os botões de ação — abre um pequeno modal com uma opção, salva em
+O botão **"Configurações"** no canto superior direito do painel — texto
+discreto (fonte pequena, cor neutra) mas com um contorno/fundo sutil que o
+separa do título ao lado, para não passar despercebido nem competir com os
+botões de ação — abre um modal com as opções, salvas em
 `chrome.storage.local`
 (preferência deste navegador, não sincronizada entre máquinas):
 
@@ -456,6 +457,218 @@ exportação).
    avisos/erros do resultado final, sem impedir os próximos itens de
    serem processados. A extração de texto de cada PDF (que envolve várias
    páginas, não só uma requisição) tem um limite maior, de 60s.
+
+## Analisar com IA
+
+**"Analisar com IA"** é sua própria subseção dentro do cartão "Gestão
+Gabinete" — separada de "Exportar Documentos", com título e recolhimento
+próprios — mas com o mesmo botão **"Detectar documentos"**, a mesma lista
+de documentos com checkboxes, os mesmos atalhos "Marcar tudo"/"Desmarcar
+tudo" e o mesmo checkbox de "incluir a movimentação" repetidos aqui, para
+não precisar alternar entre as duas subseções. As duas telas compartilham
+o mesmo estado: detectar ou marcar/desmarcar um documento em qualquer uma
+das duas (ou direto na página do processo) atualiza a outra na hora.
+
+### Análise imediata
+
+1. Clique em "Detectar documentos" (nesta subseção ou em "Exportar
+   Documentos" — tanto faz) e marque quais documentos entram na análise
+   (na lista ou direto na página do processo) e se a movimentação deve
+   ser incluída.
+2. Escolha o **tipo de prompt** (por enquanto só há um cadastrado, ver
+   abaixo) e se o conteúdo deve ser **anonimizado antes de enviar** (mesma
+   anonimização de melhor esforço do "MD único" — CPF/CNPJ, telefone,
+   e-mail, endereços removidos e nomes abreviados; ver aviso na seção "MD
+   único" acima sobre os limites dessa anonimização).
+3. Clique em **"Analisar agora"**. A extensão extrai o texto dos
+   documentos selecionados (mesmo mecanismo do "MD único") e mostra uma
+   **estimativa de custo** (tokens aproximados e custo em dólares,
+   calculados por uma heurística de caracteres — não é o tokenizador real
+   do provedor) antes de gastar qualquer coisa de verdade.
+4. Clique em **"Confirmar e enviar"** para de fato chamar a API do
+   provedor escolhido (Claude ou Gemini, configurado nas configurações da
+   extensão — ver abaixo). Ou **"Cancelar"** para descartar sem gastar
+   nada.
+5. A resposta da IA aparece num campo de texto somente leitura, com um
+   botão **"Copiar"** para colar em outro lugar da página do processo. O
+   custo **real** da chamada (calculado a partir do uso de tokens
+   devolvido pela própria API) substitui a estimativa nesse momento.
+
+### Fila em lote (mais barato, para quando não precisa da resposta na hora)
+
+Ao lado da análise imediata, a mesma subseção tem um bloco **"Fila em
+lote"**, usando a [Message Batches API da
+Claude](https://platform.claude.com/docs/en/api/creating-message-batches):
+o mesmo pedido custa **50% menos**, mas a resposta não sai na hora — o
+lote é processado em segundo plano e pode levar até 24h (a maioria
+termina bem mais rápido). **Só funciona com o provedor Claude** — o Gemini
+não tem uma API de lote assíncrona equivalente cadastrada nesta extensão
+ainda. Isso é independente do rádio "Usar Claude"/"Usar Gemini" nas
+configurações: aquele seletor só afeta a **análise imediata**
+("Analisar agora"); a fila em lote sempre usa a chave/modelo da Claude
+configurados, mesmo que "Gemini" esteja selecionado ali.
+
+Fluxo:
+
+1. Em vez de (ou além de) "Analisar agora", clique em **"Adicionar à fila
+   em lote"**. A extensão já extrai o texto do processo nesse momento (o
+   lote pode ser enviado bem depois, mesmo sem a aba do processo mais
+   aberta) e mostra o item na lista da fila, com o custo estimado já com o
+   desconto de lote.
+2. Repita para quantos processos quiser — navegue para outro processo,
+   detecte, marque a seleção e "Adicionar à fila em lote" de novo. A fila
+   persiste mesmo fechando o painel.
+3. Quando terminar de montar a fila, clique em **"Enviar lote"** — todos
+   os itens da fila são enviados de uma vez, numa única chamada à API de
+   lotes, e a fila é esvaziada.
+4. O lote enviado aparece em **"Lotes enviados"**, com o status
+   ("processando..." ou a contagem de concluídos/com erro) e um botão
+   **"Verificar agora"** para checar manualmente sem esperar a checagem
+   automática (a extensão também verifica sozinha a cada 10 minutos,
+   mesmo com o painel fechado, via `chrome.alarms`). **Mesmo enquanto
+   ainda está "processando..."**, dá pra ver a quais processos aquele
+   lote se refere — a lista de números de processo (já extraídos no
+   momento de "Adicionar à fila em lote") aparece ali embaixo do status,
+   sem precisar esperar a resposta da IA terminar.
+5. Quando o lote termina, cada processo do lote aparece **separado**,
+   identificado pelo número do processo, com sua própria resposta num
+   campo de texto e um botão "Copiar" individual — nenhuma resposta fica
+   misturada com a de outro processo do mesmo lote.
+
+Os resultados dos lotes ficam disponíveis por 29 dias na Claude — depois
+disso, um lote muito antigo que ainda não tenha sido verificado pode não
+conseguir mais recuperar os resultados.
+
+### Configuração (provedor, modelo e chaves de API)
+
+Nas configurações da extensão (botão "Configurações"), na seção "Análise com
+IA":
+
+- Escolha o provedor: **Claude (Anthropic)** ou **Gemini (Google)**.
+- Informe a chave de API do provedor escolhido (os dois campos ficam
+  salvos, então dá para trocar de provedor sem digitar a chave de novo).
+  As chaves ficam guardadas localmente (`chrome.storage.local`, neste
+  navegador) e só são enviadas para a API do próprio provedor ao chamar
+  "Analisar com IA" — nunca para nenhum servidor da extensão (que não
+  existe).
+- Escolha o **modelo** de cada provedor, num select logo abaixo da
+  respectiva chave:
+  - Claude: Haiku 4.5 (padrão, mais barato), Sonnet 5 ou Sonnet 4.6.
+  - Gemini: Flash-Lite 3.1 (padrão, mais barato) ou Pro 3.1.
+
+  O modelo escolhido é o mesmo usado tanto na análise imediata quanto ao
+  adicionar itens à fila em lote (que sempre usa o modelo Claude
+  configurado, já que o lote só funciona com esse provedor — ver abaixo).
+  O padrão de cada provedor é sempre o modelo **mais barato** da lista;
+  modelos mais caros tendem a produzir relatórios mais elaborados, mas
+  custam mais por chamada.
+
+Sem uma chave configurada para o provedor escolhido, "Confirmar e enviar"
+retorna um erro pedindo para configurá-la.
+
+### Gerenciar prompts (editar, excluir, cadastrar)
+
+O texto de cada prompt é sempre **apensado ao final** do conteúdo do
+processo (documentos selecionados + movimentação, quando incluída) — ou
+seja, a IA recebe primeiro o conteúdo do processo e, depois dele, as
+instruções do prompt.
+
+Nas configurações da extensão, o botão **"Gerenciar prompts de análise"**
+(na seção "Análise com IA") abre uma tela para:
+
+- **Cadastrar** um novo prompt (título + texto).
+- **Editar** o título/texto de qualquer prompt já cadastrado, inclusive o
+  padrão da extensão.
+- **Excluir** qualquer prompt — exceto o último restante (é preciso
+  cadastrar outro antes de poder excluir o único que sobrou, já que a
+  etapa "escolher o tipo de prompt" da análise sempre precisa de ao menos
+  uma opção).
+
+O `<select>` de "Tipo de prompt" na análise (imediata e em lote) reflete
+essa lista automaticamente, sem precisar reabrir o painel.
+
+**Prompt padrão de fábrica: "Análise inicial - família"** — cadastrado
+automaticamente na primeira vez que a extensão roda (mas editável/
+excluível como qualquer outro depois disso). Pede um relatório no formato
+FIRAC+ (fatos, pedidos, tutela de urgência) com foco em direito de família
+(guarda, alimentos, visitas, partilha), linguagem que evita termos como
+"menor" em favor de "criança"/"adolescente", e perguntas adicionais ao
+final (advogado dativo, tabela de gastos, conta bancária, idade dos
+menores envolvidos).
+
+### Prompt avulso (digitar na hora, sem precisar cadastrar)
+
+Para algo pequeno e pontual que não vale a pena cadastrar, o "Tipo de
+prompt" tem duas opções lado a lado:
+
+- **Usar prompt salvo**: o `<select>` de sempre, com os prompts
+  cadastrados.
+- **Digitar agora**: troca o `<select>` por um campo de texto livre — o
+  que for digitado ali é usado direto naquela análise (imediata ou
+  adicionada à fila em lote), sem entrar no cadastro de prompts.
+
+Se quiser guardar esse prompt avulso para reaproveitar depois, marque
+**"Salvar este prompt para reutilizar depois"** (aparece um campo de
+título) — nesse caso ele é cadastrado antes da análise, passando a
+aparecer também no modo "Usar prompt salvo" dali em diante. Sem marcar
+essa opção, nada é salvo: o texto só existe para aquela chamada.
+
+### Custos e privacidade
+
+- Cada análise (imediata ou em lote) é uma chamada paga à API do provedor
+  escolhido, cobrada na conta cuja chave foi configurada — a extensão não
+  intermedia nem subsidia esse custo. A fila em lote custa 50% menos que a
+  análise imediata pelo mesmo prompt, em troca de não ter a resposta na
+  hora.
+- O conteúdo do processo (documentos + movimentação) sai do navegador do
+  usuário direto para a API do provedor escolhido. A anonimização é
+  **opcional e de melhor esforço** (mesmas limitações do "MD único") —
+  revise o que está sendo enviado antes de confirmar, especialmente em
+  processos com dados sensíveis.
+
+### Erro "Envio falhou: verifique se a rede interna está bloqueando..."
+
+A extensão detecta automaticamente quando uma chamada à API de IA nem
+chega a sair do navegador (o "Failed to fetch" genérico que o próprio
+navegador dá, sem detalhe nenhum, sempre que a requisição é bloqueada
+antes de sair - não é um erro vindo da Claude/Gemini) e mostra essa
+mensagem mais amigável em vez do erro técnico cru. O cenário mais comum é
+a rede/firewall da instituição bloqueando o domínio daquele provedor
+(indicado na própria mensagem). O detalhe técnico completo (nome do
+provedor + mensagem original do navegador) vem no final da mensagem, e
+também fica registrado no console do service worker (`chrome://extensions`
+→ link "service worker" da extensão → Inspecionar), em logs prefixados
+`[eproc-md] Falha de rede chamando ...`.
+
+Outra causa comum é a extensão ainda não ter os `host_permissions` mais
+recentes carregados - isso acontece logo após instalar ou atualizar a
+extensão (inclusive ao trocar de branch/versão durante o
+desenvolvimento). Para corrigir:
+
+1. Abra `chrome://extensions`.
+2. Clique no ícone de **recarregar** (↻) no card da extensão (não basta
+   ela já aparecer como "ativada" - é preciso recarregar de fato depois
+   de qualquer mudança no `manifest.json`).
+3. Tente "Analisar com IA" de novo.
+
+Se o erro persistir depois de recarregar, confira sua conexão com a
+internet e, no console do service worker (`chrome://extensions` → link
+"service worker" da extensão → Inspecionar), procure por logs
+`[eproc-md] Falha de rede chamando ...` para mais detalhes.
+
+**Se isso acontece só com UM provedor** (ex.: Gemini funciona normalmente,
+mas Claude sempre falha com esse erro, ou vice-versa) — descarte o motivo
+acima, já que os `host_permissions` são os mesmos para os dois. Isso é um
+forte indício de que a rede/firewall da instituição está bloqueando
+especificamente o domínio daquele provedor (`api.anthropic.com` ou
+`generativelanguage.googleapis.com`), algo comum em redes corporativas ou
+de órgãos públicos que já liberam domínios do Google (usados por diversos
+outros serviços), mas ainda não têm domínios de IA mais novos, como o da
+Anthropic, na lista de liberação. Para confirmar: abra
+`https://api.anthropic.com` (ou o domínio do outro provedor) direto numa
+aba do navegador - se a página também não carregar ali (erro de conexão,
+não uma página de erro 404 da própria Anthropic), o problema é da rede, e
+o suporte de TI da instituição precisa liberar esse domínio especificamente.
 
 ## Corregedoria
 

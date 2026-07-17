@@ -1395,6 +1395,626 @@ async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProces
   console.log(LOG_MD, "MD único concluído com sucesso.");
 }
 
+// ---- Analise com IA (Claude / Gemini) ----
+//
+// Reaproveita a mesma extracao de texto do MD unico (extrairTextoDocumentoMd,
+// agruparDocumentosPorEvento, construirSecaoMovimentacao, anonimizarTexto) -
+// so' que devolve o texto em memoria (para virar um prompt), em vez de gerar
+// e baixar um arquivo. So' processa os documentos ja' selecionados pelo
+// usuario no painel (que podem ser um subconjunto de todos os documentos do
+// processo), e a movimentacao so' entra se o usuario tiver marcado a opcao.
+//
+// Cadastro de prompts: guardado em chrome.storage.local (chave
+// "promptsIA"), editavel/excluivel/cadastravel pelo usuario nas
+// configuracoes da extensao - a lista de objetos {id, titulo, texto} e'
+// carregada sob demanda via "obterPromptsIA()" em vez de uma constante
+// fixa. O texto de cada prompt e' sempre APENSADO ao final do conteudo do
+// processo (documentos + eventual movimentacao), nunca antes. Na primeira
+// vez que a extensao roda (storage ainda vazio), a lista e' semeada com o
+// prompt abaixo ("Análise inicial - família") - que continua editavel e
+// excluivel como qualquer outro depois disso.
+const CHAVE_PROMPTS_IA = "promptsIA";
+
+const PROMPT_PADRAO_ANALISE_FAMILIA = {
+  id: "analise-inicial-familia",
+    titulo: "Análise inicial - família",
+    texto:
+      'Persona: Aja como um juiz de direito especialista em direito de família e sucessões, respondendo com tom profissional e de autoridade.\n\n' +
+      'Instruções de Estilo:\n\n' +
+      'Use uma linguagem clara, formal e precisa, sem jargões excessivos.\n' +
+      'Evite introduções desnecessárias. Inicie diretamente com os dados do processo.\n' +
+      'Quando referir-se a menores, use "criança" (0-11 anos) ou "adolescente" (12-17 anos) conforme aplicável. Nunca utilize os termos "menor", "menor púbere", "menor impúbere" ou expressões em latim.\n' +
+      'Indique a idade das crianças envolvidas na primeira menção.\n' +
+      'Evite redundâncias e seja econômico nas palavras.\n' +
+      'Formato e Estrutura: Utilize o formato FIRAC+ para um relatório analítico e detalhado do caso jurídico, seguindo o modelo abaixo. Estruture o texto em um fluxo contínuo, sem listas ou subtópicos, mantendo a linguagem jurídica e a fluidez.\n\n' +
+      '"RELATÓRIO\n\n' +
+      'Trata-se de [tipo de ação] proposta por [nome da(s) parte(s) autora(s)] contra [nome da(s) parte(s) requerida(s)], com o objetivo de [sintetizar o pedido da ação]. (Havendo interesse de menores, indicar a data de nascimento e idade entre parênteses, utilizando sempre \'filho\', \'criança\' ou \'adolescente\').\n\n' +
+      'Alega a parte autora que [listar os fatos alegados pela parte autora].  Além disso, [mencionar outras considerações pertinentes da petição inicial]. {mencione e resuma todos os fatos alegados. se necessário, crie novos parágrafos}\n\n' +
+      'Em sede de tutela de urgência, [especificar os pedidos, como tutela de urgência, evidência, liminar, ou antecipação de tutela. Caso não haja, omitir este parágrafo].\n\n' +
+      'Ao final, pretende [mencionar os pedidos a serem julgados, excluindo pedidos de citação, de intimação do Ministério Público e de justiça gratuita e de condenação em custas e honorários]".\n\n' +
+      'ORIENTAÇÕES FINAIS\n\n' +
+      '    Vá direto ao conteúdo, sem introduções ou cabeçalhos explicativos.\n' +
+      '    Use português formal e correto, sem erros ortográficos ou gramaticais.\n' +
+      '    Utilize sinônimos e termos comuns no meio jurídico.\n' +
+      '    Evite repetições, pleonasmos e redundâncias. Após o primeiro uso dos nomes das partes, pode-se optar por utilizar "autor" e "réu".\n' +
+      '    Nunca use "procedência" ou "improcedência da ação"; use "procedência" ou "improcedência do pedido".\n' +
+      '    Em casos de guarda, especifique se o pedido é de guarda unilateral ou compartilhada, e a justificativa.\n' +
+      '    No caso de alimentos, detalhe o valor solicitado e o fundamento.\n' +
+      '    Para visitas, informe os dias e horários sugeridos.\n' +
+      '    Se houver partilha, descreva os bens, incluindo detalhes como matrícula, placa, posse, etc.\n\n' +
+      'PERGUNTAS ADICIONAIS\n\n' +
+      'Ao final responda às seguintes perguntas em tópicos:\n\n' +
+      '    O advogado é dativo/nomeado?\n\n' +
+      '    Foi apresentada uma tabela de gastos ou rendimentos? Se sim, elabore uma tabela detalhada com as despesas mês a mês.\n\n' +
+      '    Foi indicada conta bancária para depósito dos alimentos? Informe a conta e CPF do titular.\n\n' +
+      '    Qual o nome e a idade dos menores envolvidos?',
+};
+
+function obterPromptsIA() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [CHAVE_PROMPTS_IA]: null }, (itens) => {
+      const lista = itens[CHAVE_PROMPTS_IA];
+      resolve(Array.isArray(lista) && lista.length > 0 ? lista : [PROMPT_PADRAO_ANALISE_FAMILIA]);
+    });
+  });
+}
+
+function salvarPromptsIA(lista) {
+  return new Promise((resolve) => chrome.storage.local.set({ [CHAVE_PROMPTS_IA]: lista }, resolve));
+}
+
+// Cadastra (sem "id") ou atualiza (com "id" existente) um prompt. Devolve
+// a lista inteira atualizada, para o painel so' precisar re-renderizar.
+async function salvarOuAtualizarPromptIA(prompt) {
+  const titulo = (prompt && prompt.titulo || "").trim();
+  const texto = (prompt && prompt.texto || "").trim();
+  if (!titulo) throw new Error("Informe um título para o prompt.");
+  if (!texto) throw new Error("Informe o texto do prompt.");
+
+  const lista = await obterPromptsIA();
+
+  if (prompt.id) {
+    const item = lista.find((p) => p.id === prompt.id);
+    if (!item) throw new Error("Prompt não encontrado (pode ter sido excluído).");
+    item.titulo = titulo;
+    item.texto = texto;
+  } else {
+    lista.push({
+      id: `prompt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      titulo,
+      texto,
+    });
+  }
+
+  await salvarPromptsIA(lista);
+  return lista;
+}
+
+// Nunca deixa a lista vazia - sem nenhum prompt cadastrado, a etapa
+// "escolher o tipo de prompt" do fluxo de analise (imediata ou em lote)
+// ficaria sem nenhuma opcao para escolher.
+async function removerPromptIA(id) {
+  const lista = await obterPromptsIA();
+  if (lista.length <= 1) {
+    throw new Error("Não é possível excluir o último prompt cadastrado - cadastre outro antes de excluir este.");
+  }
+  const listaAtualizada = lista.filter((p) => p.id !== id);
+  await salvarPromptsIA(listaAtualizada);
+  return listaAtualizada;
+}
+
+// Catalogo de modelos escolhiveis por provedor (o usuario escolhe qual
+// usar nas configuracoes da extensao - ver "modeloClaude"/"modeloGemini"
+// em popup.js). O PRIMEIRO de cada lista e' sempre o mais barato, usado
+// como padrao. Precos em USD por milhao de tokens ("MTok"); usados so'
+// para a ESTIMATIVA previa (heuristica de caracteres/4) e para o custo
+// real (calculado depois, a partir do "usage" que a propria API devolve).
+const MODELOS_IA_DISPONIVEIS = {
+  claude: [
+    { id: "claude-haiku-4-5", nome: "Claude Haiku 4.5 (mais barato)", precoEntradaPorMTok: 1, precoSaidaPorMTok: 5 },
+    { id: "claude-sonnet-5", nome: "Claude Sonnet 5", precoEntradaPorMTok: 3, precoSaidaPorMTok: 15 },
+    { id: "claude-sonnet-4-6", nome: "Claude Sonnet 4.6", precoEntradaPorMTok: 3, precoSaidaPorMTok: 15 },
+  ],
+  gemini: [
+    { id: "gemini-3.1-flash-lite", nome: "Gemini 3.1 Flash-Lite (mais barato)", precoEntradaPorMTok: 0.25, precoSaidaPorMTok: 1.5 },
+    { id: "gemini-3.1-pro", nome: "Gemini 3.1 Pro", precoEntradaPorMTok: 2, precoSaidaPorMTok: 12 },
+  ],
+};
+
+function modeloPadrao(provedor) {
+  return (MODELOS_IA_DISPONIVEIS[provedor] || MODELOS_IA_DISPONIVEIS.claude)[0].id;
+}
+
+function obterInfoModelo(provedor, modeloId) {
+  const lista = MODELOS_IA_DISPONIVEIS[provedor] || MODELOS_IA_DISPONIVEIS.claude;
+  return lista.find((m) => m.id === modeloId) || lista[0];
+}
+
+// Heuristica grosseira (nao e' o tokenizador real de nenhum dos dois
+// provedores) so' para dar uma ideia de ordem de grandeza ANTES de chamar a
+// API de verdade - ~4 caracteres por token e' uma media razoavel para texto
+// em português.
+function estimarTokensPorCaracteres(texto) {
+  return Math.ceil((texto || "").length / 4);
+}
+
+function estimarCustoUsd(tokensEntrada, tokensSaidaEstimados, precos) {
+  const custoEntrada = (tokensEntrada / 1_000_000) * precos.precoEntradaPorMTok;
+  const custoSaida = (tokensSaidaEstimados / 1_000_000) * precos.precoSaidaPorMTok;
+  return custoEntrada + custoSaida;
+}
+
+// Monta o texto do processo (documentos selecionados + eventual
+// movimentacao) que vai virar a primeira parte do prompt - mesma logica de
+// extracao/agrupamento por evento do MD unico, mas devolvida como string em
+// memoria, sem gerar nem baixar arquivo nenhum.
+async function construirTextoProcessoParaIA(documentos, resolverUrl, movimentacao, anonimizar) {
+  const secoesEventos = [];
+
+  let abaPdf = null;
+  if (documentos.some((doc) => doc.mimetype === "pdf")) {
+    const origemEproc = `${new URL(documentos[0].href).origin}/eproc/controlador.php`;
+    abaPdf = await prepararAbaProcessamentoPdfMd(origemEproc);
+  }
+
+  async function processarUmDocumento(doc) {
+    let corpo;
+    try {
+      const urlReal = await resolverUrl(doc);
+      if (doc.mimetype === "html") {
+        const { texto, erro } = await obterTextoHtmlReal(urlReal);
+        corpo = texto || `_Não foi possível extrair o conteúdo deste documento (${erro || "motivo desconhecido"})._`;
+      } else {
+        const resultado = await extrairTextoDocumentoMd(abaPdf && abaPdf.id, urlReal, doc.mimetype, doc.nome);
+        corpo = resultado.erro && !resultado.texto
+          ? `_Não foi possível extrair o texto deste documento (${resultado.erro})._`
+          : resultado.texto || "_(sem texto identificado)_";
+      }
+    } catch (e) {
+      corpo = `_Não foi possível processar este documento (${String(e)})._`;
+    }
+    return `#### ${doc.nome}\n\n${corpo.trim()}\n`;
+  }
+
+  try {
+    const { porEvento, semEvento } = agruparDocumentosPorEvento(documentos, movimentacao);
+
+    if (movimentacao && movimentacao.length > 0) {
+      for (const evento of movimentacao) {
+        const linhas = [`### ${rotuloEvento(evento)}`, ""];
+        const docsDoEvento = evento.numeroEvento != null ? porEvento.get(evento.numeroEvento) || [] : [];
+        if (docsDoEvento.length === 0) {
+          linhas.push("_Nenhum documento anexado a este evento._");
+        } else {
+          for (const doc of docsDoEvento) linhas.push(await processarUmDocumento(doc));
+        }
+        secoesEventos.push(linhas.join("\n"));
+      }
+    } else if (movimentacao) {
+      secoesEventos.push(construirSecaoMovimentacao(movimentacao));
+    }
+
+    if (semEvento.length > 0) {
+      const linhas = ["### Documentos sem evento identificado", ""];
+      for (const doc of semEvento) linhas.push(await processarUmDocumento(doc));
+      secoesEventos.push(linhas.join("\n"));
+    }
+  } finally {
+    if (abaPdf) chrome.tabs.remove(abaPdf.id).catch(() => {});
+  }
+
+  const corpo = secoesEventos.join("\n\n");
+  return anonimizar ? anonimizarTexto(corpo) : corpo;
+}
+
+// fetch() rejeita com um TypeError generico ("Failed to fetch" / "NetworkError
+// when attempting to fetch resource", sem mais detalhe nenhum - por design do
+// navegador, pra nao vazar informacao de rede pra scripts) sempre que a
+// requisicao nem chega a sair: host ainda nao liberado em host_permissions
+// (comum logo depois de adicionar um host novo ao manifest.json, ate' a
+// extensao ser RECARREGADA em chrome://extensions - o icone de recarregar no
+// card da extensao; so' salvar o arquivo nao e' suficiente), sem internet, ou
+// o host realmente fora do ar. Troca essa mensagem generica por uma que
+// aponta a causa mais provavel, mantendo a mensagem original do navegador
+// entre parenteses para quem for investigar mais a fundo.
+async function fetchComDiagnostico(url, opcoes, nomeServico) {
+  try {
+    return await fetch(url, opcoes);
+  } catch (e) {
+    console.error(LOG_MD, `Falha de rede chamando ${nomeServico} (${url}):`, e);
+    const host = new URL(url).host;
+    // "Failed to fetch" e' o TypeError generico que o navegador da' quando
+    // a requisicao nem chega a sair - por design, sem detalhe nenhum (nao
+    // vaza informacao de rede pra scripts). A mensagem principal fica
+    // curta e direta (o cenario mais comum e' bloqueio de rede/firewall da
+    // instituicao, ja que host_permissions ja' libera o dominio); o
+    // detalhe tecnico e as outras causas possiveis (extensao desatualizada,
+    // sem internet) ficam depois, pra quem for investigar mais a fundo.
+    throw new Error(
+      `Envio falhou: verifique se a rede interna está bloqueando o acesso à API (${host}). ` +
+        `Se não for isso, confira sua conexão com a internet ou recarregue a extensão em chrome://extensions ` +
+        `(comum logo após atualizar) e tente de novo. Detalhe técnico: "${nomeServico}" - ${e && e.message}.`
+    );
+  }
+}
+
+// Chamada direta pela extensao (sem backend proprio) - por isso precisa do
+// cabecalho "anthropic-dangerous-direct-browser-access": a Anthropic bloqueia
+// por padrao chamadas feitas direto do navegador (para evitar que uma chave
+// de API vaze para qualquer script de uma pagina web); aqui e' seguro porque
+// a chave e' digitada pelo proprio usuario nas configuracoes da extensao e
+// so' e' usada para chamar a API dele mesmo.
+async function chamarClaudeAPI(apiKey, promptCompleto, modelo) {
+  const resposta = await fetchComDiagnostico("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: modelo || modeloPadrao("claude"),
+      max_tokens: 8192,
+      messages: [{ role: "user", content: promptCompleto }],
+    }),
+  }, "API da Claude");
+
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API da Claude.`);
+  }
+
+  const texto = (dados.content || []).map((bloco) => bloco.text || "").join("");
+  const tokensEntrada = dados.usage ? dados.usage.input_tokens : null;
+  const tokensSaida = dados.usage ? dados.usage.output_tokens : null;
+  return { texto, tokensEntrada, tokensSaida };
+}
+
+async function chamarGeminiAPI(apiKey, promptCompleto, modelo) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo || modeloPadrao("gemini")}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const resposta = await fetchComDiagnostico(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ contents: [{ parts: [{ text: promptCompleto }] }] }),
+  }, "API do Gemini");
+
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API do Gemini.`);
+  }
+
+  const candidato = dados.candidates && dados.candidates[0];
+  const texto = candidato && candidato.content && candidato.content.parts
+    ? candidato.content.parts.map((parte) => parte.text || "").join("")
+    : "";
+  const tokensEntrada = dados.usageMetadata ? dados.usageMetadata.promptTokenCount : null;
+  const tokensSaida = dados.usageMetadata ? dados.usageMetadata.candidatesTokenCount : null;
+  return { texto, tokensEntrada, tokensSaida };
+}
+
+// Fase 1 do fluxo (mensagem "ANALISAR_IA_EXTRAIR"): extrai o texto e devolve
+// junto uma ESTIMATIVA de custo, sem chamar a API de IA ainda - a chamada de
+// verdade so' acontece se o usuario confirmar (fase 2, "ANALISAR_IA_ENVIAR"),
+// depois de ver a estimativa.
+async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, modelo, promptId, promptTextoAvulso, aoProgredir) {
+  if (aoProgredir) aoProgredir("Extraindo o conteúdo dos documentos selecionados...");
+  const obterUrlResolvida = criarResolvedorUrlDocumento();
+  const texto = await construirTextoProcessoParaIA(documentos, obterUrlResolvida, movimentacao, anonimizar);
+
+  const modeloEscolhido = modelo || modeloPadrao(provedor);
+  const precos = obterInfoModelo(provedor, modeloEscolhido);
+  const textoPrompt = promptTextoAvulso || (await obterTextoPromptEscolhido(promptId));
+  const tokensEntradaEstimados = estimarTokensPorCaracteres(texto) + estimarTokensPorCaracteres(textoPrompt);
+  // Sem ainda saber o tamanho da resposta, usa a propria entrada como
+  // aproximacao grosseira do tamanho da saida (relatorios FIRAC costumam
+  // ficar na mesma ordem de grandeza do texto de entrada) - so' para dar
+  // uma ideia de custo maximo plausivel antes de enviar.
+  const custoEstimadoUsd = estimarCustoUsd(tokensEntradaEstimados, tokensEntradaEstimados, precos);
+
+  return {
+    texto,
+    estimativa: {
+      provedor,
+      modelo: modeloEscolhido,
+      tokensEntradaEstimados,
+      custoEstimadoUsd,
+    },
+  };
+}
+
+// Devolve so' o texto do prompt salvo (sem lancar erro se nao encontrar -
+// usado na ESTIMATIVA, onde um promptId ausente/invalido so' acontece no
+// modo "prompt avulso", que nem usa isso: nesse caso a chamada nem
+// acontece, ja' que o texto avulso e' usado direto).
+async function obterTextoPromptEscolhido(promptId) {
+  const prompts = await obterPromptsIA();
+  const prompt = prompts.find((p) => p.id === promptId);
+  return prompt ? prompt.texto : "";
+}
+
+// Apensa o texto do prompt escolhido ao final do texto do processo -
+// sempre nessa ordem (conteudo do processo primeiro, prompt depois),
+// compartilhado entre o envio imediato e o envio em lote. "promptTextoAvulso"
+// (modo "digitar agora" sem salvar, ver popup.js) tem prioridade sobre
+// "promptId" quando presente - nesse caso o texto nunca passa pelo
+// cadastro de prompts, so' e' usado nessa chamada mesmo.
+async function montarPromptCompleto(texto, promptId, promptTextoAvulso) {
+  let textoPrompt = promptTextoAvulso;
+  if (!textoPrompt) {
+    const prompts = await obterPromptsIA();
+    const prompt = prompts.find((p) => p.id === promptId);
+    if (!prompt) throw new Error("Tipo de prompt não encontrado (pode ter sido excluído nas configurações).");
+    textoPrompt = prompt.texto;
+  }
+  return `${texto}\n\n---\n\n${textoPrompt}`;
+}
+
+// Fase 2: chama a API do provedor selecionado, devolvendo tambem o custo
+// REAL (calculado a partir do "usage" que a propria resposta da API traz).
+async function executarAnaliseIA(texto, promptId, promptTextoAvulso, provedor, modelo, apiKey) {
+  if (!apiKey) throw new Error(`Nenhuma chave de API configurada para "${provedor}". Configure-a nas configurações da extensão.`);
+  const promptCompleto = await montarPromptCompleto(texto, promptId, promptTextoAvulso);
+  const modeloEscolhido = modelo || modeloPadrao(provedor);
+
+  const resultado = provedor === "gemini"
+    ? await chamarGeminiAPI(apiKey, promptCompleto, modeloEscolhido)
+    : await chamarClaudeAPI(apiKey, promptCompleto, modeloEscolhido);
+
+  const precos = obterInfoModelo(provedor, modeloEscolhido);
+  const custoRealUsd = resultado.tokensEntrada != null && resultado.tokensSaida != null
+    ? estimarCustoUsd(resultado.tokensEntrada, resultado.tokensSaida, precos)
+    : null;
+
+  return { resposta: resultado.texto, custoRealUsd };
+}
+
+// ---- Fila em lote (Claude Message Batches API) ----
+//
+// A API de lotes da Claude (POST /v1/messages/batches) processa varias
+// requisicoes de uma vez com 50% de desconto no preco - mas de forma
+// ASSINCRONA (pode levar ate' 24h). So' esta' disponivel para o provedor
+// Claude aqui (o Gemini nao tem uma API de lote assincrona equivalente
+// cadastrada nesta extensao ainda).
+//
+// A fila (itens ainda nao enviados) e os lotes ja' enviados ficam em
+// chrome.storage.local - assim sobrevivem a fechar o painel e a trocar de
+// processo (o texto de cada item ja' e' extraido no momento de "Adicionar
+// a fila", entao o lote pode ser enviado bem depois, mesmo sem a aba do
+// processo original mais aberta). "chrome.alarms" acorda o service worker
+// periodicamente para checar se algum lote pendente ja' terminou -
+// diferente de um "setTimeout" comum, sobrevive ao service worker sendo
+// encerrado por inatividade entre uma checagem e outra.
+const CHAVE_FILA_LOTE_IA = "filaLoteIA";
+const CHAVE_LOTES_ENVIADOS_IA = "lotesEnviadosIA";
+const NOME_ALARME_LOTES_IA = "verificarLotesIA";
+const INTERVALO_ALARME_LOTES_IA_MINUTOS = 10;
+
+function obterFilaLoteIA() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [CHAVE_FILA_LOTE_IA]: [] }, (itens) => resolve(itens[CHAVE_FILA_LOTE_IA]));
+  });
+}
+
+function salvarFilaLoteIA(fila) {
+  return new Promise((resolve) => chrome.storage.local.set({ [CHAVE_FILA_LOTE_IA]: fila }, resolve));
+}
+
+function obterLotesEnviadosIA() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [CHAVE_LOTES_ENVIADOS_IA]: [] }, (itens) => resolve(itens[CHAVE_LOTES_ENVIADOS_IA]));
+  });
+}
+
+function salvarLotesEnviadosIA(lotes) {
+  return new Promise((resolve) => chrome.storage.local.set({ [CHAVE_LOTES_ENVIADOS_IA]: lotes }, resolve));
+}
+
+function obterChaveClaudeConfigurada() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ chaveClaude: "" }, (itens) => resolve(itens.chaveClaude));
+  });
+}
+
+// Extrai o texto (mesma extracao/estimativa da analise imediata) e
+// adiciona um novo item a' fila, ja' com o texto pronto para ser enviado
+// depois. Devolve a fila atualizada inteira, para o painel so' precisar
+// re-renderizar a lista.
+async function adicionarItemFilaLoteIA(numeroProcesso, documentos, movimentacao, anonimizar, promptId, promptTextoAvulso, modelo) {
+  const modeloEscolhido = modelo || modeloPadrao("claude");
+  const { texto, estimativa } = await extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, "claude", modeloEscolhido, promptId, promptTextoAvulso, () => {});
+
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    numeroProcesso,
+    promptId: promptTextoAvulso ? null : promptId,
+    promptTextoAvulso: promptTextoAvulso || null,
+    modelo: modeloEscolhido,
+    texto,
+    estimativa,
+    criadoEm: Date.now(),
+  };
+
+  const fila = await obterFilaLoteIA();
+  fila.push(item);
+  await salvarFilaLoteIA(fila);
+  return fila;
+}
+
+async function removerItemFilaLoteIA(id) {
+  const fila = await obterFilaLoteIA();
+  const filaAtualizada = fila.filter((item) => item.id !== id);
+  await salvarFilaLoteIA(filaAtualizada);
+  return filaAtualizada;
+}
+
+// Envia TODA a fila atual como um unico lote (uma unica chamada a` API de
+// lotes, com uma requisicao por item) - a fila e' esvaziada so' se o envio
+// for bem sucedido.
+async function enviarLoteIA(apiKey) {
+  const fila = await obterFilaLoteIA();
+  if (fila.length === 0) throw new Error("A fila está vazia - adicione ao menos um processo antes de enviar.");
+
+  const requests = [];
+  for (const item of fila) {
+    requests.push({
+      custom_id: item.id,
+      params: {
+        model: item.modelo || modeloPadrao("claude"),
+        max_tokens: 8192,
+        messages: [{ role: "user", content: await montarPromptCompleto(item.texto, item.promptId, item.promptTextoAvulso) }],
+      },
+    });
+  }
+
+  const resposta = await fetchComDiagnostico("https://api.anthropic.com/v1/messages/batches", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({ requests }),
+  }, "API de lotes da Claude");
+
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao enviar o lote.`);
+  }
+
+  const lote = {
+    batchId: dados.id,
+    status: dados.processing_status === "ended" ? "ended" : "in_progress",
+    contagens: dados.request_counts || null,
+    criadoEm: Date.now(),
+    itens: fila.map((item) => ({ customId: item.id, numeroProcesso: item.numeroProcesso, promptId: item.promptId })),
+    resultadosPorItem: {},
+  };
+
+  const lotes = await obterLotesEnviadosIA();
+  lotes.push(lote);
+  await salvarLotesEnviadosIA(lotes);
+  await salvarFilaLoteIA([]);
+
+  chrome.alarms.create(NOME_ALARME_LOTES_IA, { periodInMinutes: INTERVALO_ALARME_LOTES_IA_MINUTOS });
+
+  return lote;
+}
+
+// Consulta o status de UM lote na API; se ja' tiver terminado, tambem
+// busca e devolve os resultados (results_url e' no mesmo dominio
+// api.anthropic.com, ja' liberado em host_permissions).
+async function consultarStatusLoteIA(batchId, apiKey) {
+  const headers = {
+    "x-api-key": apiKey,
+    "anthropic-version": "2023-06-01",
+    "anthropic-dangerous-direct-browser-access": "true",
+  };
+
+  const resposta = await fetchComDiagnostico(`https://api.anthropic.com/v1/messages/batches/${batchId}`, { headers }, "API de lotes da Claude");
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao consultar o lote.`);
+  }
+
+  if (dados.processing_status !== "ended") {
+    return { status: "in_progress", contagens: dados.request_counts || null };
+  }
+
+  const respostaResultados = await fetchComDiagnostico(dados.results_url, { headers }, "API de lotes da Claude (resultados)");
+  const textoJsonl = await respostaResultados.text();
+  const linhas = textoJsonl.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  const resultadosPorItem = {};
+  for (const linha of linhas) {
+    const registro = JSON.parse(linha);
+    const resultado = registro.result || {};
+    if (resultado.type === "succeeded") {
+      const texto = ((resultado.message && resultado.message.content) || [])
+        .map((bloco) => bloco.text || "")
+        .join("");
+      resultadosPorItem[registro.custom_id] = { resposta: texto, erro: null };
+    } else {
+      resultadosPorItem[registro.custom_id] = {
+        resposta: null,
+        erro: resultado.error ? resultado.error.message || resultado.type : resultado.type || "Falha desconhecida",
+      };
+    }
+  }
+
+  return { status: "ended", contagens: dados.request_counts || null, resultadosPorItem };
+}
+
+// Chamada manualmente (botao "Verificar agora") OU pelo alarme periodico -
+// atualiza SO' o lote indicado no storage.
+async function verificarEAtualizarLoteIA(batchId, apiKey) {
+  const resultado = await consultarStatusLoteIA(batchId, apiKey);
+  const lotes = await obterLotesEnviadosIA();
+  const lote = lotes.find((l) => l.batchId === batchId);
+  if (lote) {
+    lote.status = resultado.status;
+    lote.contagens = resultado.contagens;
+    if (resultado.status === "ended") lote.resultadosPorItem = resultado.resultadosPorItem;
+    await salvarLotesEnviadosIA(lotes);
+  }
+  return lote;
+}
+
+// Roda a cada disparo do alarme "verificarLotesIA": verifica todos os
+// lotes ainda pendentes de uma vez; se nenhum restar pendente, desliga o
+// proprio alarme (nao ha' motivo para continuar acordando o service worker
+// sem nenhum lote em andamento).
+async function verificarTodosLotesPendentesIA() {
+  const apiKey = await obterChaveClaudeConfigurada();
+  if (!apiKey) return;
+
+  const lotes = await obterLotesEnviadosIA();
+  const pendentes = lotes.filter((l) => l.status !== "ended");
+  if (pendentes.length === 0) {
+    chrome.alarms.clear(NOME_ALARME_LOTES_IA);
+    return;
+  }
+
+  let houveMudanca = false;
+  for (const lote of pendentes) {
+    try {
+      const resultado = await consultarStatusLoteIA(lote.batchId, apiKey);
+      lote.status = resultado.status;
+      lote.contagens = resultado.contagens;
+      if (resultado.status === "ended") {
+        lote.resultadosPorItem = resultado.resultadosPorItem;
+        houveMudanca = true;
+      }
+    } catch (e) {
+      console.error("[eproc-ia-lote] Falha ao verificar lote", lote.batchId, ":", e);
+    }
+  }
+
+  await salvarLotesEnviadosIA(lotes);
+  if (houveMudanca) {
+    chrome.runtime.sendMessage({ tipo: "IA_LOTE_ATUALIZADA_STATUS" }).catch(() => {});
+  }
+  if (lotes.every((l) => l.status === "ended")) {
+    chrome.alarms.clear(NOME_ALARME_LOTES_IA);
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarme) => {
+  if (alarme.name === NOME_ALARME_LOTES_IA) verificarTodosLotesPendentesIA();
+});
+
+// Ao iniciar o service worker (instalacao, atualizacao, ou so' voltar de
+// ter sido encerrado por inatividade), religa o alarme se ainda houver
+// algum lote pendente - os alarmes do chrome.alarms sobrevivem ao service
+// worker ser encerrado, mas nao a extensao ser reinstalada/atualizada.
+(async () => {
+  const lotes = await obterLotesEnviadosIA();
+  if (lotes.some((l) => l.status !== "ended")) {
+    chrome.alarms.create(NOME_ALARME_LOTES_IA, { periodInMinutes: INTERVALO_ALARME_LOTES_IA_MINUTOS });
+  }
+})();
+
 // ---- Orquestracao geral ----
 
 async function processarFila(numeroProcesso, documentos, opcoes, movimentacao) {
@@ -7717,6 +8337,125 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false, mdUnico: false };
     processarFila(mensagem.numeroProcesso, mensagem.documentos, opcoes, mensagem.movimentacao);
     sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "ANALISAR_IA_EXTRAIR") {
+    extrairTextoParaAnaliseIA(
+      mensagem.documentos,
+      mensagem.movimentacao,
+      !!mensagem.anonimizar,
+      mensagem.provedor,
+      mensagem.modelo,
+      mensagem.promptId,
+      mensagem.promptTextoAvulso,
+      (texto) => {
+        chrome.runtime.sendMessage({ tipo: "PROGRESSO_ANALISE_IA", fase: "extraindo", texto }).catch(() => {});
+      }
+    )
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "ANALISE_IA_TEXTO_PRONTO", ok: true, ...resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "ANALISE_IA_TEXTO_PRONTO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "ANALISAR_IA_ENVIAR") {
+    executarAnaliseIA(mensagem.texto, mensagem.promptId, mensagem.promptTextoAvulso, mensagem.provedor, mensagem.modelo, mensagem.apiKey)
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "ANALISE_IA_RESULTADO", ok: true, ...resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "ANALISE_IA_RESULTADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_ADICIONAR") {
+    adicionarItemFilaLoteIA(
+      mensagem.numeroProcesso,
+      mensagem.documentos,
+      mensagem.movimentacao,
+      !!mensagem.anonimizar,
+      mensagem.promptId,
+      mensagem.promptTextoAvulso,
+      mensagem.modelo
+    )
+      .then((fila) => sendResponse({ ok: true, fila }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_REMOVER") {
+    removerItemFilaLoteIA(mensagem.id)
+      .then((fila) => sendResponse({ ok: true, fila }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "PROMPTS_IA_LISTAR") {
+    obterPromptsIA()
+      .then((prompts) => sendResponse({ ok: true, prompts }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "PROMPTS_IA_SALVAR") {
+    salvarOuAtualizarPromptIA(mensagem.prompt)
+      .then((prompts) => sendResponse({ ok: true, prompts }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "PROMPTS_IA_REMOVER") {
+    removerPromptIA(mensagem.id)
+      .then((prompts) => sendResponse({ ok: true, prompts }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_LISTAR") {
+    Promise.all([obterFilaLoteIA(), obterLotesEnviadosIA()])
+      .then(([fila, lotes]) => sendResponse({ ok: true, fila, lotes }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_ENVIAR") {
+    enviarLoteIA(mensagem.apiKey)
+      .then((lote) => sendResponse({ ok: true, lote }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_VERIFICAR") {
+    obterChaveClaudeConfigurada()
+      .then((apiKey) => verificarEAtualizarLoteIA(mensagem.batchId, apiKey))
+      .then((lote) => {
+        sendResponse({ ok: true, lote });
+        chrome.runtime.sendMessage({ tipo: "IA_LOTE_ATUALIZADA_STATUS" }).catch(() => {});
+      })
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
     return true;
   }
 
