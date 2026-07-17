@@ -1618,15 +1618,20 @@ async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, p
   };
 }
 
-// Fase 2: apensa o prompt escolhido ao final do texto do processo e chama a
-// API do provedor selecionado, devolvendo tambem o custo REAL (calculado a
-// partir do "usage" que a propria resposta da API traz).
-async function executarAnaliseIA(texto, promptId, provedor, apiKey) {
+// Apensa o texto do prompt escolhido ao final do texto do processo -
+// sempre nessa ordem (conteudo do processo primeiro, prompt depois),
+// compartilhado entre o envio imediato e o envio em lote.
+function montarPromptCompleto(texto, promptId) {
   const prompt = PROMPTS_IA.find((p) => p.id === promptId);
   if (!prompt) throw new Error("Tipo de prompt não encontrado.");
-  if (!apiKey) throw new Error(`Nenhuma chave de API configurada para "${provedor}". Configure-a nas configurações da extensão.`);
+  return `${texto}\n\n---\n\n${prompt.texto}`;
+}
 
-  const promptCompleto = `${texto}\n\n---\n\n${prompt.texto}`;
+// Fase 2: chama a API do provedor selecionado, devolvendo tambem o custo
+// REAL (calculado a partir do "usage" que a propria resposta da API traz).
+async function executarAnaliseIA(texto, promptId, provedor, apiKey) {
+  if (!apiKey) throw new Error(`Nenhuma chave de API configurada para "${provedor}". Configure-a nas configurações da extensão.`);
+  const promptCompleto = montarPromptCompleto(texto, promptId);
 
   const resultado = provedor === "gemini"
     ? await chamarGeminiAPI(apiKey, promptCompleto)
@@ -1639,6 +1644,246 @@ async function executarAnaliseIA(texto, promptId, provedor, apiKey) {
 
   return { resposta: resultado.texto, custoRealUsd };
 }
+
+// ---- Fila em lote (Claude Message Batches API) ----
+//
+// A API de lotes da Claude (POST /v1/messages/batches) processa varias
+// requisicoes de uma vez com 50% de desconto no preco - mas de forma
+// ASSINCRONA (pode levar ate' 24h). So' esta' disponivel para o provedor
+// Claude aqui (o Gemini nao tem uma API de lote assincrona equivalente
+// cadastrada nesta extensao ainda).
+//
+// A fila (itens ainda nao enviados) e os lotes ja' enviados ficam em
+// chrome.storage.local - assim sobrevivem a fechar o painel e a trocar de
+// processo (o texto de cada item ja' e' extraido no momento de "Adicionar
+// a fila", entao o lote pode ser enviado bem depois, mesmo sem a aba do
+// processo original mais aberta). "chrome.alarms" acorda o service worker
+// periodicamente para checar se algum lote pendente ja' terminou -
+// diferente de um "setTimeout" comum, sobrevive ao service worker sendo
+// encerrado por inatividade entre uma checagem e outra.
+const CHAVE_FILA_LOTE_IA = "filaLoteIA";
+const CHAVE_LOTES_ENVIADOS_IA = "lotesEnviadosIA";
+const NOME_ALARME_LOTES_IA = "verificarLotesIA";
+const INTERVALO_ALARME_LOTES_IA_MINUTOS = 10;
+
+function obterFilaLoteIA() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [CHAVE_FILA_LOTE_IA]: [] }, (itens) => resolve(itens[CHAVE_FILA_LOTE_IA]));
+  });
+}
+
+function salvarFilaLoteIA(fila) {
+  return new Promise((resolve) => chrome.storage.local.set({ [CHAVE_FILA_LOTE_IA]: fila }, resolve));
+}
+
+function obterLotesEnviadosIA() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [CHAVE_LOTES_ENVIADOS_IA]: [] }, (itens) => resolve(itens[CHAVE_LOTES_ENVIADOS_IA]));
+  });
+}
+
+function salvarLotesEnviadosIA(lotes) {
+  return new Promise((resolve) => chrome.storage.local.set({ [CHAVE_LOTES_ENVIADOS_IA]: lotes }, resolve));
+}
+
+function obterChaveClaudeConfigurada() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ chaveClaude: "" }, (itens) => resolve(itens.chaveClaude));
+  });
+}
+
+// Extrai o texto (mesma extracao/estimativa da analise imediata) e
+// adiciona um novo item a' fila, ja' com o texto pronto para ser enviado
+// depois. Devolve a fila atualizada inteira, para o painel so' precisar
+// re-renderizar a lista.
+async function adicionarItemFilaLoteIA(numeroProcesso, documentos, movimentacao, anonimizar, promptId) {
+  const { texto, estimativa } = await extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, "claude", () => {});
+
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    numeroProcesso,
+    promptId,
+    texto,
+    estimativa,
+    criadoEm: Date.now(),
+  };
+
+  const fila = await obterFilaLoteIA();
+  fila.push(item);
+  await salvarFilaLoteIA(fila);
+  return fila;
+}
+
+async function removerItemFilaLoteIA(id) {
+  const fila = await obterFilaLoteIA();
+  const filaAtualizada = fila.filter((item) => item.id !== id);
+  await salvarFilaLoteIA(filaAtualizada);
+  return filaAtualizada;
+}
+
+// Envia TODA a fila atual como um unico lote (uma unica chamada a` API de
+// lotes, com uma requisicao por item) - a fila e' esvaziada so' se o envio
+// for bem sucedido.
+async function enviarLoteIA(apiKey) {
+  const fila = await obterFilaLoteIA();
+  if (fila.length === 0) throw new Error("A fila está vazia - adicione ao menos um processo antes de enviar.");
+
+  const requests = fila.map((item) => ({
+    custom_id: item.id,
+    params: {
+      model: CONFIG_MODELOS_IA.claude.modelo,
+      max_tokens: 8192,
+      messages: [{ role: "user", content: montarPromptCompleto(item.texto, item.promptId) }],
+    },
+  }));
+
+  const resposta = await fetch("https://api.anthropic.com/v1/messages/batches", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({ requests }),
+  });
+
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao enviar o lote.`);
+  }
+
+  const lote = {
+    batchId: dados.id,
+    status: dados.processing_status === "ended" ? "ended" : "in_progress",
+    contagens: dados.request_counts || null,
+    criadoEm: Date.now(),
+    itens: fila.map((item) => ({ customId: item.id, numeroProcesso: item.numeroProcesso, promptId: item.promptId })),
+    resultadosPorItem: {},
+  };
+
+  const lotes = await obterLotesEnviadosIA();
+  lotes.push(lote);
+  await salvarLotesEnviadosIA(lotes);
+  await salvarFilaLoteIA([]);
+
+  chrome.alarms.create(NOME_ALARME_LOTES_IA, { periodInMinutes: INTERVALO_ALARME_LOTES_IA_MINUTOS });
+
+  return lote;
+}
+
+// Consulta o status de UM lote na API; se ja' tiver terminado, tambem
+// busca e devolve os resultados (results_url e' no mesmo dominio
+// api.anthropic.com, ja' liberado em host_permissions).
+async function consultarStatusLoteIA(batchId, apiKey) {
+  const headers = {
+    "x-api-key": apiKey,
+    "anthropic-version": "2023-06-01",
+    "anthropic-dangerous-direct-browser-access": "true",
+  };
+
+  const resposta = await fetch(`https://api.anthropic.com/v1/messages/batches/${batchId}`, { headers });
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao consultar o lote.`);
+  }
+
+  if (dados.processing_status !== "ended") {
+    return { status: "in_progress", contagens: dados.request_counts || null };
+  }
+
+  const respostaResultados = await fetch(dados.results_url, { headers });
+  const textoJsonl = await respostaResultados.text();
+  const linhas = textoJsonl.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  const resultadosPorItem = {};
+  for (const linha of linhas) {
+    const registro = JSON.parse(linha);
+    const resultado = registro.result || {};
+    if (resultado.type === "succeeded") {
+      const texto = ((resultado.message && resultado.message.content) || [])
+        .map((bloco) => bloco.text || "")
+        .join("");
+      resultadosPorItem[registro.custom_id] = { resposta: texto, erro: null };
+    } else {
+      resultadosPorItem[registro.custom_id] = {
+        resposta: null,
+        erro: resultado.error ? resultado.error.message || resultado.type : resultado.type || "Falha desconhecida",
+      };
+    }
+  }
+
+  return { status: "ended", contagens: dados.request_counts || null, resultadosPorItem };
+}
+
+// Chamada manualmente (botao "Verificar agora") OU pelo alarme periodico -
+// atualiza SO' o lote indicado no storage.
+async function verificarEAtualizarLoteIA(batchId, apiKey) {
+  const resultado = await consultarStatusLoteIA(batchId, apiKey);
+  const lotes = await obterLotesEnviadosIA();
+  const lote = lotes.find((l) => l.batchId === batchId);
+  if (lote) {
+    lote.status = resultado.status;
+    lote.contagens = resultado.contagens;
+    if (resultado.status === "ended") lote.resultadosPorItem = resultado.resultadosPorItem;
+    await salvarLotesEnviadosIA(lotes);
+  }
+  return lote;
+}
+
+// Roda a cada disparo do alarme "verificarLotesIA": verifica todos os
+// lotes ainda pendentes de uma vez; se nenhum restar pendente, desliga o
+// proprio alarme (nao ha' motivo para continuar acordando o service worker
+// sem nenhum lote em andamento).
+async function verificarTodosLotesPendentesIA() {
+  const apiKey = await obterChaveClaudeConfigurada();
+  if (!apiKey) return;
+
+  const lotes = await obterLotesEnviadosIA();
+  const pendentes = lotes.filter((l) => l.status !== "ended");
+  if (pendentes.length === 0) {
+    chrome.alarms.clear(NOME_ALARME_LOTES_IA);
+    return;
+  }
+
+  let houveMudanca = false;
+  for (const lote of pendentes) {
+    try {
+      const resultado = await consultarStatusLoteIA(lote.batchId, apiKey);
+      lote.status = resultado.status;
+      lote.contagens = resultado.contagens;
+      if (resultado.status === "ended") {
+        lote.resultadosPorItem = resultado.resultadosPorItem;
+        houveMudanca = true;
+      }
+    } catch (e) {
+      console.error("[eproc-ia-lote] Falha ao verificar lote", lote.batchId, ":", e);
+    }
+  }
+
+  await salvarLotesEnviadosIA(lotes);
+  if (houveMudanca) {
+    chrome.runtime.sendMessage({ tipo: "IA_LOTE_ATUALIZADA_STATUS" }).catch(() => {});
+  }
+  if (lotes.every((l) => l.status === "ended")) {
+    chrome.alarms.clear(NOME_ALARME_LOTES_IA);
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarme) => {
+  if (alarme.name === NOME_ALARME_LOTES_IA) verificarTodosLotesPendentesIA();
+});
+
+// Ao iniciar o service worker (instalacao, atualizacao, ou so' voltar de
+// ter sido encerrado por inatividade), religa o alarme se ainda houver
+// algum lote pendente - os alarmes do chrome.alarms sobrevivem ao service
+// worker ser encerrado, mas nao a extensao ser reinstalada/atualizada.
+(async () => {
+  const lotes = await obterLotesEnviadosIA();
+  if (lotes.some((l) => l.status !== "ended")) {
+    chrome.alarms.create(NOME_ALARME_LOTES_IA, { periodInMinutes: INTERVALO_ALARME_LOTES_IA_MINUTOS });
+  }
+})();
 
 // ---- Orquestracao geral ----
 
@@ -8010,6 +8255,51 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
           .catch(() => {});
       });
     sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_ADICIONAR") {
+    adicionarItemFilaLoteIA(
+      mensagem.numeroProcesso,
+      mensagem.documentos,
+      mensagem.movimentacao,
+      !!mensagem.anonimizar,
+      mensagem.promptId
+    )
+      .then((fila) => sendResponse({ ok: true, fila }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_REMOVER") {
+    removerItemFilaLoteIA(mensagem.id)
+      .then((fila) => sendResponse({ ok: true, fila }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_LISTAR") {
+    Promise.all([obterFilaLoteIA(), obterLotesEnviadosIA()])
+      .then(([fila, lotes]) => sendResponse({ ok: true, fila, lotes }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_ENVIAR") {
+    enviarLoteIA(mensagem.apiKey)
+      .then((lote) => sendResponse({ ok: true, lote }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_VERIFICAR") {
+    obterChaveClaudeConfigurada()
+      .then((apiKey) => verificarEAtualizarLoteIA(mensagem.batchId, apiKey))
+      .then((lote) => {
+        sendResponse({ ok: true, lote });
+        chrome.runtime.sendMessage({ tipo: "IA_LOTE_ATUALIZADA_STATUS" }).catch(() => {});
+      })
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
     return true;
   }
 

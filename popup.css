@@ -514,6 +514,61 @@ button {
   color: var(--cor-texto);
 }
 
+.lista-ia-simples {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--cor-borda-suave);
+  border-radius: var(--raio);
+}
+
+.item-fila-lote-ia {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--cor-borda-suave);
+  font-size: var(--fonte-base);
+}
+
+.item-fila-lote-ia:last-child {
+  border-bottom: none;
+}
+
+.item-fila-lote-ia small {
+  display: block;
+  color: var(--cor-texto-suave);
+  font-size: var(--fonte-pequena);
+}
+
+.item-lote-ia {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--cor-borda-suave);
+  font-size: var(--fonte-base);
+}
+
+.item-lote-ia:last-child {
+  border-bottom: none;
+}
+
+.item-lote-ia summary {
+  cursor: pointer;
+}
+
+.resultado-lote-item {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--cor-borda-suave);
+}
+
+.resultado-lote-item p {
+  margin: 0 0 4px;
+  font-weight: 700;
+}
+
 .campo-resultado-ia {
   width: 100%;
   box-sizing: border-box;

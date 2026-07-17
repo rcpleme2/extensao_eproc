@@ -289,12 +289,21 @@
         <ul id="lista-documentos" class="lista-documentos" hidden></ul>
 
         <div id="area-erros" class="erros" hidden></div>
+      </details>
 
-        <hr class="separador-subsecao" />
+      <hr class="separador-subsecao" />
+
+      <details class="subsecao subsecao--colapsavel" id="subsecao-analise-ia">
+        <summary class="subsecao-titulo">
+          <span class="subsecao-icone" aria-hidden="true">🤖</span>
+          Analisar com IA
+        </summary>
+
+        <div id="area-analise-ia-processo" class="status">
+          Detecte um processo em "Exportar Documentos" para poder analisá-lo com IA.
+        </div>
 
         <div id="area-analise-ia" hidden>
-          <p class="subsecao-titulo">🤖 Analisar com IA</p>
-
           <div class="opcoes">
             <label class="campo-config-ia">
               Tipo de prompt
@@ -304,7 +313,10 @@
               <input type="checkbox" id="chk-anonimizar-ia" checked />
               Anonimizar antes de enviar (remove CPF/CNPJ, telefone, e-mail, endereços, abrevia nomes)
             </label>
-            <button id="btn-analisar-ia" class="btn">Analisar com IA</button>
+            <div class="linha-formatos">
+              <button id="btn-analisar-ia" class="btn">Analisar agora</button>
+              <button id="btn-adicionar-fila-ia" class="btn-secundario">Adicionar à fila em lote</button>
+            </div>
           </div>
 
           <div id="area-progresso-ia" class="progresso-spinner" hidden>
@@ -330,6 +342,24 @@
             </div>
           </div>
         </div>
+
+        <hr class="separador-subsecao" />
+
+        <p class="legenda-opcoes">
+          📦 Fila em lote (Claude, 50% mais barato — processado em até 24h)
+        </p>
+        <div id="area-erros-fila-lote-ia" class="erros" hidden></div>
+        <ul id="lista-fila-lote-ia" class="lista-ia-simples" hidden></ul>
+        <div id="area-fila-lote-vazia" class="status">Nenhum item na fila ainda.</div>
+        <div class="botoes">
+          <button id="btn-enviar-lote-ia" class="btn" disabled>Enviar lote</button>
+        </div>
+
+        <hr class="separador-subsecao" />
+
+        <p class="legenda-opcoes">Lotes enviados</p>
+        <div id="area-lotes-enviados-vazio" class="status">Nenhum lote enviado ainda.</div>
+        <ul id="lista-lotes-enviados-ia" class="lista-ia-simples" hidden></ul>
       </details>
 
       <hr class="separador-subsecao" />

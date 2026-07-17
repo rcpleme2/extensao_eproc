@@ -20,10 +20,12 @@ const barraProgresso = document.getElementById("barra-progresso");
 const textoProgresso = document.getElementById("texto-progresso");
 const areaErros = document.getElementById("area-erros");
 
+const areaAnaliseIAProcesso = document.getElementById("area-analise-ia-processo");
 const areaAnaliseIA = document.getElementById("area-analise-ia");
 const selectPromptIA = document.getElementById("select-prompt-ia");
 const chkAnonimizarIA = document.getElementById("chk-anonimizar-ia");
 const btnAnalisarIA = document.getElementById("btn-analisar-ia");
+const btnAdicionarFilaIA = document.getElementById("btn-adicionar-fila-ia");
 const areaProgressoIA = document.getElementById("area-progresso-ia");
 const textoProgressoIA = document.getElementById("texto-progresso-ia");
 const areaEstimativaIA = document.getElementById("area-estimativa-ia");
@@ -34,6 +36,13 @@ const areaErrosIA = document.getElementById("area-erros-ia");
 const areaResultadoIA = document.getElementById("area-resultado-ia");
 const textoResultadoIA = document.getElementById("texto-resultado-ia");
 const btnCopiarResultadoIA = document.getElementById("btn-copiar-resultado-ia");
+
+const areaErrosFilaLoteIA = document.getElementById("area-erros-fila-lote-ia");
+const listaFilaLoteIA = document.getElementById("lista-fila-lote-ia");
+const areaFilaLoteVazia = document.getElementById("area-fila-lote-vazia");
+const btnEnviarLoteIA = document.getElementById("btn-enviar-lote-ia");
+const areaLotesEnviadosVazio = document.getElementById("area-lotes-enviados-vazio");
+const listaLotesEnviadosIA = document.getElementById("lista-lotes-enviados-ia");
 
 // Cadastro de prompts espelhado do PROMPTS_IA em background.js - só o
 // id/título precisam existir aqui (o texto completo do prompt fica só no
@@ -114,6 +123,174 @@ btnCopiarResultadoIA.addEventListener("click", async () => {
   } catch (e) {
     textoResultadoIA.select();
     document.execCommand("copy");
+  }
+});
+
+// ---- Fila em lote (Claude Batches API - processa em até 24h, 50% mais
+// barato) ----
+//
+// Diferente da análise imediata, aqui o TEXTO já é extraído no momento de
+// "Adicionar à fila" (o processo pode não estar mais aberto quando o lote
+// for de fato enviado) - o background guarda a fila em
+// chrome.storage.local, então ela sobrevive a fechar o painel e trocar de
+// processo. Só funciona com o provedor Claude (Gemini não tem uma API de
+// lote assíncrona equivalente cadastrada aqui ainda).
+
+async function copiarTexto(texto) {
+  try {
+    await navigator.clipboard.writeText(texto);
+  } catch (e) {
+    const area = document.createElement("textarea");
+    area.value = texto;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+}
+
+function renderizarFilaLoteIA(fila) {
+  listaFilaLoteIA.innerHTML = "";
+  const itens = fila || [];
+  areaFilaLoteVazia.hidden = itens.length > 0;
+  listaFilaLoteIA.hidden = itens.length === 0;
+  btnEnviarLoteIA.disabled = itens.length === 0;
+  btnEnviarLoteIA.textContent = `Enviar lote${itens.length > 0 ? ` (${itens.length})` : ""}`;
+
+  for (const item of itens) {
+    const li = document.createElement("li");
+    li.className = "item-fila-lote-ia";
+    const prompt = PROMPTS_IA_PAINEL.find((p) => p.id === item.promptId);
+    li.innerHTML = `
+      <span>${item.numeroProcesso} — ${prompt ? prompt.titulo : item.promptId}
+        <small>(~${(item.estimativa && item.estimativa.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens, até ${FORMATADOR_USD.format((item.estimativa && item.estimativa.custoEstimadoUsd || 0) * 0.5)} com desconto de lote)</small>
+      </span>
+      <button type="button" class="btn-ghost" data-remover-item="${item.id}">Remover</button>
+    `;
+    listaFilaLoteIA.appendChild(li);
+  }
+
+  listaFilaLoteIA.querySelectorAll("[data-remover-item]").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ tipo: "IA_LOTE_REMOVER", id: botao.dataset.removerItem });
+    });
+  });
+}
+
+function renderizarLotesEnviadosIA(lotes) {
+  listaLotesEnviadosIA.innerHTML = "";
+  const itens = lotes || [];
+  areaLotesEnviadosVazio.hidden = itens.length > 0;
+  listaLotesEnviadosIA.hidden = itens.length === 0;
+
+  for (const lote of [...itens].reverse()) {
+    const li = document.createElement("li");
+    li.className = "item-lote-ia";
+
+    const contagens = lote.contagens || {};
+    const resumoContagens = lote.status === "ended"
+      ? `${contagens.succeeded || 0} concluído(s), ${contagens.errored || 0} com erro(s)`
+      : "processando...";
+
+    let resultadosHtml = "";
+    if (lote.status === "ended") {
+      resultadosHtml = (lote.itens || [])
+        .map((item) => {
+          const resultado = (lote.resultadosPorItem || {})[item.customId];
+          if (!resultado) return "";
+          const textoResultado = resultado.erro ? `Erro: ${resultado.erro}` : resultado.resposta || "";
+          const idResultado = `resultado-lote-${lote.batchId}-${item.customId}`;
+          return `
+            <div class="resultado-lote-item">
+              <p><strong>${item.numeroProcesso}</strong></p>
+              <textarea id="${idResultado}" class="campo-resultado-ia" readonly rows="6">${textoResultado.replace(/</g, "&lt;")}</textarea>
+              <button type="button" class="btn-secundario" data-copiar-resultado="${idResultado}">Copiar</button>
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    li.innerHTML = `
+      <details>
+        <summary>Lote ${lote.batchId} — ${new Date(lote.criadoEm).toLocaleString("pt-BR")} (${resumoContagens})</summary>
+        ${lote.status !== "ended" ? '<button type="button" class="btn-ghost" data-verificar-lote="' + lote.batchId + '">Verificar agora</button>' : ""}
+        ${resultadosHtml}
+      </details>
+    `;
+    listaLotesEnviadosIA.appendChild(li);
+  }
+
+  listaLotesEnviadosIA.querySelectorAll("[data-verificar-lote]").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ tipo: "IA_LOTE_VERIFICAR", batchId: botao.dataset.verificarLote });
+    });
+  });
+  listaLotesEnviadosIA.querySelectorAll("[data-copiar-resultado]").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      const area = document.getElementById(botao.dataset.copiarResultado);
+      if (area) copiarTexto(area.value);
+    });
+  });
+}
+
+function atualizarListaCompletaIA() {
+  chrome.runtime.sendMessage({ tipo: "IA_LOTE_LISTAR" }).then((resposta) => {
+    if (!resposta) return;
+    renderizarFilaLoteIA(resposta.fila);
+    renderizarLotesEnviadosIA(resposta.lotes);
+  });
+}
+
+btnAdicionarFilaIA.addEventListener("click", async () => {
+  const { documentosSelecionados, movimentacaoParaEnviar } = await obterSelecaoAtualParaEnvio();
+
+  if (documentosSelecionados.length === 0 && movimentacaoParaEnviar.length === 0) {
+    areaErrosFilaLoteIA.hidden = false;
+    areaErrosFilaLoteIA.textContent =
+      "Nada para adicionar à fila: nenhum documento selecionado e a movimentação está excluída.";
+    return;
+  }
+
+  areaErrosFilaLoteIA.hidden = true;
+  btnAdicionarFilaIA.disabled = true;
+  const resposta = await chrome.runtime.sendMessage({
+    tipo: "IA_LOTE_ADICIONAR",
+    numeroProcesso: estadoAtual.numeroProcesso,
+    documentos: documentosSelecionados,
+    movimentacao: movimentacaoParaEnviar,
+    anonimizar: chkAnonimizarIA.checked,
+    promptId: selectPromptIA.value,
+  });
+  btnAdicionarFilaIA.disabled = false;
+
+  if (resposta && resposta.ok) {
+    renderizarFilaLoteIA(resposta.fila);
+  } else {
+    areaErrosFilaLoteIA.hidden = false;
+    areaErrosFilaLoteIA.textContent = (resposta && resposta.erro) || "Falha ao adicionar à fila.";
+  }
+});
+
+btnEnviarLoteIA.addEventListener("click", async () => {
+  const config = await obterConfiguracoes();
+  if (!config.chaveClaude) {
+    areaErrosFilaLoteIA.hidden = false;
+    areaErrosFilaLoteIA.textContent = 'A fila em lote usa a API da Claude - configure a "Chave de API da Claude" nas configurações.';
+    return;
+  }
+
+  areaErrosFilaLoteIA.hidden = true;
+  btnEnviarLoteIA.disabled = true;
+  const resposta = await chrome.runtime.sendMessage({ tipo: "IA_LOTE_ENVIAR", apiKey: config.chaveClaude });
+
+  if (resposta && resposta.ok) {
+    renderizarFilaLoteIA([]);
+    atualizarListaCompletaIA();
+  } else {
+    areaErrosFilaLoteIA.hidden = false;
+    areaErrosFilaLoteIA.textContent = (resposta && resposta.erro) || "Falha ao enviar o lote.";
+    btnEnviarLoteIA.disabled = false;
   }
 });
 
@@ -460,6 +637,7 @@ btnDetectar.addEventListener("click", async () => {
       listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
       areaAnaliseIA.hidden = true;
+      areaAnaliseIAProcesso.textContent = 'Detecte um processo em "Exportar Documentos" para poder analisá-lo com IA.';
       resetarAnaliseIA();
       return;
     }
@@ -471,6 +649,7 @@ btnDetectar.addEventListener("click", async () => {
     areaProcesso.hidden = false;
     areaOpcoes.hidden = false;
     areaAnaliseIA.hidden = false;
+    areaAnaliseIAProcesso.textContent = `Processo: ${resposta.numeroProcesso} (${documentos.length} documento(s)) — usa a mesma seleção de "Exportar Documentos".`;
     resetarAnaliseIA();
 
     // Sem nenhum documento anexado (so' movimentação), os modos
@@ -1174,6 +1353,10 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     }
   }
 
+  if (mensagem.tipo === "IA_LOTE_ATUALIZADA_STATUS") {
+    atualizarListaCompletaIA();
+  }
+
   if (mensagem.tipo === "PROGRESSO_UNIDADES_RELATORIO") {
     textoProgressoUnidades.textContent = mensagem.texto || "Processando...";
     setStatusCorregedoria(mensagem.texto || "Processando...");
@@ -1710,3 +1893,5 @@ listaCardsPerfil.querySelectorAll(".card").forEach((card) => {
     salvarOrdemCards();
   });
 });
+
+atualizarListaCompletaIA();

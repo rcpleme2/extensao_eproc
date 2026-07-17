@@ -459,22 +459,26 @@ exportação).
 
 ## Analisar com IA
 
-Dentro de "Exportar Documentos", logo abaixo da lista de documentos, há um
-bloco **"Analisar com IA"** (visível assim que "Detectar documentos"
-encontra um processo). Ele reaproveita a mesma seleção de documentos e o
-mesmo checkbox de "incluir a movimentação" já usados para baixar/exportar
-— não é preciso escolher de novo.
+**"Analisar com IA"** é sua própria subseção dentro do cartão "Gestão
+Gabinete" — separada de "Exportar Documentos", com título e recolhimento
+próprios — mas reaproveita o mesmo mecanismo de detecção/seleção: assim
+que "Detectar documentos" (em "Exportar Documentos") encontra um processo,
+essa subseção passa a mostrar o número do processo e o total de
+documentos, e usa a mesma seleção de documentos e o mesmo checkbox de
+"incluir a movimentação" já usados para baixar/exportar — não é preciso
+escolher de novo, nem essa subseção tem sua própria lista de checkboxes.
 
-Fluxo:
+### Análise imediata
 
-1. Marque quais documentos entram na análise (na lista do painel ou direto
-   na página do processo) e se a movimentação deve ser incluída.
+1. Marque quais documentos entram na análise (na lista de "Exportar
+   Documentos" ou direto na página do processo) e se a movimentação deve
+   ser incluída.
 2. Escolha o **tipo de prompt** (por enquanto só há um cadastrado, ver
    abaixo) e se o conteúdo deve ser **anonimizado antes de enviar** (mesma
    anonimização de melhor esforço do "MD único" — CPF/CNPJ, telefone,
    e-mail, endereços removidos e nomes abreviados; ver aviso na seção "MD
    único" acima sobre os limites dessa anonimização).
-3. Clique em **"Analisar com IA"**. A extensão extrai o texto dos
+3. Clique em **"Analisar agora"**. A extensão extrai o texto dos
    documentos selecionados (mesmo mecanismo do "MD único") e mostra uma
    **estimativa de custo** (tokens aproximados e custo em dólares,
    calculados por uma heurística de caracteres — não é o tokenizador real
@@ -487,6 +491,44 @@ Fluxo:
    botão **"Copiar"** para colar em outro lugar da página do processo. O
    custo **real** da chamada (calculado a partir do uso de tokens
    devolvido pela própria API) substitui a estimativa nesse momento.
+
+### Fila em lote (mais barato, para quando não precisa da resposta na hora)
+
+Ao lado da análise imediata, a mesma subseção tem um bloco **"Fila em
+lote"**, usando a [Message Batches API da
+Claude](https://platform.claude.com/docs/en/api/creating-message-batches):
+o mesmo pedido custa **50% menos**, mas a resposta não sai na hora — o
+lote é processado em segundo plano e pode levar até 24h (a maioria
+termina bem mais rápido). Só funciona com o provedor **Claude** (o Gemini
+não tem uma API de lote assíncrona equivalente cadastrada nesta extensão
+ainda).
+
+Fluxo:
+
+1. Em vez de (ou além de) "Analisar agora", clique em **"Adicionar à fila
+   em lote"**. A extensão já extrai o texto do processo nesse momento (o
+   lote pode ser enviado bem depois, mesmo sem a aba do processo mais
+   aberta) e mostra o item na lista da fila, com o custo estimado já com o
+   desconto de lote.
+2. Repita para quantos processos quiser — navegue para outro processo,
+   detecte, marque a seleção e "Adicionar à fila em lote" de novo. A fila
+   persiste mesmo fechando o painel.
+3. Quando terminar de montar a fila, clique em **"Enviar lote"** — todos
+   os itens da fila são enviados de uma vez, numa única chamada à API de
+   lotes, e a fila é esvaziada.
+4. O lote enviado aparece em **"Lotes enviados"**, com o status
+   ("processando..." ou a contagem de concluídos/com erro) e um botão
+   **"Verificar agora"** para checar manualmente sem esperar a checagem
+   automática (a extensão também verifica sozinha a cada 10 minutos,
+   mesmo com o painel fechado, via `chrome.alarms`).
+5. Quando o lote termina, cada processo do lote aparece **separado**,
+   identificado pelo número do processo, com sua própria resposta num
+   campo de texto e um botão "Copiar" individual — nenhuma resposta fica
+   misturada com a de outro processo do mesmo lote.
+
+Os resultados dos lotes ficam disponíveis por 29 dias na Claude — depois
+disso, um lote muito antigo que ainda não tenha sido verificado pode não
+conseguir mais recuperar os resultados.
 
 ### Configuração (provedor e chaves de API)
 
@@ -517,9 +559,11 @@ dativo, tabela de gastos, conta bancária, idade dos menores envolvidos).
 
 ### Custos e privacidade
 
-- Cada análise é uma chamada paga à API do provedor escolhido, cobrada na
-  conta cujo a chave foi configurada — a extensão não intermedia nem
-  subsidia esse custo.
+- Cada análise (imediata ou em lote) é uma chamada paga à API do provedor
+  escolhido, cobrada na conta cuja chave foi configurada — a extensão não
+  intermedia nem subsidia esse custo. A fila em lote custa 50% menos que a
+  análise imediata pelo mesmo prompt, em troca de não ter a resposta na
+  hora.
 - O conteúdo do processo (documentos + movimentação) sai do navegador do
   usuário direto para a API do provedor escolhido. A anonimização é
   **opcional e de melhor esforço** (mesmas limitações do "MD único") —
