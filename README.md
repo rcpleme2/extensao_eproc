@@ -457,6 +457,75 @@ exportação).
    serem processados. A extração de texto de cada PDF (que envolve várias
    páginas, não só uma requisição) tem um limite maior, de 60s.
 
+## Analisar com IA
+
+Dentro de "Exportar Documentos", logo abaixo da lista de documentos, há um
+bloco **"Analisar com IA"** (visível assim que "Detectar documentos"
+encontra um processo). Ele reaproveita a mesma seleção de documentos e o
+mesmo checkbox de "incluir a movimentação" já usados para baixar/exportar
+— não é preciso escolher de novo.
+
+Fluxo:
+
+1. Marque quais documentos entram na análise (na lista do painel ou direto
+   na página do processo) e se a movimentação deve ser incluída.
+2. Escolha o **tipo de prompt** (por enquanto só há um cadastrado, ver
+   abaixo) e se o conteúdo deve ser **anonimizado antes de enviar** (mesma
+   anonimização de melhor esforço do "MD único" — CPF/CNPJ, telefone,
+   e-mail, endereços removidos e nomes abreviados; ver aviso na seção "MD
+   único" acima sobre os limites dessa anonimização).
+3. Clique em **"Analisar com IA"**. A extensão extrai o texto dos
+   documentos selecionados (mesmo mecanismo do "MD único") e mostra uma
+   **estimativa de custo** (tokens aproximados e custo em dólares,
+   calculados por uma heurística de caracteres — não é o tokenizador real
+   do provedor) antes de gastar qualquer coisa de verdade.
+4. Clique em **"Confirmar e enviar"** para de fato chamar a API do
+   provedor escolhido (Claude ou Gemini, configurado nas configurações da
+   extensão — ver abaixo). Ou **"Cancelar"** para descartar sem gastar
+   nada.
+5. A resposta da IA aparece num campo de texto somente leitura, com um
+   botão **"Copiar"** para colar em outro lugar da página do processo. O
+   custo **real** da chamada (calculado a partir do uso de tokens
+   devolvido pela própria API) substitui a estimativa nesse momento.
+
+### Configuração (provedor e chaves de API)
+
+Nas configurações da extensão (ícone de engrenagem), na seção "Análise com
+IA":
+
+- Escolha o provedor: **Claude (Anthropic)** ou **Gemini (Google)**.
+- Informe a chave de API do provedor escolhido (os dois campos ficam
+  salvos, então dá para trocar de provedor sem digitar a chave de novo).
+  As chaves ficam guardadas localmente (`chrome.storage.local`, neste
+  navegador) e só são enviadas para a API do próprio provedor ao chamar
+  "Analisar com IA" — nunca para nenhum servidor da extensão (que não
+  existe).
+
+Sem uma chave configurada para o provedor escolhido, "Confirmar e enviar"
+retorna um erro pedindo para configurá-la.
+
+### Prompt cadastrado: "Análise inicial - família"
+
+Único prompt disponível por enquanto. É sempre **apensado ao final** do
+conteúdo do processo (documentos selecionados + movimentação, quando
+incluída) — ou seja, a IA recebe primeiro o conteúdo do processo e, depois
+dele, as instruções do prompt. Pede um relatório no formato FIRAC+ (fatos,
+pedidos, tutela de urgência) com foco em direito de família (guarda,
+alimentos, visitas, partilha), linguagem que evita termos como "menor" em
+favor de "criança"/"adolescente", e perguntas adicionais ao final (advogado
+dativo, tabela de gastos, conta bancária, idade dos menores envolvidos).
+
+### Custos e privacidade
+
+- Cada análise é uma chamada paga à API do provedor escolhido, cobrada na
+  conta cujo a chave foi configurada — a extensão não intermedia nem
+  subsidia esse custo.
+- O conteúdo do processo (documentos + movimentação) sai do navegador do
+  usuário direto para a API do provedor escolhido. A anonimização é
+  **opcional e de melhor esforço** (mesmas limitações do "MD único") —
+  revise o que está sendo enviado antes de confirmar, especialmente em
+  processos com dados sensíveis.
+
 ## Corregedoria
 
 Quando o perfil ativo (select de perfil no cabeçalho do eproc,

@@ -289,6 +289,47 @@
         <ul id="lista-documentos" class="lista-documentos" hidden></ul>
 
         <div id="area-erros" class="erros" hidden></div>
+
+        <hr class="separador-subsecao" />
+
+        <div id="area-analise-ia" hidden>
+          <p class="subsecao-titulo">🤖 Analisar com IA</p>
+
+          <div class="opcoes">
+            <label class="campo-config-ia">
+              Tipo de prompt
+              <select id="select-prompt-ia"></select>
+            </label>
+            <label class="opcao">
+              <input type="checkbox" id="chk-anonimizar-ia" checked />
+              Anonimizar antes de enviar (remove CPF/CNPJ, telefone, e-mail, endereços, abrevia nomes)
+            </label>
+            <button id="btn-analisar-ia" class="btn">Analisar com IA</button>
+          </div>
+
+          <div id="area-progresso-ia" class="progresso-spinner" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="texto-progresso-ia"></span>
+          </div>
+
+          <div id="area-estimativa-ia" class="aviso" hidden>
+            <p id="texto-estimativa-ia"></p>
+            <div class="modal-botoes">
+              <button id="btn-confirmar-analise-ia" class="btn">Confirmar e enviar</button>
+              <button id="btn-cancelar-analise-ia" class="btn-secundario">Cancelar</button>
+            </div>
+          </div>
+
+          <div id="area-erros-ia" class="erros" hidden></div>
+
+          <div id="area-resultado-ia" hidden>
+            <label class="legenda-opcoes" for="texto-resultado-ia">Resposta da IA</label>
+            <textarea id="texto-resultado-ia" class="campo-resultado-ia" readonly rows="10"></textarea>
+            <div class="botoes">
+              <button id="btn-copiar-resultado-ia" class="btn-secundario">Copiar</button>
+            </div>
+          </div>
+        </div>
       </details>
 
       <hr class="separador-subsecao" />
@@ -365,6 +406,25 @@
         <label class="opcao">
           <input type="checkbox" id="chk-config-anexar-magistrado-conclusos" />
           Acrescentar o Magistrado aos eventos "Conclusos *" na tela do processo
+        </label>
+      </div>
+      <div class="opcoes">
+        <p class="legenda-opcoes">Análise com IA</p>
+        <label class="opcao">
+          <input type="radio" name="config-provedor-ia" id="radio-config-provedor-claude" value="claude" />
+          Usar Claude (Anthropic)
+        </label>
+        <label class="opcao">
+          <input type="radio" name="config-provedor-ia" id="radio-config-provedor-gemini" value="gemini" />
+          Usar Gemini (Google)
+        </label>
+        <label class="campo-config-ia">
+          Chave de API da Claude
+          <input type="password" id="config-chave-claude" placeholder="sk-ant-..." autocomplete="off" />
+        </label>
+        <label class="campo-config-ia">
+          Chave de API do Gemini
+          <input type="password" id="config-chave-gemini" placeholder="AIza..." autocomplete="off" />
         </label>
       </div>
       <div class="modal-botoes">

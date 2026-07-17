@@ -20,6 +20,103 @@ const barraProgresso = document.getElementById("barra-progresso");
 const textoProgresso = document.getElementById("texto-progresso");
 const areaErros = document.getElementById("area-erros");
 
+const areaAnaliseIA = document.getElementById("area-analise-ia");
+const selectPromptIA = document.getElementById("select-prompt-ia");
+const chkAnonimizarIA = document.getElementById("chk-anonimizar-ia");
+const btnAnalisarIA = document.getElementById("btn-analisar-ia");
+const areaProgressoIA = document.getElementById("area-progresso-ia");
+const textoProgressoIA = document.getElementById("texto-progresso-ia");
+const areaEstimativaIA = document.getElementById("area-estimativa-ia");
+const textoEstimativaIA = document.getElementById("texto-estimativa-ia");
+const btnConfirmarAnaliseIA = document.getElementById("btn-confirmar-analise-ia");
+const btnCancelarAnaliseIA = document.getElementById("btn-cancelar-analise-ia");
+const areaErrosIA = document.getElementById("area-erros-ia");
+const areaResultadoIA = document.getElementById("area-resultado-ia");
+const textoResultadoIA = document.getElementById("texto-resultado-ia");
+const btnCopiarResultadoIA = document.getElementById("btn-copiar-resultado-ia");
+
+// Cadastro de prompts espelhado do PROMPTS_IA em background.js - só o
+// id/título precisam existir aqui (o texto completo do prompt fica só no
+// background, que é quem de fato monta a chamada à API).
+const PROMPTS_IA_PAINEL = [{ id: "analise-inicial-familia", titulo: "Análise inicial - família" }];
+for (const prompt of PROMPTS_IA_PAINEL) {
+  const option = document.createElement("option");
+  option.value = prompt.id;
+  option.textContent = prompt.titulo;
+  selectPromptIA.appendChild(option);
+}
+
+const FORMATADOR_USD = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", minimumFractionDigits: 4 });
+
+let textoExtraidoParaIA = null;
+
+function resetarAnaliseIA() {
+  textoExtraidoParaIA = null;
+  areaProgressoIA.hidden = true;
+  areaEstimativaIA.hidden = true;
+  areaErrosIA.hidden = true;
+  areaResultadoIA.hidden = true;
+  textoResultadoIA.value = "";
+  btnAnalisarIA.disabled = false;
+}
+
+btnAnalisarIA.addEventListener("click", async () => {
+  const { documentosSelecionados, movimentacaoParaEnviar } = await obterSelecaoAtualParaEnvio();
+
+  if (documentosSelecionados.length === 0 && movimentacaoParaEnviar.length === 0) {
+    areaErrosIA.hidden = false;
+    areaErrosIA.textContent =
+      "Nada para analisar: nenhum documento selecionado e a movimentação está excluída. Marque ao menos um documento ou inclua a movimentação.";
+    return;
+  }
+
+  const config = await obterConfiguracoes();
+
+  resetarAnaliseIA();
+  btnAnalisarIA.disabled = true;
+  areaProgressoIA.hidden = false;
+  textoProgressoIA.textContent = "Extraindo o conteúdo dos documentos selecionados...";
+
+  chrome.runtime.sendMessage({
+    tipo: "ANALISAR_IA_EXTRAIR",
+    documentos: documentosSelecionados,
+    movimentacao: movimentacaoParaEnviar,
+    anonimizar: chkAnonimizarIA.checked,
+    provedor: config.provedorIA,
+  });
+});
+
+btnCancelarAnaliseIA.addEventListener("click", () => {
+  resetarAnaliseIA();
+});
+
+btnConfirmarAnaliseIA.addEventListener("click", async () => {
+  if (!textoExtraidoParaIA) return;
+  const config = await obterConfiguracoes();
+  const apiKey = config.provedorIA === "gemini" ? config.chaveGemini : config.chaveClaude;
+
+  areaEstimativaIA.hidden = true;
+  areaProgressoIA.hidden = false;
+  textoProgressoIA.textContent = "Aguardando a resposta da IA...";
+
+  chrome.runtime.sendMessage({
+    tipo: "ANALISAR_IA_ENVIAR",
+    texto: textoExtraidoParaIA,
+    promptId: selectPromptIA.value,
+    provedor: config.provedorIA,
+    apiKey,
+  });
+});
+
+btnCopiarResultadoIA.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(textoResultadoIA.value);
+  } catch (e) {
+    textoResultadoIA.select();
+    document.execCommand("copy");
+  }
+});
+
 const ROTULO_FASE = {
   individuais: "Arquivos individuais",
   "pdf-unico": "PDF único",
@@ -38,6 +135,9 @@ const CONFIG_PADRAO = {
   substituirSigla: true,
   separarOrgaoJuizoPorComarca: false,
   anexarMagistradoConclusos: true,
+  provedorIA: "claude",
+  chaveClaude: "",
+  chaveGemini: "",
 };
 
 function obterConfiguracoes() {
@@ -56,13 +156,37 @@ const chkConfigSubstituirSigla = document.getElementById("chk-config-substituir-
 const chkConfigSepararOrgaoJuizo = document.getElementById("chk-config-separar-orgao-juizo");
 const chkConfigAnexarMagistradoConclusos = document.getElementById("chk-config-anexar-magistrado-conclusos");
 const modalConfigFechar = document.getElementById("modal-config-fechar");
+const radioConfigProvedorClaude = document.getElementById("radio-config-provedor-claude");
+const radioConfigProvedorGemini = document.getElementById("radio-config-provedor-gemini");
+const inputConfigChaveClaude = document.getElementById("config-chave-claude");
+const inputConfigChaveGemini = document.getElementById("config-chave-gemini");
 
 btnAbrirConfiguracoes.addEventListener("click", async () => {
   const config = await obterConfiguracoes();
   chkConfigSubstituirSigla.checked = config.substituirSigla;
   chkConfigSepararOrgaoJuizo.checked = config.separarOrgaoJuizoPorComarca;
   chkConfigAnexarMagistradoConclusos.checked = config.anexarMagistradoConclusos;
+  radioConfigProvedorClaude.checked = config.provedorIA !== "gemini";
+  radioConfigProvedorGemini.checked = config.provedorIA === "gemini";
+  inputConfigChaveClaude.value = config.chaveClaude || "";
+  inputConfigChaveGemini.value = config.chaveGemini || "";
   modalConfiguracoes.hidden = false;
+});
+
+radioConfigProvedorClaude.addEventListener("change", () => {
+  if (radioConfigProvedorClaude.checked) salvarConfiguracao("provedorIA", "claude");
+});
+
+radioConfigProvedorGemini.addEventListener("change", () => {
+  if (radioConfigProvedorGemini.checked) salvarConfiguracao("provedorIA", "gemini");
+});
+
+inputConfigChaveClaude.addEventListener("change", () => {
+  salvarConfiguracao("chaveClaude", inputConfigChaveClaude.value.trim());
+});
+
+inputConfigChaveGemini.addEventListener("change", () => {
+  salvarConfiguracao("chaveGemini", inputConfigChaveGemini.value.trim());
 });
 
 chkConfigSubstituirSigla.addEventListener("change", () => {
@@ -335,6 +459,8 @@ btnDetectar.addEventListener("click", async () => {
       areaIncluirMovimentacao.hidden = true;
       listaDocumentosEl.hidden = true;
       listaDocumentosEl.innerHTML = "";
+      areaAnaliseIA.hidden = true;
+      resetarAnaliseIA();
       return;
     }
 
@@ -344,6 +470,8 @@ btnDetectar.addEventListener("click", async () => {
     totalDocumentosEl.textContent = String(documentos.length);
     areaProcesso.hidden = false;
     areaOpcoes.hidden = false;
+    areaAnaliseIA.hidden = false;
+    resetarAnaliseIA();
 
     // Sem nenhum documento anexado (so' movimentação), os modos
     // "Arquivos individuais" e "PDF único" não têm o que gerar - só "MD
@@ -383,15 +511,14 @@ btnDetectar.addEventListener("click", async () => {
   }
 });
 
-btnBaixar.addEventListener("click", async () => {
-  if (!estadoAtual.documentos.length && !estadoAtual.movimentacao.length) return;
-
-  // Confere o estado ATUAL dos checkboxes direto na página do processo
-  // antes de baixar - cobre o caso do usuário ter ajustado a seleção lá
-  // (marcar/desmarcar um documento) depois do último "Detectar", sem
-  // precisar clicar em "Detectar" de novo só para isso. Sem resposta da
-  // aba (ex.: usuário navegou para outro lugar), cai para o que já está
-  // marcado no próprio painel, sem travar o download.
+// Confere o estado ATUAL dos checkboxes direto na página do processo antes
+// de usar a seleção - cobre o caso do usuário ter ajustado a seleção lá
+// (marcar/desmarcar um documento, ou o checkbox de movimentação) depois do
+// último "Detectar", sem precisar clicar em "Detectar" de novo só para
+// isso. Sem resposta da aba (ex.: usuário navegou para outro lugar), cai
+// para o que já está marcado no próprio painel. Compartilhada entre
+// "Baixar" e "Analisar com IA", que partem da mesma seleção de documentos.
+async function obterSelecaoAtualParaEnvio() {
   let idsSelecionados = null;
   try {
     const aba = await getAbaAtiva();
@@ -407,9 +534,6 @@ btnBaixar.addEventListener("click", async () => {
     ? estadoAtual.documentos.filter((doc) => idsSelecionados.has(doc.idDocumento))
     : estadoAtual.documentos.filter((doc) => doc.selecionado !== false);
 
-  // Mesma ideia acima, agora para o checkbox único "incluir a
-  // movimentação" - relê o estado atual direto da página antes de
-  // decidir se a linha do tempo entra ou não na exportação.
   let movimentacaoIncluida = estadoAtual.movimentacaoIncluida !== false;
   try {
     const aba = await getAbaAtiva();
@@ -421,6 +545,14 @@ btnBaixar.addEventListener("click", async () => {
     /* segue com a seleção já conhecida pelo painel */
   }
   const movimentacaoParaEnviar = movimentacaoIncluida ? estadoAtual.movimentacao : [];
+
+  return { documentosSelecionados, movimentacaoParaEnviar };
+}
+
+btnBaixar.addEventListener("click", async () => {
+  if (!estadoAtual.documentos.length && !estadoAtual.movimentacao.length) return;
+
+  const { documentosSelecionados, movimentacaoParaEnviar } = await obterSelecaoAtualParaEnvio();
 
   const opcoes = {
     individuais: radioIndividuais.checked,
@@ -1000,6 +1132,45 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErros.textContent =
         `${mensagem.erros.length} erro(s): ` +
         mensagem.erros.map((e) => `${e.nome} (${e.mensagem})`).join("; ");
+    }
+  }
+
+  if (mensagem.tipo === "PROGRESSO_ANALISE_IA") {
+    textoProgressoIA.textContent = mensagem.texto || "Processando...";
+  }
+
+  if (mensagem.tipo === "ANALISE_IA_TEXTO_PRONTO") {
+    areaProgressoIA.hidden = true;
+    if (mensagem.ok) {
+      textoExtraidoParaIA = mensagem.texto;
+      const est = mensagem.estimativa || {};
+      areaEstimativaIA.hidden = false;
+      textoEstimativaIA.textContent =
+        `Tamanho estimado: ~${(est.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens de entrada ` +
+        `(modelo ${est.modelo || "-"}). Custo estimado: até ${FORMATADOR_USD.format(est.custoEstimadoUsd || 0)}. ` +
+        `Confirme para enviar de verdade à IA.`;
+    } else {
+      btnAnalisarIA.disabled = false;
+      areaErrosIA.hidden = false;
+      areaErrosIA.textContent = mensagem.erro || "Falha desconhecida ao extrair o conteúdo dos documentos.";
+    }
+  }
+
+  if (mensagem.tipo === "ANALISE_IA_RESULTADO") {
+    areaProgressoIA.hidden = true;
+    btnAnalisarIA.disabled = false;
+    if (mensagem.ok) {
+      areaResultadoIA.hidden = false;
+      textoResultadoIA.value = mensagem.resposta || "";
+      if (mensagem.custoRealUsd != null) {
+        textoProgressoIA.textContent = "";
+        areaEstimativaIA.hidden = false;
+        areaEstimativaIA.querySelector(".modal-botoes").hidden = true;
+        textoEstimativaIA.textContent = `Custo real desta chamada: ${FORMATADOR_USD.format(mensagem.custoRealUsd)}.`;
+      }
+    } else {
+      areaErrosIA.hidden = false;
+      areaErrosIA.textContent = mensagem.erro || "Falha desconhecida ao consultar a IA.";
     }
   }
 

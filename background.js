@@ -1395,6 +1395,251 @@ async function construirMdUnico(documentos, resolverUrl, pastaBase, numeroProces
   console.log(LOG_MD, "MD único concluído com sucesso.");
 }
 
+// ---- Analise com IA (Claude / Gemini) ----
+//
+// Reaproveita a mesma extracao de texto do MD unico (extrairTextoDocumentoMd,
+// agruparDocumentosPorEvento, construirSecaoMovimentacao, anonimizarTexto) -
+// so' que devolve o texto em memoria (para virar um prompt), em vez de gerar
+// e baixar um arquivo. So' processa os documentos ja' selecionados pelo
+// usuario no painel (que podem ser um subconjunto de todos os documentos do
+// processo), e a movimentacao so' entra se o usuario tiver marcado a opcao.
+//
+// Cadastro de prompts: por enquanto so' um ("Análise inicial - família"),
+// mas a estrutura (lista de objetos {id, titulo, texto}) e' pensada para
+// crescer sem precisar mudar o resto do fluxo - o texto de cada prompt e'
+// sempre APENSADO ao final do conteudo do processo (documentos + eventual
+// movimentacao), nunca antes.
+const PROMPTS_IA = [
+  {
+    id: "analise-inicial-familia",
+    titulo: "Análise inicial - família",
+    texto:
+      'Persona: Aja como um juiz de direito especialista em direito de família e sucessões, respondendo com tom profissional e de autoridade.\n\n' +
+      'Instruções de Estilo:\n\n' +
+      'Use uma linguagem clara, formal e precisa, sem jargões excessivos.\n' +
+      'Evite introduções desnecessárias. Inicie diretamente com os dados do processo.\n' +
+      'Quando referir-se a menores, use "criança" (0-11 anos) ou "adolescente" (12-17 anos) conforme aplicável. Nunca utilize os termos "menor", "menor púbere", "menor impúbere" ou expressões em latim.\n' +
+      'Indique a idade das crianças envolvidas na primeira menção.\n' +
+      'Evite redundâncias e seja econômico nas palavras.\n' +
+      'Formato e Estrutura: Utilize o formato FIRAC+ para um relatório analítico e detalhado do caso jurídico, seguindo o modelo abaixo. Estruture o texto em um fluxo contínuo, sem listas ou subtópicos, mantendo a linguagem jurídica e a fluidez.\n\n' +
+      '"RELATÓRIO\n\n' +
+      'Trata-se de [tipo de ação] proposta por [nome da(s) parte(s) autora(s)] contra [nome da(s) parte(s) requerida(s)], com o objetivo de [sintetizar o pedido da ação]. (Havendo interesse de menores, indicar a data de nascimento e idade entre parênteses, utilizando sempre \'filho\', \'criança\' ou \'adolescente\').\n\n' +
+      'Alega a parte autora que [listar os fatos alegados pela parte autora].  Além disso, [mencionar outras considerações pertinentes da petição inicial]. {mencione e resuma todos os fatos alegados. se necessário, crie novos parágrafos}\n\n' +
+      'Em sede de tutela de urgência, [especificar os pedidos, como tutela de urgência, evidência, liminar, ou antecipação de tutela. Caso não haja, omitir este parágrafo].\n\n' +
+      'Ao final, pretende [mencionar os pedidos a serem julgados, excluindo pedidos de citação, de intimação do Ministério Público e de justiça gratuita e de condenação em custas e honorários]".\n\n' +
+      'ORIENTAÇÕES FINAIS\n\n' +
+      '    Vá direto ao conteúdo, sem introduções ou cabeçalhos explicativos.\n' +
+      '    Use português formal e correto, sem erros ortográficos ou gramaticais.\n' +
+      '    Utilize sinônimos e termos comuns no meio jurídico.\n' +
+      '    Evite repetições, pleonasmos e redundâncias. Após o primeiro uso dos nomes das partes, pode-se optar por utilizar "autor" e "réu".\n' +
+      '    Nunca use "procedência" ou "improcedência da ação"; use "procedência" ou "improcedência do pedido".\n' +
+      '    Em casos de guarda, especifique se o pedido é de guarda unilateral ou compartilhada, e a justificativa.\n' +
+      '    No caso de alimentos, detalhe o valor solicitado e o fundamento.\n' +
+      '    Para visitas, informe os dias e horários sugeridos.\n' +
+      '    Se houver partilha, descreva os bens, incluindo detalhes como matrícula, placa, posse, etc.\n\n' +
+      'PERGUNTAS ADICIONAIS\n\n' +
+      'Ao final responda às seguintes perguntas em tópicos:\n\n' +
+      '    O advogado é dativo/nomeado?\n\n' +
+      '    Foi apresentada uma tabela de gastos ou rendimentos? Se sim, elabore uma tabela detalhada com as despesas mês a mês.\n\n' +
+      '    Foi indicada conta bancária para depósito dos alimentos? Informe a conta e CPF do titular.\n\n' +
+      '    Qual o nome e a idade dos menores envolvidos?',
+  },
+];
+
+// Modelo usado em cada provedor e' fixo por enquanto (nao configuravel na
+// UI) - so' o provedor e a chave de API sao escolhidos pelo usuario.
+// Precos em USD por milhao de tokens ("MTok"); usados so' para a
+// ESTIMATIVA previa (heuristica de caracteres/4) e para o custo real
+// (calculado depois, a partir do "usage" que a propria API devolve).
+const CONFIG_MODELOS_IA = {
+  claude: { modelo: "claude-opus-4-8", precoEntradaPorMTok: 5, precoSaidaPorMTok: 25 },
+  gemini: { modelo: "gemini-2.5-pro", precoEntradaPorMTok: 1.25, precoSaidaPorMTok: 10 },
+};
+
+// Heuristica grosseira (nao e' o tokenizador real de nenhum dos dois
+// provedores) so' para dar uma ideia de ordem de grandeza ANTES de chamar a
+// API de verdade - ~4 caracteres por token e' uma media razoavel para texto
+// em português.
+function estimarTokensPorCaracteres(texto) {
+  return Math.ceil((texto || "").length / 4);
+}
+
+function estimarCustoUsd(tokensEntrada, tokensSaidaEstimados, precos) {
+  const custoEntrada = (tokensEntrada / 1_000_000) * precos.precoEntradaPorMTok;
+  const custoSaida = (tokensSaidaEstimados / 1_000_000) * precos.precoSaidaPorMTok;
+  return custoEntrada + custoSaida;
+}
+
+// Monta o texto do processo (documentos selecionados + eventual
+// movimentacao) que vai virar a primeira parte do prompt - mesma logica de
+// extracao/agrupamento por evento do MD unico, mas devolvida como string em
+// memoria, sem gerar nem baixar arquivo nenhum.
+async function construirTextoProcessoParaIA(documentos, resolverUrl, movimentacao, anonimizar) {
+  const secoesEventos = [];
+
+  let abaPdf = null;
+  if (documentos.some((doc) => doc.mimetype === "pdf")) {
+    const origemEproc = `${new URL(documentos[0].href).origin}/eproc/controlador.php`;
+    abaPdf = await prepararAbaProcessamentoPdfMd(origemEproc);
+  }
+
+  async function processarUmDocumento(doc) {
+    let corpo;
+    try {
+      const urlReal = await resolverUrl(doc);
+      if (doc.mimetype === "html") {
+        const { texto, erro } = await obterTextoHtmlReal(urlReal);
+        corpo = texto || `_Não foi possível extrair o conteúdo deste documento (${erro || "motivo desconhecido"})._`;
+      } else {
+        const resultado = await extrairTextoDocumentoMd(abaPdf && abaPdf.id, urlReal, doc.mimetype, doc.nome);
+        corpo = resultado.erro && !resultado.texto
+          ? `_Não foi possível extrair o texto deste documento (${resultado.erro})._`
+          : resultado.texto || "_(sem texto identificado)_";
+      }
+    } catch (e) {
+      corpo = `_Não foi possível processar este documento (${String(e)})._`;
+    }
+    return `#### ${doc.nome}\n\n${corpo.trim()}\n`;
+  }
+
+  try {
+    const { porEvento, semEvento } = agruparDocumentosPorEvento(documentos, movimentacao);
+
+    if (movimentacao && movimentacao.length > 0) {
+      for (const evento of movimentacao) {
+        const linhas = [`### ${rotuloEvento(evento)}`, ""];
+        const docsDoEvento = evento.numeroEvento != null ? porEvento.get(evento.numeroEvento) || [] : [];
+        if (docsDoEvento.length === 0) {
+          linhas.push("_Nenhum documento anexado a este evento._");
+        } else {
+          for (const doc of docsDoEvento) linhas.push(await processarUmDocumento(doc));
+        }
+        secoesEventos.push(linhas.join("\n"));
+      }
+    } else if (movimentacao) {
+      secoesEventos.push(construirSecaoMovimentacao(movimentacao));
+    }
+
+    if (semEvento.length > 0) {
+      const linhas = ["### Documentos sem evento identificado", ""];
+      for (const doc of semEvento) linhas.push(await processarUmDocumento(doc));
+      secoesEventos.push(linhas.join("\n"));
+    }
+  } finally {
+    if (abaPdf) chrome.tabs.remove(abaPdf.id).catch(() => {});
+  }
+
+  const corpo = secoesEventos.join("\n\n");
+  return anonimizar ? anonimizarTexto(corpo) : corpo;
+}
+
+// Chamada direta pela extensao (sem backend proprio) - por isso precisa do
+// cabecalho "anthropic-dangerous-direct-browser-access": a Anthropic bloqueia
+// por padrao chamadas feitas direto do navegador (para evitar que uma chave
+// de API vaze para qualquer script de uma pagina web); aqui e' seguro porque
+// a chave e' digitada pelo proprio usuario nas configuracoes da extensao e
+// so' e' usada para chamar a API dele mesmo.
+async function chamarClaudeAPI(apiKey, promptCompleto) {
+  const resposta = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: CONFIG_MODELOS_IA.claude.modelo,
+      max_tokens: 8192,
+      messages: [{ role: "user", content: promptCompleto }],
+    }),
+  });
+
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API da Claude.`);
+  }
+
+  const texto = (dados.content || []).map((bloco) => bloco.text || "").join("");
+  const tokensEntrada = dados.usage ? dados.usage.input_tokens : null;
+  const tokensSaida = dados.usage ? dados.usage.output_tokens : null;
+  return { texto, tokensEntrada, tokensSaida };
+}
+
+async function chamarGeminiAPI(apiKey, promptCompleto) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG_MODELOS_IA.gemini.modelo}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const resposta = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ contents: [{ parts: [{ text: promptCompleto }] }] }),
+  });
+
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API do Gemini.`);
+  }
+
+  const candidato = dados.candidates && dados.candidates[0];
+  const texto = candidato && candidato.content && candidato.content.parts
+    ? candidato.content.parts.map((parte) => parte.text || "").join("")
+    : "";
+  const tokensEntrada = dados.usageMetadata ? dados.usageMetadata.promptTokenCount : null;
+  const tokensSaida = dados.usageMetadata ? dados.usageMetadata.candidatesTokenCount : null;
+  return { texto, tokensEntrada, tokensSaida };
+}
+
+// Fase 1 do fluxo (mensagem "ANALISAR_IA_EXTRAIR"): extrai o texto e devolve
+// junto uma ESTIMATIVA de custo, sem chamar a API de IA ainda - a chamada de
+// verdade so' acontece se o usuario confirmar (fase 2, "ANALISAR_IA_ENVIAR"),
+// depois de ver a estimativa.
+async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, aoProgredir) {
+  if (aoProgredir) aoProgredir("Extraindo o conteúdo dos documentos selecionados...");
+  const obterUrlResolvida = criarResolvedorUrlDocumento();
+  const texto = await construirTextoProcessoParaIA(documentos, obterUrlResolvida, movimentacao, anonimizar);
+
+  const precos = CONFIG_MODELOS_IA[provedor] || CONFIG_MODELOS_IA.claude;
+  const tokensEntradaEstimados = estimarTokensPorCaracteres(texto) + estimarTokensPorCaracteres(
+    PROMPTS_IA.map((p) => p.texto).join("")
+  );
+  // Sem ainda saber o tamanho da resposta, usa a propria entrada como
+  // aproximacao grosseira do tamanho da saida (relatorios FIRAC costumam
+  // ficar na mesma ordem de grandeza do texto de entrada) - so' para dar
+  // uma ideia de custo maximo plausivel antes de enviar.
+  const custoEstimadoUsd = estimarCustoUsd(tokensEntradaEstimados, tokensEntradaEstimados, precos);
+
+  return {
+    texto,
+    estimativa: {
+      provedor,
+      modelo: precos.modelo,
+      tokensEntradaEstimados,
+      custoEstimadoUsd,
+    },
+  };
+}
+
+// Fase 2: apensa o prompt escolhido ao final do texto do processo e chama a
+// API do provedor selecionado, devolvendo tambem o custo REAL (calculado a
+// partir do "usage" que a propria resposta da API traz).
+async function executarAnaliseIA(texto, promptId, provedor, apiKey) {
+  const prompt = PROMPTS_IA.find((p) => p.id === promptId);
+  if (!prompt) throw new Error("Tipo de prompt não encontrado.");
+  if (!apiKey) throw new Error(`Nenhuma chave de API configurada para "${provedor}". Configure-a nas configurações da extensão.`);
+
+  const promptCompleto = `${texto}\n\n---\n\n${prompt.texto}`;
+
+  const resultado = provedor === "gemini"
+    ? await chamarGeminiAPI(apiKey, promptCompleto)
+    : await chamarClaudeAPI(apiKey, promptCompleto);
+
+  const precos = CONFIG_MODELOS_IA[provedor] || CONFIG_MODELOS_IA.claude;
+  const custoRealUsd = resultado.tokensEntrada != null && resultado.tokensSaida != null
+    ? estimarCustoUsd(resultado.tokensEntrada, resultado.tokensSaida, precos)
+    : null;
+
+  return { resposta: resultado.texto, custoRealUsd };
+}
+
 // ---- Orquestracao geral ----
 
 async function processarFila(numeroProcesso, documentos, opcoes, movimentacao) {
@@ -7716,6 +7961,54 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "BAIXAR_DOCUMENTOS") {
     const opcoes = mensagem.opcoes || { individuais: true, pdfUnico: false, mdUnico: false };
     processarFila(mensagem.numeroProcesso, mensagem.documentos, opcoes, mensagem.movimentacao);
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "ANALISAR_IA_EXTRAIR") {
+    extrairTextoParaAnaliseIA(
+      mensagem.documentos,
+      mensagem.movimentacao,
+      !!mensagem.anonimizar,
+      mensagem.provedor,
+      (texto) => {
+        chrome.runtime.sendMessage({ tipo: "PROGRESSO_ANALISE_IA", fase: "extraindo", texto }).catch(() => {});
+      }
+    )
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "ANALISE_IA_TEXTO_PRONTO", ok: true, ...resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "ANALISE_IA_TEXTO_PRONTO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "ANALISAR_IA_ENVIAR") {
+    executarAnaliseIA(mensagem.texto, mensagem.promptId, mensagem.provedor, mensagem.apiKey)
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "ANALISE_IA_RESULTADO", ok: true, ...resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "ANALISE_IA_RESULTADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
     sendResponse({ ok: true });
     return true;
   }

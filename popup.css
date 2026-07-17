@@ -485,6 +485,49 @@ button {
   color: var(--cor-texto);
 }
 
+.campo-config-ia {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fonte-pequena);
+  color: var(--cor-texto-suave);
+  margin-top: 4px;
+}
+
+.campo-config-ia input[type="password"],
+.campo-config-ia input[type="text"] {
+  padding: 6px 8px;
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+  background: var(--cor-cartao);
+  font-size: var(--fonte-base);
+  color: var(--cor-texto);
+}
+
+.campo-config-ia select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+  background: var(--cor-cartao);
+  font-size: var(--fonte-base);
+  color: var(--cor-texto);
+}
+
+.campo-resultado-ia {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+  background: var(--cor-cartao);
+  font-size: var(--fonte-base);
+  color: var(--cor-texto);
+  font-family: inherit;
+  resize: vertical;
+  margin-bottom: 4px;
+}
+
 /* ---- Avisos (uma classe só para os antigos aviso-md-unico e
    aviso-urgencia) ---- */
 
