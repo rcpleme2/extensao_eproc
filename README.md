@@ -545,7 +545,7 @@ IA":
   existe).
 - Escolha o **modelo** de cada provedor, num select logo abaixo da
   respectiva chave:
-  - Claude: Haiku 4.5 (padrão, mais barato), Sonnet 5 ou Opus 4.8.
+  - Claude: Haiku 4.5 (padrão, mais barato), Sonnet 5 ou Sonnet 4.6.
   - Gemini: Flash-Lite 3.1 (padrão, mais barato) ou Pro 3.1.
 
   O modelo escolhido é o mesmo usado tanto na análise imediata quanto ao

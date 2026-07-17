@@ -1456,7 +1456,7 @@ const MODELOS_IA_DISPONIVEIS = {
   claude: [
     { id: "claude-haiku-4-5", nome: "Claude Haiku 4.5 (mais barato)", precoEntradaPorMTok: 1, precoSaidaPorMTok: 5 },
     { id: "claude-sonnet-5", nome: "Claude Sonnet 5", precoEntradaPorMTok: 3, precoSaidaPorMTok: 15 },
-    { id: "claude-opus-4-8", nome: "Claude Opus 4.8", precoEntradaPorMTok: 5, precoSaidaPorMTok: 25 },
+    { id: "claude-sonnet-4-6", nome: "Claude Sonnet 4.6", precoEntradaPorMTok: 3, precoSaidaPorMTok: 15 },
   ],
   gemini: [
     { id: "gemini-3.1-flash-lite", nome: "Gemini 3.1 Flash-Lite (mais barato)", precoEntradaPorMTok: 0.25, precoSaidaPorMTok: 1.5 },

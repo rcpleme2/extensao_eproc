@@ -338,7 +338,7 @@ const MODELOS_IA_PAINEL = {
   claude: [
     { id: "claude-haiku-4-5", nome: "Claude Haiku 4.5 (mais barato)" },
     { id: "claude-sonnet-5", nome: "Claude Sonnet 5" },
-    { id: "claude-opus-4-8", nome: "Claude Opus 4.8" },
+    { id: "claude-sonnet-4-6", nome: "Claude Sonnet 4.6" },
   ],
   gemini: [
     { id: "gemini-3.1-flash-lite", nome: "Gemini 3.1 Flash-Lite (mais barato)" },
@@ -538,7 +538,7 @@ function iniciarCronometroStatus(el) {
 // DESLIGAR (mostrando o total decorrido) quando chega um "ok"/"erro" e
 // havia um rodando - nunca liga um cronometro sozinho (ver
 // "iniciarCronometroStatus").
-function aplicarStatus(el, texto, tipo) {
+function aplicarStatus(el, texto, tipo, abrirCartao = true) {
   const finalizado = tipo === "ok" || tipo === "erro";
   el.dataset.statusTexto = texto;
 
@@ -552,8 +552,11 @@ function aplicarStatus(el, texto, tipo) {
   el.classList.toggle("status--ok", tipo === "ok");
   el.classList.toggle("status--erro", tipo === "erro");
   // Atividade numa secao (progresso/resultado/erro) abre o cartao dela,
-  // para nada acontecer escondido atras de um cartao colapsado.
-  abrirCartaoDe(el);
+  // para nada acontecer escondido atras de um cartao colapsado - so'
+  // quando "abrirCartao" nao foi explicitamente desligado (ver "setStatus",
+  // que atualiza DUAS areas de status ao mesmo tempo mas so' deve abrir o
+  // cartao de quem realmente originou a acao).
+  if (abrirCartao) abrirCartaoDe(el);
 }
 
 // Garante que o cartao (details) que contem o elemento esteja aberto -
@@ -573,10 +576,14 @@ function abrirCartaoDe(el) {
 
 // Aplica em AMBOS os status ("Exportar Documentos" e "Analisar com IA") -
 // as duas subseções compartilham a mesma detecção/seleção de documentos,
-// então mostram sempre a mesma mensagem.
-function setStatus(texto, tipo) {
-  aplicarStatus(areaStatus, texto, tipo);
-  aplicarStatus(areaStatusIA, texto, tipo);
+// então mostram sempre a mesma mensagem. So' abre o CARTAO de quem
+// originou a acao ("origem": "exportar", padrão, ou "ia") - sem isso,
+// detectar pela subseção "Analisar com IA" abriria também "Exportar
+// Documentos" (e vice-versa), já que as duas áreas de status são
+// atualizadas juntas.
+function setStatus(texto, tipo, origem = "exportar") {
+  aplicarStatus(areaStatus, texto, tipo, origem !== "ia");
+  aplicarStatus(areaStatusIA, texto, tipo, origem === "ia");
 }
 
 async function getAbaAtiva() {
@@ -701,9 +708,9 @@ chkIncluirMovimentacaoIA.addEventListener("change", () => definirMovimentacaoInc
 // Compartilhada pelos dois botões "Detectar documentos" ("Exportar
 // Documentos" e "Analisar com IA") - as duas subseções mostram a mesma
 // detecção/seleção, só a UI é repetida.
-async function executarDeteccao() {
+async function executarDeteccao(origem = "exportar") {
   areaErros.hidden = true;
-  setStatus("Detectando documentos na pagina...");
+  setStatus("Detectando documentos na pagina...", undefined, origem);
   try {
     const aba = await getAbaAtiva();
     const resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_DOCUMENTOS" });
@@ -713,7 +720,9 @@ async function executarDeteccao() {
 
     if (!resposta || (documentos.length === 0 && movimentacao.length === 0)) {
       setStatus(
-        "Nenhum documento nem movimentação encontrados. Confirme que você está na página de detalhes do processo no eproc."
+        "Nenhum documento nem movimentação encontrados. Confirme que você está na página de detalhes do processo no eproc.",
+        undefined,
+        origem
       );
       estadoAtual = { numeroProcesso: null, documentos: [], movimentacao: [], movimentacaoIncluida: true };
       atualizarEstadoBotaoBaixar();
@@ -781,17 +790,21 @@ async function executarDeteccao() {
     setStatus(
       semDocumentos
         ? `Nenhum documento anexado, mas ${movimentacao.length} evento(s) de movimentação encontrado(s) - só "MD único" está disponível.`
-        : 'Documentos detectados. Escolha o que baixar e clique em "Baixar".'
+        : 'Documentos detectados. Escolha o que baixar e clique em "Baixar".',
+      undefined,
+      origem
     );
   } catch (e) {
     setStatus(
-      "Nao foi possivel ler a pagina. Verifique se voce esta em uma pagina de processo do eproc e tente novamente."
+      "Nao foi possivel ler a pagina. Verifique se voce esta em uma pagina de processo do eproc e tente novamente.",
+      undefined,
+      origem
     );
   }
 }
 
-btnDetectar.addEventListener("click", executarDeteccao);
-btnDetectarIA.addEventListener("click", executarDeteccao);
+btnDetectar.addEventListener("click", () => executarDeteccao("exportar"));
+btnDetectarIA.addEventListener("click", () => executarDeteccao("ia"));
 
 // Confere o estado ATUAL dos checkboxes direto na página do processo antes
 // de usar a seleção - cobre o caso do usuário ter ajustado a seleção lá
