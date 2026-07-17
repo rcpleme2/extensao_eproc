@@ -626,14 +626,24 @@ essa opção, nada é salvo: o texto só existe para aquela chamada.
   revise o que está sendo enviado antes de confirmar, especialmente em
   processos com dados sensíveis.
 
-### Erro "Falha de rede ao chamar a API ... (Failed to fetch)"
+### Erro "Envio falhou: verifique se a rede interna está bloqueando..."
 
-Esse erro significa que a chamada para a API do provedor nem chegou a
-sair do navegador (não é um erro vindo da Claude/Gemini). A causa mais
-comum é a extensão ainda não ter os `host_permissions` mais recentes
-carregados - isso acontece logo após instalar ou atualizar a extensão
-(inclusive ao trocar de branch/versão durante o desenvolvimento). Para
-corrigir:
+A extensão detecta automaticamente quando uma chamada à API de IA nem
+chega a sair do navegador (o "Failed to fetch" genérico que o próprio
+navegador dá, sem detalhe nenhum, sempre que a requisição é bloqueada
+antes de sair - não é um erro vindo da Claude/Gemini) e mostra essa
+mensagem mais amigável em vez do erro técnico cru. O cenário mais comum é
+a rede/firewall da instituição bloqueando o domínio daquele provedor
+(indicado na própria mensagem). O detalhe técnico completo (nome do
+provedor + mensagem original do navegador) vem no final da mensagem, e
+também fica registrado no console do service worker (`chrome://extensions`
+→ link "service worker" da extensão → Inspecionar), em logs prefixados
+`[eproc-md] Falha de rede chamando ...`.
+
+Outra causa comum é a extensão ainda não ter os `host_permissions` mais
+recentes carregados - isso acontece logo após instalar ou atualizar a
+extensão (inclusive ao trocar de branch/versão durante o
+desenvolvimento). Para corrigir:
 
 1. Abra `chrome://extensions`.
 2. Clique no ícone de **recarregar** (↻) no card da extensão (não basta

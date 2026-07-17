@@ -1623,13 +1623,17 @@ async function fetchComDiagnostico(url, opcoes, nomeServico) {
   } catch (e) {
     console.error(LOG_MD, `Falha de rede chamando ${nomeServico} (${url}):`, e);
     const host = new URL(url).host;
+    // "Failed to fetch" e' o TypeError generico que o navegador da' quando
+    // a requisicao nem chega a sair - por design, sem detalhe nenhum (nao
+    // vaza informacao de rede pra scripts). A mensagem principal fica
+    // curta e direta (o cenario mais comum e' bloqueio de rede/firewall da
+    // instituicao, ja que host_permissions ja' libera o dominio); o
+    // detalhe tecnico e as outras causas possiveis (extensao desatualizada,
+    // sem internet) ficam depois, pra quem for investigar mais a fundo.
     throw new Error(
-      `Falha de rede ao chamar ${nomeServico} ("${e && e.message}"). Se você acabou de instalar ou atualizar a extensão, ` +
-        `recarregue-a em chrome://extensions (ícone de recarregar no card da extensão) e tente de novo - alterações de ` +
-        `permissão só valem depois disso. Se isso acontece só com esse provedor (outro provedor de IA funciona normalmente), ` +
-        `é bem provável que a rede/firewall da instituição esteja bloqueando "${host}" especificamente - tente abrir ` +
-        `https://${host} direto numa aba do navegador: se também não carregar lá, confirme com o suporte de TI se esse ` +
-        `endereço pode ser liberado. Se persistir sem explicação, confira sua conexão com a internet.`
+      `Envio falhou: verifique se a rede interna está bloqueando o acesso à API (${host}). ` +
+        `Se não for isso, confira sua conexão com a internet ou recarregue a extensão em chrome://extensions ` +
+        `(comum logo após atualizar) e tente de novo. Detalhe técnico: "${nomeServico}" - ${e && e.message}.`
     );
   }
 }
