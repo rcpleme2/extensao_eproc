@@ -69,18 +69,23 @@ const listaLotesEnviadosIA = document.getElementById("lista-lotes-enviados-ia");
 // cadastro/edição/exclusão.
 let PROMPTS_IA_PAINEL = [];
 
-function atualizarSelectPromptIA() {
-  const valorAtual = selectPromptIA.value;
-  selectPromptIA.innerHTML = "";
+function preencherSelectComPromptsIA(select) {
+  const valorAtual = select.value;
+  select.innerHTML = "";
   for (const prompt of PROMPTS_IA_PAINEL) {
     const option = document.createElement("option");
     option.value = prompt.id;
     option.textContent = prompt.titulo;
-    selectPromptIA.appendChild(option);
+    select.appendChild(option);
   }
   if (PROMPTS_IA_PAINEL.some((p) => p.id === valorAtual)) {
-    selectPromptIA.value = valorAtual;
+    select.value = valorAtual;
   }
+}
+
+function atualizarSelectPromptIA() {
+  preencherSelectComPromptsIA(selectPromptIA);
+  preencherSelectComPromptsIA(selectPromptLoteLocalizadorIA);
 }
 
 async function atualizarPromptsIA() {
@@ -1877,10 +1882,13 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   if (mensagem.tipo === "PROGRESSO_LISTAR_LOCALIZADORES") {
     textoProgressoNavLocalizadores.textContent = mensagem.texto || "Processando...";
     setStatusNavLocalizadores(mensagem.texto || "Processando...");
+    textoProgressoCarregarLoteLocalizadorIA.textContent = mensagem.texto || "Processando...";
+    aplicarStatus(areaStatusLoteLocalizadorIA, mensagem.texto || "Processando...");
   }
 
   if (mensagem.tipo === "LISTAR_LOCALIZADORES_FINALIZADO") {
     areaProgressoNavLocalizadores.hidden = true;
+    areaProgressoCarregarLoteLocalizadorIA.hidden = true;
 
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
@@ -1892,20 +1900,35 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
       selectLocalizadorProcessos.innerHTML =
         '<option value="" selected disabled>Selecione um localizador...</option>';
+      selectLoteLocalizadorIA.innerHTML =
+        '<option value="" selected disabled>Selecione um localizador...</option>';
       for (const loc of localizadores) {
         const opcao = document.createElement("option");
         opcao.value = loc.urlProcessos;
         opcao.textContent = `${loc.nome} (${loc.totalProcessos})`;
         selectLocalizadorProcessos.appendChild(opcao);
+
+        const opcaoLote = opcao.cloneNode(true);
+        selectLoteLocalizadorIA.appendChild(opcaoLote);
       }
       areaSelectLocalizador.hidden = localizadores.length === 0;
+      areaSelectLoteLocalizadorIA.hidden = localizadores.length === 0;
       // Sem nenhum localizador encontrado nao ha' nada mais a fazer com
       // a lista carregada - reaparece o botao para tentar de novo.
-      if (localizadores.length === 0) btnCarregarLocalizadores.hidden = false;
+      if (localizadores.length === 0) {
+        btnCarregarLocalizadores.hidden = false;
+        btnCarregarLocalizadoresLoteIA.hidden = false;
+      }
 
       setStatusNavLocalizadores(
         localizadores.length > 0
           ? `${localizadores.length} localizador(es) com processos - selecione um para navegar até ele ou exportar um relatório.`
+          : "Nenhum localizador com processos foi encontrado."
+      );
+      aplicarStatus(
+        areaStatusLoteLocalizadorIA,
+        localizadores.length > 0
+          ? `${localizadores.length} localizador(es) com processos - selecione um para varrer os documentos.`
           : "Nenhum localizador com processos foi encontrado."
       );
       if (resultado.erroColeta) {
@@ -1918,6 +1941,9 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosNavLocalizadores.textContent =
         mensagem.erro || "Falha desconhecida ao carregar os localizadores.";
       btnCarregarLocalizadores.hidden = false;
+
+      aplicarStatus(areaStatusLoteLocalizadorIA, "Erro ao carregar os localizadores.", "erro");
+      btnCarregarLocalizadoresLoteIA.hidden = false;
     }
   }
 
@@ -1997,10 +2023,38 @@ const btnExportarDocumentosLocalizador = document.getElementById("btn-exportar-d
 const areaProgressoDocumentosLocalizador = document.getElementById("area-progresso-documentos-localizador");
 const textoProgressoDocumentosLocalizador = document.getElementById("texto-progresso-documentos-localizador");
 
+const areaStatusLoteLocalizadorIA = document.getElementById("area-status-lote-localizador-ia");
+const btnCarregarLocalizadoresLoteIA = document.getElementById("btn-carregar-localizadores-lote-ia");
+const areaProgressoCarregarLoteLocalizadorIA = document.getElementById("area-progresso-carregar-lote-localizador-ia");
+const textoProgressoCarregarLoteLocalizadorIA = document.getElementById("texto-progresso-carregar-lote-localizador-ia");
+const areaSelectLoteLocalizadorIA = document.getElementById("area-select-lote-localizador-ia");
+const selectLoteLocalizadorIA = document.getElementById("select-lote-localizador-ia");
+const btnVarrerLoteLocalizadorIA = document.getElementById("btn-varrer-lote-localizador-ia");
+const areaConfirmarVarreduraLoteLocalizadorIA = document.getElementById("area-confirmar-varredura-lote-localizador-ia");
+const textoConfirmarVarreduraLoteLocalizadorIA = document.getElementById("texto-confirmar-varredura-lote-localizador-ia");
+const btnConfirmarVarreduraLoteLocalizadorIA = document.getElementById("btn-confirmar-varredura-lote-localizador-ia");
+const btnCancelarVarreduraLoteLocalizadorIA = document.getElementById("btn-cancelar-varredura-lote-localizador-ia");
+const areaProgressoLoteLocalizadorIA = document.getElementById("area-progresso-lote-localizador-ia");
+const textoProgressoLoteLocalizadorIA = document.getElementById("texto-progresso-lote-localizador-ia");
+const areaGruposLoteLocalizadorIA = document.getElementById("area-grupos-lote-localizador-ia");
+const listaGruposLoteLocalizadorIA = document.getElementById("lista-grupos-lote-localizador-ia");
+const btnMarcarTudoGruposLoteIA = document.getElementById("btn-marcar-tudo-grupos-lote-ia");
+const btnDesmarcarTudoGruposLoteIA = document.getElementById("btn-desmarcar-tudo-grupos-lote-ia");
+const selectPromptLoteLocalizadorIA = document.getElementById("select-prompt-lote-localizador-ia");
+const chkAnonimizarLoteLocalizadorIA = document.getElementById("chk-anonimizar-lote-localizador-ia");
+const btnAdicionarLoteLocalizadorIA = document.getElementById("btn-adicionar-lote-localizador-ia");
+const areaErrosLoteLocalizadorIA = document.getElementById("area-erros-lote-localizador-ia");
+
 // Guarda a ultima lista carregada (nome + urlProcessos de cada
 // localizador) para poder identificar qual localizador esta' selecionado
 // no dropdown na hora de exportar o relatorio de processos dele.
 let localizadoresCarregados = [];
+
+// Resultado da ultima varredura de documentos de um localizador (lote por
+// localizador) - guardado so' em memoria do painel (nao persiste), para
+// "Adicionar à fila" poder filtrar pelos grupos escolhidos sem precisar
+// varrer os processos de novo.
+let processosVarridosLoteLocalizadorIA = [];
 
 function setStatusNavLocalizadores(texto, tipo) {
   aplicarStatus(areaNavLocalizadoresInfo, texto, tipo);
@@ -2150,6 +2204,231 @@ btnExportarDocumentosLocalizador.addEventListener("click", async () => {
     areaErrosNavLocalizadores.textContent = e && e.message ? e.message : String(e);
     areaProgressoDocumentosLocalizador.hidden = true;
     btnExportarDocumentosLocalizador.disabled = false;
+  }
+});
+
+// ---- Lote por localizador (rodar um prompt pré-cadastrado em todos os
+// processos de um localizador, filtrando por grupo/sigla de documento) ----
+
+function setStatusLoteLocalizadorIA(texto, tipo) {
+  aplicarStatus(areaStatusLoteLocalizadorIA, texto, tipo);
+}
+
+btnCarregarLocalizadoresLoteIA.addEventListener("click", () => {
+  // Reaproveita o mesmo carregamento (e a mesma mensagem em segundo
+  // plano) do botão "Carregar localizadores" da seção "Busca específica
+  // de localizadores" logo abaixo - o resultado preenche os dois
+  // dropdowns ao mesmo tempo (ver LISTAR_LOCALIZADORES_FINALIZADO acima).
+  btnCarregarLocalizadores.click();
+});
+
+selectLoteLocalizadorIA.addEventListener("change", () => {
+  areaErrosLoteLocalizadorIA.hidden = true;
+  areaGruposLoteLocalizadorIA.hidden = true;
+  areaConfirmarVarreduraLoteLocalizadorIA.hidden = true;
+  processosVarridosLoteLocalizadorIA = [];
+});
+
+// Localizadores podem ter muitos processos - cada um custa abrir uma aba
+// oculta e esperar a pagina carregar, entao acima de 50 processos pede
+// confirmacao explicita antes de comecar (poderia levar minutos).
+const LIMITE_PROCESSOS_SEM_CONFIRMACAO_LOTE_LOCALIZADOR = 50;
+
+function iniciarVarreduraLoteLocalizadorIA(localizador) {
+  areaErrosLoteLocalizadorIA.hidden = true;
+  areaConfirmarVarreduraLoteLocalizadorIA.hidden = true;
+  areaGruposLoteLocalizadorIA.hidden = true;
+  processosVarridosLoteLocalizadorIA = [];
+  btnVarrerLoteLocalizadorIA.disabled = true;
+  areaProgressoLoteLocalizadorIA.hidden = false;
+  textoProgressoLoteLocalizadorIA.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaStatusLoteLocalizadorIA);
+  setStatusLoteLocalizadorIA(`Varrendo os documentos de cada processo de "${localizador.nome}" (pode demorar)...`);
+
+  chrome.runtime
+    .sendMessage({ tipo: "IA_LOTE_LOCALIZADOR_VARRER", urlProcessos: localizador.urlProcessos })
+    .then((resposta) => {
+      if (!resposta || !resposta.ok) {
+        throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a varredura.");
+      }
+    })
+    .catch((e) => {
+      setStatusLoteLocalizadorIA("Erro ao iniciar a varredura.", "erro");
+      areaErrosLoteLocalizadorIA.hidden = false;
+      areaErrosLoteLocalizadorIA.textContent = e && e.message ? e.message : String(e);
+      areaProgressoLoteLocalizadorIA.hidden = true;
+      btnVarrerLoteLocalizadorIA.disabled = false;
+    });
+}
+
+btnVarrerLoteLocalizadorIA.addEventListener("click", () => {
+  const url = selectLoteLocalizadorIA.value;
+  const localizador = localizadoresCarregados.find((loc) => loc.urlProcessos === url);
+  if (!localizador) return;
+
+  if ((localizador.totalProcessos || 0) > LIMITE_PROCESSOS_SEM_CONFIRMACAO_LOTE_LOCALIZADOR) {
+    areaConfirmarVarreduraLoteLocalizadorIA.hidden = false;
+    textoConfirmarVarreduraLoteLocalizadorIA.textContent =
+      `"${localizador.nome}" tem ${localizador.totalProcessos} processos - varrer todos pode demorar vários ` +
+      `minutos (uma aba oculta por processo, um de cada vez). Confirma?`;
+    return;
+  }
+
+  iniciarVarreduraLoteLocalizadorIA(localizador);
+});
+
+btnConfirmarVarreduraLoteLocalizadorIA.addEventListener("click", () => {
+  const url = selectLoteLocalizadorIA.value;
+  const localizador = localizadoresCarregados.find((loc) => loc.urlProcessos === url);
+  if (!localizador) return;
+  iniciarVarreduraLoteLocalizadorIA(localizador);
+});
+
+btnCancelarVarreduraLoteLocalizadorIA.addEventListener("click", () => {
+  areaConfirmarVarreduraLoteLocalizadorIA.hidden = true;
+});
+
+function renderizarGruposLoteLocalizadorIA(grupos) {
+  listaGruposLoteLocalizadorIA.innerHTML = "";
+  for (const { grupo, contagem } of grupos) {
+    const label = document.createElement("label");
+    label.className = "opcao";
+    label.innerHTML = `
+      <input type="checkbox" checked data-grupo-doc="${grupo}" />
+      ${grupo} (${contagem} documento(s))
+    `;
+    listaGruposLoteLocalizadorIA.appendChild(label);
+  }
+}
+
+function checkboxesGruposLoteLocalizadorIA() {
+  return Array.from(listaGruposLoteLocalizadorIA.querySelectorAll("[data-grupo-doc]"));
+}
+
+btnMarcarTudoGruposLoteIA.addEventListener("click", () => {
+  checkboxesGruposLoteLocalizadorIA().forEach((chk) => (chk.checked = true));
+});
+
+btnDesmarcarTudoGruposLoteIA.addEventListener("click", () => {
+  checkboxesGruposLoteLocalizadorIA().forEach((chk) => (chk.checked = false));
+});
+
+btnAdicionarLoteLocalizadorIA.addEventListener("click", async () => {
+  const gruposEscolhidos = checkboxesGruposLoteLocalizadorIA()
+    .filter((chk) => chk.checked)
+    .map((chk) => chk.dataset.grupoDoc);
+
+  if (gruposEscolhidos.length === 0) {
+    areaErrosLoteLocalizadorIA.hidden = false;
+    areaErrosLoteLocalizadorIA.textContent = "Marque ao menos um grupo de documentos.";
+    return;
+  }
+  if (processosVarridosLoteLocalizadorIA.length === 0) {
+    areaErrosLoteLocalizadorIA.hidden = false;
+    areaErrosLoteLocalizadorIA.textContent = "Varra os documentos de um localizador antes de adicionar à fila.";
+    return;
+  }
+  if (!selectPromptLoteLocalizadorIA.value) {
+    areaErrosLoteLocalizadorIA.hidden = false;
+    areaErrosLoteLocalizadorIA.textContent = "Escolha um prompt cadastrado para aplicar em todos os processos.";
+    return;
+  }
+
+  areaErrosLoteLocalizadorIA.hidden = true;
+  btnAdicionarLoteLocalizadorIA.disabled = true;
+  areaProgressoLoteLocalizadorIA.hidden = false;
+  textoProgressoLoteLocalizadorIA.textContent = "Iniciando...";
+  setStatusLoteLocalizadorIA("Adicionando os processos filtrados à fila em lote...");
+
+  const config = await obterConfiguracoes();
+
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "IA_LOTE_LOCALIZADOR_ADICIONAR",
+      processos: processosVarridosLoteLocalizadorIA,
+      grupos: gruposEscolhidos,
+      promptId: selectPromptLoteLocalizadorIA.value,
+      promptTextoAvulso: null,
+      anonimizar: chkAnonimizarLoteLocalizadorIA.checked,
+      modelo: config.modeloClaude,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao adicionar à fila.");
+    }
+  } catch (e) {
+    setStatusLoteLocalizadorIA("Erro ao adicionar os processos à fila.", "erro");
+    areaErrosLoteLocalizadorIA.hidden = false;
+    areaErrosLoteLocalizadorIA.textContent = e && e.message ? e.message : String(e);
+    areaProgressoLoteLocalizadorIA.hidden = true;
+    btnAdicionarLoteLocalizadorIA.disabled = false;
+  }
+});
+
+chrome.runtime.onMessage.addListener((mensagem) => {
+  if (!mensagem) return;
+
+  if (mensagem.tipo === "PROGRESSO_IA_LOTE_LOCALIZADOR") {
+    textoProgressoLoteLocalizadorIA.textContent = mensagem.texto || "Processando...";
+    setStatusLoteLocalizadorIA(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "IA_LOTE_LOCALIZADOR_VARRIDO") {
+    areaProgressoLoteLocalizadorIA.hidden = true;
+    btnVarrerLoteLocalizadorIA.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      processosVarridosLoteLocalizadorIA = resultado.processos || [];
+      const grupos = resultado.grupos || [];
+      const erros = resultado.erros || [];
+
+      if (grupos.length > 0) {
+        renderizarGruposLoteLocalizadorIA(grupos);
+        areaGruposLoteLocalizadorIA.hidden = false;
+      }
+
+      setStatusLoteLocalizadorIA(
+        `Varredura concluída: ${processosVarridosLoteLocalizadorIA.length} de ${resultado.total || 0} processo(s) ` +
+          `com documentos lidos${erros.length > 0 ? ` (${erros.length} com aviso/erro - veja abaixo)` : ""}.`,
+        erros.length > 0 ? "erro" : "ok"
+      );
+      if (erros.length > 0 || resultado.erroColeta) {
+        areaErrosLoteLocalizadorIA.hidden = false;
+        const linhas = erros.map((e) => `${e.nome}: ${e.mensagem}`);
+        if (resultado.erroColeta) linhas.unshift(`Aviso: ${resultado.erroColeta}`);
+        areaErrosLoteLocalizadorIA.textContent = linhas.join("\n");
+      }
+    } else {
+      setStatusLoteLocalizadorIA("Erro ao varrer os documentos do localizador.", "erro");
+      areaErrosLoteLocalizadorIA.hidden = false;
+      areaErrosLoteLocalizadorIA.textContent =
+        mensagem.erro || "Falha desconhecida ao varrer os documentos do localizador.";
+    }
+  }
+
+  if (mensagem.tipo === "IA_LOTE_LOCALIZADOR_ADICIONADO") {
+    areaProgressoLoteLocalizadorIA.hidden = true;
+    btnAdicionarLoteLocalizadorIA.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      const erros = resultado.erros || [];
+      setStatusLoteLocalizadorIA(
+        `Concluído! ${resultado.adicionados || 0} de ${resultado.total || 0} processo(s) adicionado(s) à fila em lote acima` +
+          (erros.length > 0 ? ` (${erros.length} pulado(s) - veja abaixo).` : "."),
+        erros.length > 0 ? "erro" : "ok"
+      );
+      if (erros.length > 0) {
+        areaErrosLoteLocalizadorIA.hidden = false;
+        areaErrosLoteLocalizadorIA.textContent = erros.map((e) => `${e.nome}: ${e.mensagem}`).join("\n");
+      }
+      atualizarListaCompletaIA();
+    } else {
+      setStatusLoteLocalizadorIA("Erro ao adicionar os processos à fila.", "erro");
+      areaErrosLoteLocalizadorIA.hidden = false;
+      areaErrosLoteLocalizadorIA.textContent =
+        mensagem.erro || "Falha desconhecida ao adicionar os processos à fila.";
+    }
   }
 });
 

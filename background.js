@@ -1417,7 +1417,7 @@ const CHAVE_PROMPTS_IA = "promptsIA";
 
 const PROMPT_PADRAO_ANALISE_FAMILIA = {
   id: "analise-inicial-familia",
-    titulo: "Análise inicial - família",
+    titulo: "Relatório - Inicial - Família",
     texto:
       'Persona: Aja como um juiz de direito especialista em direito de família e sucessões, respondendo com tom profissional e de autoridade.\n\n' +
       'Instruções de Estilo:\n\n' +
@@ -1450,11 +1450,29 @@ const PROMPT_PADRAO_ANALISE_FAMILIA = {
       '    Qual o nome e a idade dos menores envolvidos?',
 };
 
+// Renomeacao do titulo padrao ("Análise inicial - família" -> "Relatório -
+// Inicial - Família"): quem ja' tinha o prompt semeado antes dessa mudanca
+// fica com o titulo antigo gravado no storage (o seed so' roda uma vez).
+// Migra automaticamente so' quando o titulo salvo ainda e' o antigo (nao'
+// mexe se o usuario ja' tiver editado o titulo manualmente).
+const TITULO_PADRAO_ANALISE_FAMILIA_ANTIGO = "Análise inicial - família";
+
 function obterPromptsIA() {
   return new Promise((resolve) => {
     chrome.storage.local.get({ [CHAVE_PROMPTS_IA]: null }, (itens) => {
       const lista = itens[CHAVE_PROMPTS_IA];
-      resolve(Array.isArray(lista) && lista.length > 0 ? lista : [PROMPT_PADRAO_ANALISE_FAMILIA]);
+      if (!Array.isArray(lista) || lista.length === 0) {
+        resolve([PROMPT_PADRAO_ANALISE_FAMILIA]);
+        return;
+      }
+      const prompt = lista.find(
+        (p) => p && p.id === PROMPT_PADRAO_ANALISE_FAMILIA.id && p.titulo === TITULO_PADRAO_ANALISE_FAMILIA_ANTIGO
+      );
+      if (prompt) {
+        prompt.titulo = PROMPT_PADRAO_ANALISE_FAMILIA.titulo;
+        salvarPromptsIA(lista);
+      }
+      resolve(lista);
     });
   });
 }
@@ -7552,6 +7570,144 @@ async function abrirAbaEListarDocumentosDoProcesso(urlProcesso) {
   }
 }
 
+// Grupo/sigla de um documento a partir do nome exibido pelo eproc (ex.:
+// "INIC1" -> "INIC", "OUT23" -> "OUT", "MANDCITACAO1" -> "MANDCITACAO") -
+// mesma convencao ja documentada no README (sigla + numero sequencial
+// dentro do evento). So' remove o numero final; sem numero, usa o nome
+// inteiro (alguns tipos raros nao tem sufixo numerico).
+function extrairSiglaDocumento(nome) {
+  const texto = (nome || "").trim();
+  const semNumero = texto.replace(/\d+\s*$/, "").trim();
+  return (semNumero || texto).toUpperCase();
+}
+
+// Varre TODOS os processos de um localizador (mesma coleta de
+// "abrirAbaEColetarProcessosDoLocalizador" usada nas exportacoes acima) e,
+// para cada um, abre uma aba oculta e le a lista de documentos (mesma
+// "abrirAbaEListarDocumentosDoProcesso"). Nao envia nada para a IA aqui -
+// so' coleta documentos+movimentacao de cada processo (guardados em
+// memoria, devolvidos para o painel) e a contagem de quantos documentos
+// existem por grupo/sigla, para o usuario escolher quais grupos entram na
+// analise em lote (feito depois, sem precisar varrer os processos de
+// novo - ver "adicionarProcessosLocalizadorNaFilaIA").
+async function varrerDocumentosProcessosLocalizador(urlProcessos, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  if (!urlProcessos) {
+    throw new Error("URL do localizador não informada.");
+  }
+
+  notificar(`Listando os processos deste localizador...`);
+  const { itens, erro: erroColeta } = await abrirAbaEColetarProcessosDoLocalizador(urlProcessos);
+
+  if (itens.length === 0) {
+    throw new Error(erroColeta || "Nenhum processo encontrado para esse localizador.");
+  }
+
+  const total = itens.length;
+  const processos = [];
+  const erros = [];
+  const contagemGrupos = new Map();
+  let concluidos = 0;
+
+  for (const item of itens) {
+    const numeroProcesso = item.numeroProcesso || `processo_${concluidos + 1}`;
+    notificar(`Lendo documentos ${concluidos + 1} de ${total}: ${numeroProcesso}...`);
+
+    if (!item.url) {
+      erros.push({ nome: numeroProcesso, mensagem: "Link do processo não encontrado na listagem." });
+      concluidos += 1;
+      continue;
+    }
+
+    const { documentos, movimentacao, erro: erroAba } = await abrirAbaEListarDocumentosDoProcesso(item.url);
+
+    if (erroAba) {
+      erros.push({ nome: numeroProcesso, mensagem: erroAba });
+      concluidos += 1;
+      continue;
+    }
+    if (documentos.length === 0) {
+      erros.push({ nome: numeroProcesso, mensagem: "Nenhum documento encontrado neste processo." });
+      concluidos += 1;
+      continue;
+    }
+
+    const documentosComGrupo = documentos.map((doc) => ({ ...doc, grupo: extrairSiglaDocumento(doc.nome) }));
+    for (const doc of documentosComGrupo) {
+      contagemGrupos.set(doc.grupo, (contagemGrupos.get(doc.grupo) || 0) + 1);
+    }
+
+    processos.push({ numeroProcesso, documentos: documentosComGrupo, movimentacao });
+    concluidos += 1;
+  }
+
+  const grupos = [...contagemGrupos.entries()]
+    .map(([grupo, contagem]) => ({ grupo, contagem }))
+    .sort((a, b) => b.contagem - a.contagem || a.grupo.localeCompare(b.grupo, "pt-BR"));
+
+  notificar("Finalizando varredura...");
+  return { total, processos, grupos, erros, erroColeta };
+}
+
+// Recebe a colecao ja' feita por "varrerDocumentosProcessosLocalizador"
+// (sem varrer os processos de novo) e adiciona um item na mesma fila em
+// lote usada pelo fluxo de um processo so' (chrome.storage.local,
+// "adicionarItemFilaLoteIA") para cada processo que tiver ao menos 1
+// documento nos grupos escolhidos pelo usuario. Processos sem nenhum
+// documento no(s) grupo(s) escolhido(s) sao pulados (registrados como
+// aviso, nao como erro fatal).
+async function adicionarProcessosLocalizadorNaFilaIA(
+  processos,
+  gruposEscolhidos,
+  promptId,
+  promptTextoAvulso,
+  anonimizar,
+  modelo,
+  aoProgredir
+) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const conjuntoGrupos = new Set((gruposEscolhidos || []).map((g) => (g || "").toUpperCase()));
+  const total = (processos || []).length;
+  const erros = [];
+  let adicionados = 0;
+  let concluidos = 0;
+
+  for (const processo of processos || []) {
+    concluidos += 1;
+    notificar(`Adicionando à fila ${concluidos} de ${total}: ${processo.numeroProcesso}...`);
+
+    const documentosFiltrados = (processo.documentos || []).filter((doc) => conjuntoGrupos.has(doc.grupo));
+    if (documentosFiltrados.length === 0) {
+      erros.push({ nome: processo.numeroProcesso, mensagem: "Nenhum documento dos grupos selecionados neste processo." });
+      continue;
+    }
+
+    try {
+      await adicionarItemFilaLoteIA(
+        processo.numeroProcesso,
+        documentosFiltrados,
+        processo.movimentacao,
+        anonimizar,
+        promptId,
+        promptTextoAvulso,
+        modelo
+      );
+      adicionados += 1;
+    } catch (e) {
+      erros.push({ nome: processo.numeroProcesso, mensagem: e && e.message ? e.message : String(e) });
+    }
+  }
+
+  notificar("Finalizando...");
+  return { total, adicionados, erros };
+}
+
 // Exportacao em lote: para cada processo da lista de UM localizador
 // (recebida do painel, ja' capturada durante a listagem de "Processos
 // por Localizador"), abre o processo numa aba oculta, coleta todos os
@@ -8410,6 +8566,63 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     removerItemFilaLoteIA(mensagem.id)
       .then((fila) => sendResponse({ ok: true, fila }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_LOCALIZADOR_VARRER") {
+    // Mesmo padrao das demais operacoes em segundo plano com localizador
+    // (EXPORTAR_DOCUMENTOS_LOCALIZADOR): pode demorar bastante (um
+    // processo de cada vez, cada um com sua propria aba oculta), entao
+    // confirma o recebimento na hora e avisa o resultado final por uma
+    // mensagem separada.
+    varrerDocumentosProcessosLocalizador(mensagem.urlProcessos, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_IA_LOTE_LOCALIZADOR", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "IA_LOTE_LOCALIZADOR_VARRIDO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "IA_LOTE_LOCALIZADOR_VARRIDO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_LOCALIZADOR_ADICIONAR") {
+    adicionarProcessosLocalizadorNaFilaIA(
+      mensagem.processos,
+      mensagem.grupos,
+      mensagem.promptId,
+      mensagem.promptTextoAvulso,
+      !!mensagem.anonimizar,
+      mensagem.modelo,
+      (texto) => {
+        chrome.runtime.sendMessage({ tipo: "PROGRESSO_IA_LOTE_LOCALIZADOR", texto }).catch(() => {});
+      }
+    )
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "IA_LOTE_LOCALIZADOR_ADICIONADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "IA_LOTE_LOCALIZADOR_ADICIONADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
     return true;
   }
 

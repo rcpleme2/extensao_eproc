@@ -415,6 +415,71 @@
         <p class="legenda-opcoes">Lotes enviados</p>
         <div id="area-lotes-enviados-vazio" class="status">Nenhum lote enviado ainda.</div>
         <ul id="lista-lotes-enviados-ia" class="lista-ia-simples" hidden></ul>
+
+        <hr class="separador-subsecao" />
+
+        <p class="legenda-opcoes">
+          🗂️ Lote por localizador (adiciona à fila acima todos os processos de um localizador)
+        </p>
+        <div id="area-status-lote-localizador-ia" class="status">
+          Carregue os localizadores e escolha um para varrer todos os seus processos.
+        </div>
+
+        <div class="botoes">
+          <button id="btn-carregar-localizadores-lote-ia" class="btn-secundario">Carregar localizadores</button>
+        </div>
+
+        <div id="area-progresso-carregar-lote-localizador-ia" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-carregar-lote-localizador-ia"></span>
+        </div>
+
+        <div class="opcoes" id="area-select-lote-localizador-ia" hidden>
+          <select id="select-lote-localizador-ia">
+            <option value="" selected disabled>Selecione um localizador...</option>
+          </select>
+          <button id="btn-varrer-lote-localizador-ia" class="btn-secundario">Varrer documentos deste localizador</button>
+        </div>
+
+        <div id="area-confirmar-varredura-lote-localizador-ia" class="aviso" hidden>
+          <p id="texto-confirmar-varredura-lote-localizador-ia"></p>
+          <div class="modal-botoes">
+            <button id="btn-confirmar-varredura-lote-localizador-ia" class="btn">Confirmar</button>
+            <button id="btn-cancelar-varredura-lote-localizador-ia" class="btn-secundario">Cancelar</button>
+          </div>
+        </div>
+
+        <div id="area-progresso-lote-localizador-ia" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-lote-localizador-ia"></span>
+        </div>
+
+        <div id="area-grupos-lote-localizador-ia" class="opcoes" hidden>
+          <p class="legenda-opcoes">Grupos de documentos encontrados (escolha quais entram na análise)</p>
+          <div id="lista-grupos-lote-localizador-ia"></div>
+          <div class="botoes">
+            <button type="button" id="btn-marcar-tudo-grupos-lote-ia" class="btn-ghost">Marcar tudo</button>
+            <button type="button" id="btn-desmarcar-tudo-grupos-lote-ia" class="btn-ghost">Desmarcar tudo</button>
+          </div>
+
+          <label class="campo-config-ia">
+            Prompt a aplicar em todos os processos
+            <select id="select-prompt-lote-localizador-ia"></select>
+          </label>
+          <label class="opcao">
+            <input type="checkbox" id="chk-anonimizar-lote-localizador-ia" checked />
+            Anonimizar antes de enviar (remove CPF/CNPJ, telefone, e-mail, endereços, abrevia nomes)
+          </label>
+          <button id="btn-adicionar-lote-localizador-ia" class="btn">
+            Adicionar processos filtrados à fila em lote
+          </button>
+          <p class="legenda-opcoes">
+            A fila em lote usa sempre a Claude (50% mais barato, até 24h). Depois de adicionados,
+            revise a fila acima e clique em "Enviar lote" quando quiser.
+          </p>
+        </div>
+
+        <div id="area-erros-lote-localizador-ia" class="erros" hidden></div>
       </details>
 
       <hr class="separador-subsecao" />

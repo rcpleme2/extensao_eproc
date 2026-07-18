@@ -539,6 +539,46 @@ Os resultados dos lotes ficam disponíveis por 29 dias na Claude — depois
 disso, um lote muito antigo que ainda não tenha sido verificado pode não
 conseguir mais recuperar os resultados.
 
+### Lote por localizador (rodar um prompt em todos os processos de um localizador)
+
+Ainda dentro de "Analisar com IA", logo abaixo de "Lotes enviados", o bloco
+**"Lote por localizador"** adiciona à mesma fila em lote acima, de uma vez,
+todos os processos de um localizador — sem precisar abrir cada processo
+manualmente e clicar em "Adicionar à fila em lote" um por um.
+
+Cada documento no eproc tem um nome com uma sigla e um número sequencial
+(ex.: `INIC1`, `PET3`, `CPF2`, `OUT4` — a mesma convenção já usada no
+restante da extensão). A varredura agrupa os documentos de todos os
+processos por essa sigla (o texto antes do número final) e mostra, como
+checkboxes, só os grupos que de fato existem nos processos daquele
+localizador — nada de lista fixa adivinhada, o que aparece é sempre o que
+foi encontrado.
+
+Fluxo:
+
+1. Clique em **"Carregar localizadores"** (o mesmo carregamento da seção
+   "Busca específica de localizadores" mais abaixo — os dois dropdowns são
+   preenchidos juntos) e escolha um localizador no select.
+2. Clique em **"Varrer documentos deste localizador"**. A extensão abre
+   cada processo do localizador numa aba oculta (um de cada vez) só para
+   ler a lista de documentos — nada é enviado à IA nessa etapa. Localizadores
+   com mais de 50 processos pedem confirmação antes de começar, já que a
+   varredura pode demorar vários minutos.
+3. Escolha quais **grupos de documentos** entram na análise (ex.: só
+   `INIC` + `PET`, ignorando anexos/certidões) e o **prompt já cadastrado**
+   a aplicar em todos os processos — não há opção de prompt avulso aqui,
+   só prompts salvos (use "Gerenciar prompts" para cadastrar um novo antes,
+   se precisar).
+4. Clique em **"Adicionar processos filtrados à fila em lote"**. Cada
+   processo que tiver ao menos um documento nos grupos escolhidos vira um
+   item na "Fila em lote" logo acima (processos sem nenhum documento do
+   grupo escolhido são pulados, listados como aviso). A partir daí é o
+   mesmo fluxo de sempre: revise a fila e clique em "Enviar lote" quando
+   quiser — nada é enviado automaticamente.
+
+Assim como o restante da fila em lote, essa varredura sempre usa a Claude
+(a fila em lote não tem integração de lote com o Gemini).
+
 ### Configuração (provedor, modelo e chaves de API)
 
 Nas configurações da extensão (botão "Configurações"), na seção "Análise com
