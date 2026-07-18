@@ -494,6 +494,67 @@
 
       <hr class="separador-subsecao" />
 
+      <details class="subsecao subsecao--colapsavel" id="subsecao-transcricao-ia">
+        <summary class="subsecao-titulo">
+          <span class="subsecao-icone" aria-hidden="true">🎙️</span>
+          Transcrever Depoimentos
+        </summary>
+
+        <div id="area-status-transcricao-ia" class="status">
+          Abra um processo no eproc e clique em "Detectar vídeos".
+        </div>
+
+        <p class="legenda-opcoes">
+          Identifica os documentos de vídeo (nome começando com "VIDEO", ex. VIDEO1) e envia o(s)
+          escolhido(s) à API do Gemini para transcrição — <strong>exclusivo do Gemini</strong> (a
+          Claude não processa áudio/vídeo), independente do provedor escolhido acima.
+        </p>
+
+        <div class="botoes">
+          <button id="btn-detectar-transcricao-ia" class="btn">Detectar vídeos</button>
+        </div>
+
+        <div id="area-lista-videos-transcricao-ia" class="opcoes" hidden>
+          <div id="lista-videos-transcricao-ia"></div>
+          <div class="botoes">
+            <button type="button" id="btn-marcar-tudo-videos-ia" class="btn-ghost">Marcar tudo</button>
+            <button type="button" id="btn-desmarcar-tudo-videos-ia" class="btn-ghost">Desmarcar tudo</button>
+          </div>
+        </div>
+
+        <div id="area-sem-videos-transcricao-ia" class="status" hidden>
+          Nenhum documento de vídeo (nome começando com "VIDEO") foi encontrado neste processo.
+        </div>
+
+        <div class="aviso">
+          O áudio da gravação é enviado ao Google sem anonimização (diferente do texto de
+          documentos, que pode ser anonimizado antes do envio) — não há como redigir falas de um
+          áudio automaticamente. Gravações muito longas (várias horas) podem custar mais e demorar
+          mais para transcrever.
+        </div>
+
+        <div class="botoes">
+          <button id="btn-transcrever-ia" class="btn" disabled>Transcrever selecionado(s)</button>
+        </div>
+
+        <div id="area-progresso-transcricao-ia" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-transcricao-ia"></span>
+        </div>
+
+        <div id="area-erros-transcricao-ia" class="erros" hidden></div>
+
+        <div id="area-resultado-transcricao-ia" hidden>
+          <label class="legenda-opcoes" for="texto-resultado-transcricao-ia">Transcrição</label>
+          <textarea id="texto-resultado-transcricao-ia" class="campo-resultado-ia" readonly rows="14"></textarea>
+          <div class="botoes">
+            <button id="btn-copiar-resultado-transcricao-ia" class="btn-secundario">Copiar</button>
+          </div>
+        </div>
+      </details>
+
+      <hr class="separador-subsecao" />
+
       <details class="subsecao subsecao--colapsavel">
         <summary class="subsecao-titulo">
           <span class="subsecao-icone" aria-hidden="true">🔎</span>

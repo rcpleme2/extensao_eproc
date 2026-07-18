@@ -57,6 +57,21 @@ const areaResultadoIA = document.getElementById("area-resultado-ia");
 const textoResultadoIA = document.getElementById("texto-resultado-ia");
 const btnCopiarResultadoIA = document.getElementById("btn-copiar-resultado-ia");
 
+const areaStatusTranscricaoIA = document.getElementById("area-status-transcricao-ia");
+const btnDetectarTranscricaoIA = document.getElementById("btn-detectar-transcricao-ia");
+const areaListaVideosTranscricaoIA = document.getElementById("area-lista-videos-transcricao-ia");
+const listaVideosTranscricaoIA = document.getElementById("lista-videos-transcricao-ia");
+const btnMarcarTudoVideosIA = document.getElementById("btn-marcar-tudo-videos-ia");
+const btnDesmarcarTudoVideosIA = document.getElementById("btn-desmarcar-tudo-videos-ia");
+const areaSemVideosTranscricaoIA = document.getElementById("area-sem-videos-transcricao-ia");
+const btnTranscreverIA = document.getElementById("btn-transcrever-ia");
+const areaProgressoTranscricaoIA = document.getElementById("area-progresso-transcricao-ia");
+const textoProgressoTranscricaoIA = document.getElementById("texto-progresso-transcricao-ia");
+const areaErrosTranscricaoIA = document.getElementById("area-erros-transcricao-ia");
+const areaResultadoTranscricaoIA = document.getElementById("area-resultado-transcricao-ia");
+const textoResultadoTranscricaoIA = document.getElementById("texto-resultado-transcricao-ia");
+const btnCopiarResultadoTranscricaoIA = document.getElementById("btn-copiar-resultado-transcricao-ia");
+
 const areaErrosFilaLoteIA = document.getElementById("area-erros-fila-lote-ia");
 const listaFilaLoteIA = document.getElementById("lista-fila-lote-ia");
 const areaFilaLoteVazia = document.getElementById("area-fila-lote-vazia");
@@ -867,16 +882,18 @@ function abrirCartaoDe(el) {
   }
 }
 
-// Aplica em AMBOS os status ("Exportar Documentos" e "Analisar com IA") -
-// as duas subseções compartilham a mesma detecção/seleção de documentos,
-// então mostram sempre a mesma mensagem. So' abre o CARTAO de quem
-// originou a acao ("origem": "exportar", padrão, ou "ia") - sem isso,
-// detectar pela subseção "Analisar com IA" abriria também "Exportar
-// Documentos" (e vice-versa), já que as duas áreas de status são
-// atualizadas juntas.
+// Aplica nas TRÊS áreas de status ("Exportar Documentos", "Analisar com
+// IA" e "Transcrever Depoimentos") - as três subseções compartilham a
+// mesma detecção de documentos (a lista de vídeos da transcrição é so'
+// um filtro da mesma lista), então mostram sempre a mesma mensagem. So'
+// abre o CARTAO de quem originou a acao ("origem": "exportar" padrão,
+// "ia" ou "transcricao") - sem isso, detectar por uma subseção abriria
+// as outras duas junto, ja' que as três áreas de status são atualizadas
+// juntas.
 function setStatus(texto, tipo, origem = "exportar") {
-  aplicarStatus(areaStatus, texto, tipo, origem !== "ia");
+  aplicarStatus(areaStatus, texto, tipo, origem === "exportar");
   aplicarStatus(areaStatusIA, texto, tipo, origem === "ia");
+  aplicarStatus(areaStatusTranscricaoIA, texto, tipo, origem === "transcricao");
 }
 
 async function getAbaAtiva() {
@@ -998,6 +1015,54 @@ function definirMovimentacaoIncluida(incluida) {
 chkIncluirMovimentacao.addEventListener("change", () => definirMovimentacaoIncluida(chkIncluirMovimentacao.checked));
 chkIncluirMovimentacaoIA.addEventListener("change", () => definirMovimentacaoIncluida(chkIncluirMovimentacaoIA.checked));
 
+// Mesma convenção de nomenclatura já documentada no README (sigla +
+// número sequencial, ex. "INIC1", "OUT2") - um documento de vídeo de
+// audiência é identificado pelo nome começar com "VIDEO" (ex. "VIDEO1").
+function ehDocumentoVideo(nome) {
+  return /^video\d*$/i.test((nome || "").trim());
+}
+
+// Filtra a MESMA lista de documentos já detectada (estadoAtual.documentos,
+// compartilhada com "Exportar Documentos"/"Analisar com IA") pelos que são
+// vídeo - não faz nenhuma detecção própria, so' reaproveita.
+function renderizarListaVideos(documentos) {
+  const videos = (documentos || []).filter((doc) => ehDocumentoVideo(doc.nome));
+  listaVideosTranscricaoIA.innerHTML = "";
+
+  areaSemVideosTranscricaoIA.hidden = videos.length > 0;
+  areaListaVideosTranscricaoIA.hidden = videos.length === 0;
+  btnTranscreverIA.disabled = videos.length === 0;
+
+  for (const doc of videos) {
+    const label = document.createElement("label");
+    label.className = "opcao";
+    label.innerHTML = `<input type="checkbox" checked data-video-doc="${doc.idDocumento}" /> ${doc.nome}`;
+    listaVideosTranscricaoIA.appendChild(label);
+  }
+  atualizarEstadoBotaoTranscrever();
+}
+
+function checkboxesVideosTranscricaoIA() {
+  return Array.from(listaVideosTranscricaoIA.querySelectorAll("[data-video-doc]"));
+}
+
+function atualizarEstadoBotaoTranscrever() {
+  const algumSelecionado = checkboxesVideosTranscricaoIA().some((chk) => chk.checked);
+  btnTranscreverIA.disabled = checkboxesVideosTranscricaoIA().length === 0 || !algumSelecionado;
+}
+
+listaVideosTranscricaoIA.addEventListener("change", atualizarEstadoBotaoTranscrever);
+
+btnMarcarTudoVideosIA.addEventListener("click", () => {
+  checkboxesVideosTranscricaoIA().forEach((chk) => (chk.checked = true));
+  atualizarEstadoBotaoTranscrever();
+});
+
+btnDesmarcarTudoVideosIA.addEventListener("click", () => {
+  checkboxesVideosTranscricaoIA().forEach((chk) => (chk.checked = false));
+  atualizarEstadoBotaoTranscrever();
+});
+
 // Compartilhada pelos dois botões "Detectar documentos" ("Exportar
 // Documentos" e "Analisar com IA") - as duas subseções mostram a mesma
 // detecção/seleção, só a UI é repetida.
@@ -1032,6 +1097,7 @@ async function executarDeteccao(origem = "exportar") {
       listaDocumentosIAEl.innerHTML = "";
       areaAnaliseIA.hidden = true;
       resetarAnaliseIA();
+      renderizarListaVideos([]);
       return;
     }
 
@@ -1078,6 +1144,7 @@ async function executarDeteccao(origem = "exportar") {
       areaMarcarDocumentosIA.hidden = false;
       renderizarLista(documentos);
     }
+    renderizarListaVideos(documentos);
 
     atualizarEstadoBotaoBaixar();
     setStatus(
@@ -1098,6 +1165,7 @@ async function executarDeteccao(origem = "exportar") {
 
 btnDetectar.addEventListener("click", () => executarDeteccao("exportar"));
 btnDetectarIA.addEventListener("click", () => executarDeteccao("ia"));
+btnDetectarTranscricaoIA.addEventListener("click", () => executarDeteccao("transcricao"));
 
 // Confere o estado ATUAL dos checkboxes direto na página do processo antes
 // de usar a seleção - cobre o caso do usuário ter ajustado a seleção lá
@@ -2494,6 +2562,86 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosLoteLocalizadorIA.hidden = false;
       areaErrosLoteLocalizadorIA.textContent =
         mensagem.erro || "Falha desconhecida ao adicionar os processos à fila.";
+    }
+  }
+});
+
+// ---- Transcrever Depoimentos (arquivos "VIDEO*" via Gemini) ----
+
+btnTranscreverIA.addEventListener("click", async () => {
+  const selecionados = checkboxesVideosTranscricaoIA()
+    .filter((chk) => chk.checked)
+    .map((chk) => chk.dataset.videoDoc);
+
+  const documentos = (estadoAtual.documentos || []).filter((doc) => selecionados.includes(doc.idDocumento));
+  if (documentos.length === 0) {
+    areaErrosTranscricaoIA.hidden = false;
+    areaErrosTranscricaoIA.textContent = "Selecione ao menos um vídeo antes de transcrever.";
+    return;
+  }
+
+  const config = await obterConfiguracoes();
+  if (!config.chaveGemini) {
+    areaErrosTranscricaoIA.hidden = false;
+    areaErrosTranscricaoIA.textContent =
+      'A transcrição usa a API do Gemini - configure a "Chave de API do Gemini" nas configurações.';
+    return;
+  }
+
+  areaErrosTranscricaoIA.hidden = true;
+  areaResultadoTranscricaoIA.hidden = true;
+  btnTranscreverIA.disabled = true;
+  areaProgressoTranscricaoIA.hidden = false;
+  textoProgressoTranscricaoIA.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaStatusTranscricaoIA);
+  setStatus(`Transcrevendo ${documentos.length} vídeo(s) selecionado(s) (pode demorar)...`, undefined, "transcricao");
+
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "TRANSCREVER_IA",
+      documentos: documentos.map((doc) => ({
+        idDocumento: doc.idDocumento,
+        nome: doc.nome,
+        href: doc.href,
+        mimetype: doc.mimetype,
+      })),
+      modelo: config.modeloGemini,
+      apiKey: config.chaveGemini,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a transcrição.");
+    }
+  } catch (e) {
+    setStatus("Erro ao iniciar a transcrição.", "erro", "transcricao");
+    areaErrosTranscricaoIA.hidden = false;
+    areaErrosTranscricaoIA.textContent = e && e.message ? e.message : String(e);
+    areaProgressoTranscricaoIA.hidden = true;
+    btnTranscreverIA.disabled = false;
+  }
+});
+
+btnCopiarResultadoTranscricaoIA.addEventListener("click", () => copiarTexto(textoResultadoTranscricaoIA.value));
+
+chrome.runtime.onMessage.addListener((mensagem) => {
+  if (!mensagem) return;
+
+  if (mensagem.tipo === "PROGRESSO_TRANSCRICAO_IA") {
+    textoProgressoTranscricaoIA.textContent = mensagem.texto || "Processando...";
+    setStatus(mensagem.texto || "Processando...", undefined, "transcricao");
+  }
+
+  if (mensagem.tipo === "TRANSCRICAO_IA_PRONTA") {
+    areaProgressoTranscricaoIA.hidden = true;
+    btnTranscreverIA.disabled = false;
+
+    if (mensagem.ok) {
+      areaResultadoTranscricaoIA.hidden = false;
+      textoResultadoTranscricaoIA.value = mensagem.texto || "";
+      setStatus("Transcrição concluída.", "ok", "transcricao");
+    } else {
+      setStatus("Erro ao transcrever.", "erro", "transcricao");
+      areaErrosTranscricaoIA.hidden = false;
+      areaErrosTranscricaoIA.textContent = mensagem.erro || "Falha desconhecida ao transcrever.";
     }
   }
 });

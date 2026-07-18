@@ -1711,6 +1711,233 @@ async function chamarGeminiAPI(apiKey, promptCompleto, modelo) {
   return { texto, tokensEntrada, tokensSaida };
 }
 
+// ---- Transcrever Depoimentos (arquivos "VIDEO*" via Gemini) ----
+//
+// Exclusiva do Gemini: a Claude nao tem capacidade de processar audio/
+// video (so' texto/imagem/PDF), entao essa ferramenta sempre usa a chave e
+// o modelo Gemini configurados nas Configuracoes, independente do
+// provedor escolhido em "Analisar com IA" - mesmo padrao ja usado na fila
+// em lote (exclusiva da Claude, so' que ao contrario).
+//
+// v1: envia o VIDEO ORIGINAL para o Gemini (sem extrair/recodificar a
+// trilha de audio localmente antes). O Gemini processa video nativamente
+// (incluindo a trilha de audio), entao funciona sem nenhum passo extra -
+// mas cobra tokens tambem pelos frames de video (bem mais caro que so'
+// audio) e cada minuto de gravacao consome mais do contexto do modelo.
+// Extrair so' a trilha de audio (sem recodificar, so' remontando o AAC ja'
+// existente num .m4a) reduziria bastante o custo e o tamanho do upload,
+// mas exigiria um parser de MP4/AAC vendorizado e testado contra uma
+// gravacao real de audiencia (que nao esta' disponivel neste ambiente de
+// desenvolvimento) - fica documentado como possivel evolucao futura, sem
+// arriscar corromper audio silenciosamente numa implementacao nao
+// validada contra arquivo real.
+const PROMPT_TRANSCRICAO_AUDIENCIA =
+  "Essa é a gravação de uma audiência judicial. Transcreva o ato sem criar nenhum elemento, apenas transcreva o " +
+  "que está escrito. Se tiver algum trecho inaudível colocar [inaudível]. Use timestamps e se possível identifique " +
+  "os interlocutores.";
+
+// Mapa de sigla/mimetype curto (mesmo padrao de "EXTENSAO_POR_MIMETYPE")
+// para o mime type completo que a API do Gemini espera no upload.
+const MIMETYPE_VIDEO_COMPLETO = {
+  mp4: "video/mp4",
+  mpeg: "video/mpeg",
+  mpg: "video/mpg",
+  mov: "video/mov",
+  avi: "video/avi",
+  flv: "video/x-flv",
+  webm: "video/webm",
+  wmv: "video/wmv",
+  "3gp": "video/3gpp",
+};
+
+function mimetypeVideoCompleto(mimetypeCurto) {
+  const chave = (mimetypeCurto || "").toLowerCase();
+  return MIMETYPE_VIDEO_COMPLETO[chave] || "video/mp4";
+}
+
+// Baixa os bytes de um video de "doc.href". Diferente de
+// "criarResolvedorUrlDocumento" (usado no resto da extensao, que sempre
+// faz um fetch + ".text()" so' para verificar se a URL e' uma pagina HTML
+// com um iframe embutido apontando pro arquivo de verdade), aqui isso so'
+// acontece se a resposta realmente vier como "text/html" (checado pelo
+// cabecalho Content-Type, sem ler o corpo) - assim um video de varios
+// GB nunca e' baixado/decodificado como texto por engano, so' quando
+// realmente esbarra numa pagina-invólucro (raro, e small).
+async function baixarBytesVideo(doc) {
+  const resposta = await fetchComDiagnostico(doc.href, { credentials: "same-origin" }, `Download de "${doc.nome}"`);
+  if (!resposta.ok) {
+    throw new Error(`Falha ao baixar "${doc.nome}" (HTTP ${resposta.status}).`);
+  }
+
+  const contentType = (resposta.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("text/html")) {
+    const texto = await resposta.text();
+    const match = texto.match(REGEX_IFRAME_CONTEUDO);
+    if (!match) {
+      throw new Error(`"${doc.nome}" devolveu uma página HTML em vez do vídeo, e não foi possível achar o link real dentro dela.`);
+    }
+    const urlReal = new URL(match[1].replace(/&amp;/g, "&"), doc.href).toString();
+    const respostaReal = await fetchComDiagnostico(urlReal, { credentials: "same-origin" }, `Download de "${doc.nome}"`);
+    if (!respostaReal.ok) {
+      throw new Error(`Falha ao baixar "${doc.nome}" (HTTP ${respostaReal.status}).`);
+    }
+    return new Uint8Array(await respostaReal.arrayBuffer());
+  }
+
+  return new Uint8Array(await resposta.arrayBuffer());
+}
+
+// Upload resumable de um arquivo para o Gemini File API (necessario para
+// qualquer arquivo acima de ~20MB - na pratica, todo video de audiencia).
+// Protocolo em 2 passos: (1) inicia o upload e recebe uma URL dedicada no
+// cabecalho "x-goog-upload-url" da resposta; (2) envia os bytes de fato
+// para essa URL. Devolve o objeto "file" (com "name"/"uri"/"state") que a
+// API do Gemini devolveu.
+async function enviarArquivoParaGeminiFileAPI(apiKey, bytes, mimetype, nomeExibicao, aoProgredir) {
+  const respostaInicio = await fetchComDiagnostico(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(bytes.byteLength),
+        "X-Goog-Upload-Header-Content-Type": mimetype,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file: { display_name: nomeExibicao } }),
+    },
+    "Upload de arquivo do Gemini"
+  );
+
+  if (!respostaInicio.ok) {
+    const erro = await respostaInicio.json().catch(() => null);
+    throw new Error(
+      (erro && erro.error && erro.error.message) || `Erro HTTP ${respostaInicio.status} ao iniciar o upload no Gemini.`
+    );
+  }
+
+  const urlUpload = respostaInicio.headers.get("x-goog-upload-url");
+  if (!urlUpload) throw new Error("O Gemini não devolveu a URL de upload (resposta inesperada).");
+
+  if (aoProgredir) {
+    aoProgredir(`Enviando "${nomeExibicao}" (${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB) ao Gemini...`);
+  }
+
+  const respostaUpload = await fetchComDiagnostico(
+    urlUpload,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Offset": "0",
+        "X-Goog-Upload-Command": "upload, finalize",
+      },
+      body: bytes,
+    },
+    "Upload de arquivo do Gemini"
+  );
+
+  const dadosArquivo = await respostaUpload.json().catch(() => null);
+  if (!respostaUpload.ok || !dadosArquivo || !dadosArquivo.file) {
+    throw new Error(
+      (dadosArquivo && dadosArquivo.error && dadosArquivo.error.message) ||
+        `Erro HTTP ${respostaUpload.status} ao enviar o arquivo ao Gemini.`
+    );
+  }
+
+  return dadosArquivo.file;
+}
+
+// O Gemini processa arquivos de video/audio de forma assincrona apos o
+// upload (estado "PROCESSING" -> "ACTIVE") - so' pode ser referenciado
+// numa chamada a` generateContent depois de "ACTIVE". Consulta a cada 5s
+// (ate' 5 minutos) em vez de so' uma vez, ja' que o processamento pode
+// levar mais tempo para gravacoes longas.
+async function aguardarArquivoAtivoGemini(apiKey, nomeArquivo, aoProgredir) {
+  for (let tentativa = 0; tentativa < 60; tentativa += 1) {
+    const resposta = await fetchComDiagnostico(
+      `https://generativelanguage.googleapis.com/v1beta/${nomeArquivo}?key=${encodeURIComponent(apiKey)}`,
+      { method: "GET" },
+      "Consulta de arquivo do Gemini"
+    );
+    const dados = await resposta.json().catch(() => null);
+    if (!resposta.ok) {
+      throw new Error(
+        (dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao consultar o arquivo no Gemini.`
+      );
+    }
+    if (dados.state === "ACTIVE") return dados;
+    if (dados.state === "FAILED") {
+      throw new Error(`O Gemini falhou ao processar o arquivo "${nomeArquivo}" enviado.`);
+    }
+    if (aoProgredir) aoProgredir(`Aguardando o Gemini processar o arquivo (${dados.state || "processando"})...`);
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
+  throw new Error("Tempo esgotado aguardando o Gemini processar o arquivo enviado.");
+}
+
+// Orquestra a transcricao de 1+ documentos "VIDEO*" ja' selecionados pelo
+// usuario no painel: baixa cada video (mesmo dominio do eproc, ja'
+// autenticado), envia ao Gemini File API, aguarda ficar "ACTIVE" e por
+// fim chama generateContent com o prompt fixo de transcricao - todos os
+// videos selecionados entram na MESMA chamada (partes multiplas), para o
+// usuario poder mandar varios atos de uma vez e receber uma transcricao
+// so'. Quando ha' mais de 1 video, acrescenta uma frase extra pedindo pra
+// separar claramente a transcricao de cada arquivo (o prompt principal,
+// pedido pelo usuario, permanece inalterado).
+async function transcreverDepoimentosIA(documentos, apiKey, modelo, aoProgredir) {
+  if (!apiKey) {
+    throw new Error('Nenhuma chave de API do Gemini configurada. Configure-a nas configurações da extensão.');
+  }
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const partesArquivo = [];
+
+  for (const doc of documentos) {
+    notificar(`Baixando "${doc.nome}"...`);
+    const bytes = await baixarBytesVideo(doc);
+    const mimetypeCompleto = mimetypeVideoCompleto(doc.mimetype);
+
+    const arquivoEnviado = await enviarArquivoParaGeminiFileAPI(apiKey, bytes, mimetypeCompleto, doc.nome, notificar);
+    const arquivoAtivo = await aguardarArquivoAtivoGemini(apiKey, arquivoEnviado.name, notificar);
+    partesArquivo.push({ file_data: { mime_type: arquivoAtivo.mimeType, file_uri: arquivoAtivo.uri } });
+  }
+
+  const promptFinal =
+    documentos.length > 1
+      ? `${PROMPT_TRANSCRICAO_AUDIENCIA}\n\nOs ${documentos.length} arquivos acima correspondem a atos/gravações ` +
+        `diferentes, na mesma ordem em que foram enviados (${documentos.map((d) => d.nome).join(", ")}) - identifique ` +
+        `claramente, com um cabeçalho, onde a transcrição de cada um começa.`
+      : PROMPT_TRANSCRICAO_AUDIENCIA;
+
+  notificar("Transcrevendo com a IA (pode demorar, dependendo da duração da gravação)...");
+  const modeloEscolhido = modelo || modeloPadrao("gemini");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modeloEscolhido}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const resposta = await fetchComDiagnostico(
+    url,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [...partesArquivo, { text: promptFinal }] }] }),
+    },
+    "API do Gemini (transcrição)"
+  );
+
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API do Gemini.`);
+  }
+
+  const candidato = dados.candidates && dados.candidates[0];
+  const texto = candidato && candidato.content && candidato.content.parts
+    ? candidato.content.parts.map((parte) => parte.text || "").join("")
+    : "";
+
+  return { texto };
+}
+
 // Estimativa de custo a partir de um texto JA' PRONTO (documentos +
 // eventual movimentacao, ja' anonimizado se for o caso) - fatorado para
 // fora de "extrairTextoParaAnaliseIA" para poder ser chamado de novo
@@ -8683,6 +8910,26 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "TRANSCREVER_IA") {
+    // Mesmo padrao das demais operacoes em segundo plano que podem
+    // demorar (download + upload de video + espera do Gemini processar):
+    // confirma o recebimento na hora e avisa o resultado final por uma
+    // mensagem separada.
+    transcreverDepoimentosIA(mensagem.documentos, mensagem.apiKey, mensagem.modelo, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_TRANSCRICAO_IA", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime.sendMessage({ tipo: "TRANSCRICAO_IA_PRONTA", ok: true, ...resultado }).catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({ tipo: "TRANSCRICAO_IA_PRONTA", ok: false, erro: e && e.message ? e.message : String(e) })
           .catch(() => {});
       });
     sendResponse({ ok: true });

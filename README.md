@@ -608,6 +608,62 @@ Fluxo:
 Assim como o restante da fila em lote, essa varredura sempre usa a Claude
 (a fila em lote não tem integração de lote com o Gemini).
 
+## Transcrever Depoimentos
+
+Nova subseção do cartão "Gestão Gabinete" (ícone 🎙️), independente das
+demais: identifica os documentos de **vídeo de audiência** do processo (nome
+começando com `VIDEO`, ex. `VIDEO1`, `VIDEO2` — mesma convenção de sigla +
+número usada em todo o resto do eproc) e transcreve o(s) escolhido(s) via
+IA, usando o seguinte prompt fixo:
+
+> "Essa é a gravação de uma audiência judicial. Transcreva o ato sem criar
+> nenhum elemento, apenas transcreva o que está escrito. Se tiver algum
+> trecho inaudível colocar [inaudível]. Use timestamps e se possível
+> identifique os interlocutores."
+
+**Exclusiva do Gemini** — a Claude não tem capacidade de processar áudio/
+vídeo (só texto, imagem e PDF), então essa ferramenta sempre usa a chave e
+o modelo Gemini configurados nas configurações, independente do provedor
+escolhido em "Analisar com IA" (mesmo padrão já usado na fila em lote,
+exclusiva da Claude, só que ao contrário).
+
+Fluxo:
+
+1. Clique em **"Detectar vídeos"** (reaproveita a mesma detecção de
+   documentos das outras subseções). Os documentos `VIDEO*` encontrados
+   aparecem como checkboxes, todos marcados por padrão.
+2. Marque quais vídeos entram na transcrição — **selecionando mais de um,
+   todos são enviados juntos numa única transcrição** (útil para vários
+   atos/vídeos do mesmo processo), com um pedido extra automático para a
+   IA separar claramente onde a transcrição de cada arquivo começa.
+3. Clique em **"Transcrever selecionado(s)"**. A extensão baixa cada vídeo,
+   envia ao Gemini (upload de arquivo, não vai embutido na chamada — vídeos
+   de audiência normalmente passam do limite de request inline) e aguarda o
+   Gemini processá-lo antes de pedir a transcrição de fato. Pode demorar
+   bastante para gravações longas.
+4. A transcrição aparece numa caixa de texto no próprio painel, com um
+   botão **"Copiar"** — não é baixada como arquivo automaticamente.
+
+**Limitações da v1 / possíveis evoluções:**
+
+- O vídeo é enviado **original** para o Gemini (sem extrair/recodificar
+  localmente só a trilha de áudio antes) — o Gemini processa vídeo
+  nativamente, então funciona sem passo extra, mas cobra tokens também
+  pelos frames de vídeo (bem mais caro que áudio puro) e cada minuto de
+  gravação consome mais do contexto do modelo. Gravações muito longas
+  (várias horas) podem ficar caras ou até estourar o contexto — extrair só
+  o áudio antes do envio reduziria isso bastante, mas exigiria um parser de
+  vídeo vendorizado e testado contra uma gravação real de audiência (não
+  disponível no ambiente onde esta versão foi construída); fica documentado
+  como evolução futura em vez de arriscar um processamento de mídia não
+  validado.
+- **Sem anonimização**: diferente do texto de documentos (que pode ser
+  anonimizado antes do envio), não há como redigir automaticamente falas de
+  um áudio — a gravação vai ao Google exatamente como está.
+- Nenhum arquivo é salvo em Downloads automaticamente; a transcrição fica
+  só na caixa de texto do painel (copie antes de fechar/trocar de
+  processo).
+
 ### Configuração (provedor, modelo e chaves de API)
 
 Nas configurações da extensão (botão "Configurações"), na seção "Análise com
