@@ -482,17 +482,43 @@ das duas (ou direto na página do processo) atualiza a outra na hora.
    único" acima sobre os limites dessa anonimização).
 3. Clique em **"Analisar agora"**. A extensão extrai o texto dos
    documentos selecionados (mesmo mecanismo do "MD único") e mostra uma
-   **estimativa de custo** (tokens aproximados e custo em dólares,
-   calculados por uma heurística de caracteres — não é o tokenizador real
-   do provedor) antes de gastar qualquer coisa de verdade.
+   **pré-visualização editável** desse texto (documentos + eventual
+   movimentação, já anonimizado se marcado), junto com uma **estimativa de
+   custo** (tokens aproximados e custo em dólares, calculados por uma
+   heurística de caracteres — não é o tokenizador real do provedor) antes
+   de gastar qualquer coisa de verdade. Veja "Pré-visualização e edição
+   antes de enviar" abaixo.
 4. Clique em **"Confirmar e enviar"** para de fato chamar a API do
    provedor escolhido (Claude ou Gemini, configurado nas configurações da
-   extensão — ver abaixo). Ou **"Cancelar"** para descartar sem gastar
-   nada.
+   extensão — ver abaixo) com o texto que estiver na pré-visualização
+   (editado ou não). Ou **"Cancelar"** para descartar sem gastar nada.
 5. A resposta da IA aparece num campo de texto somente leitura, com um
    botão **"Copiar"** para colar em outro lugar da página do processo. O
    custo **real** da chamada (calculado a partir do uso de tokens
    devolvido pela própria API) substitui a estimativa nesse momento.
+
+### Pré-visualização e edição antes de enviar
+
+Tanto "Analisar agora" quanto "Adicionar à fila em lote" passam pelo mesmo
+passo intermediário antes de gastar qualquer coisa: uma **caixa de texto
+editável** mostrando exatamente o conteúdo (documentos + movimentação, já
+anonimizado se a opção estiver marcada) que seria apensado ao prompt e
+enviado à IA — nada sai da extensão enquanto essa tela estiver aberta.
+
+- **Revise e edite livremente** o texto ali mesmo antes de confirmar —
+  útil para remover algo que a anonimização automática não pegou, cortar
+  um trecho irrelevante ou corrigir uma extração malfeita de algum
+  documento. A estimativa de custo é **recalculada automaticamente**
+  conforme você edita.
+- Para textos longos, o botão **"Abrir em janela maior para editar"** abre
+  uma janela separada, bem maior que a área do painel lateral, com a mesma
+  caixa de texto (e um contador de caracteres). Ao clicar em **"Usar este
+  texto"**, o conteúdo editado volta automaticamente para a
+  pré-visualização no painel; **"Cancelar"** só fecha a janela, sem alterar
+  nada.
+- Ao clicar em "Confirmar e enviar" (ou "Confirmar e adicionar à fila"), é
+  sempre o texto que estiver **nessa caixa no momento da confirmação** que
+  é usado — inclusive qualquer edição feita na janela maior.
 
 ### Fila em lote (mais barato, para quando não precisa da resposta na hora)
 
@@ -511,10 +537,13 @@ configurados, mesmo que "Gemini" esteja selecionado ali.
 Fluxo:
 
 1. Em vez de (ou além de) "Analisar agora", clique em **"Adicionar à fila
-   em lote"**. A extensão já extrai o texto do processo nesse momento (o
-   lote pode ser enviado bem depois, mesmo sem a aba do processo mais
-   aberta) e mostra o item na lista da fila, com o custo estimado já com o
-   desconto de lote.
+   em lote"**. A extensão extrai o texto do processo e mostra a mesma
+   pré-visualização editável descrita acima — revise/edite e clique em
+   **"Confirmar e adicionar à fila"** para de fato enfileirar (o texto que
+   entra na fila é sempre o que estiver na caixa nesse momento). O lote
+   pode ser enviado bem depois, mesmo sem a aba do processo mais aberta; o
+   item aparece na lista da fila com o custo estimado já com o desconto de
+   lote.
 2. Repita para quantos processos quiser — navegue para outro processo,
    detecte, marque a seleção e "Adicionar à fila em lote" de novo. A fila
    persiste mesmo fechando o painel.

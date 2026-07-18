@@ -381,6 +381,16 @@
 
           <div id="area-estimativa-ia" class="aviso" hidden>
             <p id="texto-estimativa-ia"></p>
+            <label class="campo-config-ia" for="texto-preview-ia">
+              Texto que será enviado (documentos + movimentação, já anonimizado se marcado acima) —
+              revise e edite se precisar antes de confirmar
+            </label>
+            <textarea id="texto-preview-ia" class="campo-resultado-ia" rows="12"></textarea>
+            <div class="botoes">
+              <button type="button" id="btn-abrir-preview-janela-ia" class="btn-ghost">
+                Abrir em janela maior para editar
+              </button>
+            </div>
             <div class="modal-botoes">
               <button id="btn-confirmar-analise-ia" class="btn">Confirmar e enviar</button>
               <button id="btn-cancelar-analise-ia" class="btn-secundario">Cancelar</button>

@@ -1711,15 +1711,13 @@ async function chamarGeminiAPI(apiKey, promptCompleto, modelo) {
   return { texto, tokensEntrada, tokensSaida };
 }
 
-// Fase 1 do fluxo (mensagem "ANALISAR_IA_EXTRAIR"): extrai o texto e devolve
-// junto uma ESTIMATIVA de custo, sem chamar a API de IA ainda - a chamada de
-// verdade so' acontece se o usuario confirmar (fase 2, "ANALISAR_IA_ENVIAR"),
-// depois de ver a estimativa.
-async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, modelo, promptId, promptTextoAvulso, aoProgredir) {
-  if (aoProgredir) aoProgredir("Extraindo o conteúdo dos documentos selecionados...");
-  const obterUrlResolvida = criarResolvedorUrlDocumento();
-  const texto = await construirTextoProcessoParaIA(documentos, obterUrlResolvida, movimentacao, anonimizar);
-
+// Estimativa de custo a partir de um texto JA' PRONTO (documentos +
+// eventual movimentacao, ja' anonimizado se for o caso) - fatorado para
+// fora de "extrairTextoParaAnaliseIA" para poder ser chamado de novo
+// depois que o usuario EDITA o texto na pre-visualizacao (o texto extraido
+// e' so' um ponto de partida editavel, nao o que necessariamente e'
+// enviado - ver "ANALISE_IA_REESTIMAR"/"IA_LOTE_ADICIONAR_TEXTO").
+async function construirEstimativaIA(texto, promptId, promptTextoAvulso, provedor, modelo) {
   const modeloEscolhido = modelo || modeloPadrao(provedor);
   const precos = obterInfoModelo(provedor, modeloEscolhido);
   const textoPrompt = promptTextoAvulso || (await obterTextoPromptEscolhido(promptId));
@@ -1731,14 +1729,24 @@ async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, p
   const custoEstimadoUsd = estimarCustoUsd(tokensEntradaEstimados, tokensEntradaEstimados, precos);
 
   return {
-    texto,
-    estimativa: {
-      provedor,
-      modelo: modeloEscolhido,
-      tokensEntradaEstimados,
-      custoEstimadoUsd,
-    },
+    provedor,
+    modelo: modeloEscolhido,
+    tokensEntradaEstimados,
+    custoEstimadoUsd,
   };
+}
+
+// Fase 1 do fluxo (mensagem "ANALISAR_IA_EXTRAIR"): extrai o texto e devolve
+// junto uma ESTIMATIVA de custo, sem chamar a API de IA ainda - a chamada de
+// verdade so' acontece se o usuario confirmar (fase 2, "ANALISAR_IA_ENVIAR"),
+// depois de ver (e poder editar) a pre-visualizacao.
+async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, modelo, promptId, promptTextoAvulso, aoProgredir) {
+  if (aoProgredir) aoProgredir("Extraindo o conteúdo dos documentos selecionados...");
+  const obterUrlResolvida = criarResolvedorUrlDocumento();
+  const texto = await construirTextoProcessoParaIA(documentos, obterUrlResolvida, movimentacao, anonimizar);
+  const estimativa = await construirEstimativaIA(texto, promptId, promptTextoAvulso, provedor, modelo);
+
+  return { texto, estimativa };
 }
 
 // Devolve so' o texto do prompt salvo (sem lancar erro se nao encontrar -
@@ -1841,6 +1849,32 @@ function obterChaveClaudeConfigurada() {
 async function adicionarItemFilaLoteIA(numeroProcesso, documentos, movimentacao, anonimizar, promptId, promptTextoAvulso, modelo) {
   const modeloEscolhido = modelo || modeloPadrao("claude");
   const { texto, estimativa } = await extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, "claude", modeloEscolhido, promptId, promptTextoAvulso, () => {});
+
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    numeroProcesso,
+    promptId: promptTextoAvulso ? null : promptId,
+    promptTextoAvulso: promptTextoAvulso || null,
+    modelo: modeloEscolhido,
+    texto,
+    estimativa,
+    criadoEm: Date.now(),
+  };
+
+  const fila = await obterFilaLoteIA();
+  fila.push(item);
+  await salvarFilaLoteIA(fila);
+  return fila;
+}
+
+// Mesma coisa que "adicionarItemFilaLoteIA", mas para quando o texto JA'
+// foi extraido antes (e possivelmente editado pelo usuario na
+// pre-visualizacao, ver "ANALISAR_IA_EXTRAIR"/"ANALISE_IA_TEXTO_PRONTO" em
+// popup.js) - nao extrai de novo dos documentos, so' reestima o custo em
+// cima do texto final recebido e guarda esse mesmo texto na fila.
+async function adicionarItemFilaLoteIAComTexto(numeroProcesso, texto, promptId, promptTextoAvulso, modelo) {
+  const modeloEscolhido = modelo || modeloPadrao("claude");
+  const estimativa = await construirEstimativaIA(texto, promptId, promptTextoAvulso, "claude", modeloEscolhido);
 
   const item = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -8553,6 +8587,35 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
       mensagem.documentos,
       mensagem.movimentacao,
       !!mensagem.anonimizar,
+      mensagem.promptId,
+      mensagem.promptTextoAvulso,
+      mensagem.modelo
+    )
+      .then((fila) => sendResponse({ ok: true, fila }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "ANALISE_IA_REESTIMAR") {
+    // Recalcula a estimativa de custo em cima do texto ATUAL da
+    // pre-visualizacao (o usuario pode ter editado o texto extraido antes
+    // de confirmar) - nao extrai nada de novo, so' reconta caracteres.
+    construirEstimativaIA(
+      mensagem.texto || "",
+      mensagem.promptId,
+      mensagem.promptTextoAvulso,
+      mensagem.provedor,
+      mensagem.modelo
+    )
+      .then((estimativa) => sendResponse({ ok: true, estimativa }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_ADICIONAR_TEXTO") {
+    adicionarItemFilaLoteIAComTexto(
+      mensagem.numeroProcesso,
+      mensagem.texto,
       mensagem.promptId,
       mensagem.promptTextoAvulso,
       mensagem.modelo

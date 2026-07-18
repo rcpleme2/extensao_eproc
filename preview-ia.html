@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pré-visualizar e editar antes de enviar</title>
+  <link rel="stylesheet" href="popup.css" />
+  <style>
+    html, body {
+      height: 100%;
+      min-width: 0;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      gap: var(--espaco-2);
+    }
+    h1 {
+      font-size: 15px;
+      margin: 0;
+      color: var(--cor-primaria-escura);
+    }
+    #texto-preview-janela {
+      flex: 1;
+      width: 100%;
+      resize: none;
+      font-family: ui-monospace, "SF Mono", Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.4;
+    }
+    .rodape-preview-janela {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: var(--espaco-2);
+    }
+  </style>
+</head>
+<body>
+  <h1>Pré-visualizar e editar antes de enviar</h1>
+  <p class="legenda-opcoes">
+    Este é o texto (documentos + eventual movimentação, já anonimizado se essa opção
+    estiver marcada) que será apensado ao prompt e enviado à IA. Edite livremente antes
+    de usar — nada é enviado a partir desta janela.
+  </p>
+  <textarea id="texto-preview-janela" class="campo-resultado-ia"></textarea>
+  <div class="rodape-preview-janela">
+    <span id="contador-preview-janela" class="status"></span>
+    <div class="botoes">
+      <button id="btn-cancelar-preview-janela" class="btn-secundario">Cancelar</button>
+      <button id="btn-usar-preview-janela" class="btn">Usar este texto</button>
+    </div>
+  </div>
+  <script src="preview-ia.js"></script>
+</body>
+</html>

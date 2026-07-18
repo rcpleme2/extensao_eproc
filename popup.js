@@ -48,6 +48,8 @@ const areaProgressoIA = document.getElementById("area-progresso-ia");
 const textoProgressoIA = document.getElementById("texto-progresso-ia");
 const areaEstimativaIA = document.getElementById("area-estimativa-ia");
 const textoEstimativaIA = document.getElementById("texto-estimativa-ia");
+const textoPreviewIA = document.getElementById("texto-preview-ia");
+const btnAbrirPreviewJanelaIA = document.getElementById("btn-abrir-preview-janela-ia");
 const btnConfirmarAnaliseIA = document.getElementById("btn-confirmar-analise-ia");
 const btnCancelarAnaliseIA = document.getElementById("btn-cancelar-analise-ia");
 const areaErrosIA = document.getElementById("area-erros-ia");
@@ -103,22 +105,33 @@ function nomeAmigavelModelo(modeloId) {
   return encontrado ? encontrado.nome : modeloId;
 }
 
-let textoExtraidoParaIA = null;
 // Guarda qual prompt foi de fato usado na extração (fase 1), pra fase 2
-// ("Confirmar e enviar") reenviar EXATAMENTE o mesmo prompt - mesmo que o
-// usuário tenha mexido nos campos de prompt avulso enquanto aguardava a
-// estimativa.
+// ("Confirmar e enviar"/"Confirmar e adicionar à fila") reenviar
+// EXATAMENTE o mesmo prompt - mesmo que o usuário tenha mexido nos campos
+// de prompt avulso enquanto aguardava a estimativa.
 let promptEmUsoNaAnalise = { promptId: null, promptTextoAvulso: null };
+// "enviar" (Analisar agora) ou "fila" (Adicionar à fila em lote) - os dois
+// fluxos compartilham a mesma pré-visualização/edição de texto antes de
+// confirmar; só o botão final muda de comportamento.
+let modoConfirmacaoIA = null;
+// Config (provedor/modelo) usada na extração - reaproveitada para
+// reestimar o custo quando o usuário edita o texto na pré-visualização.
+let configEmUsoNaAnalise = { provedor: "claude", modelo: null };
 
 function resetarAnaliseIA() {
-  textoExtraidoParaIA = null;
+  modoConfirmacaoIA = null;
   promptEmUsoNaAnalise = { promptId: null, promptTextoAvulso: null };
   areaProgressoIA.hidden = true;
   areaEstimativaIA.hidden = true;
+  areaEstimativaIA.querySelector(".modal-botoes").hidden = false;
   areaErrosIA.hidden = true;
   areaResultadoIA.hidden = true;
   textoResultadoIA.value = "";
+  textoPreviewIA.value = "";
+  textoPreviewIA.hidden = false;
+  btnAbrirPreviewJanelaIA.hidden = false;
   btnAnalisarIA.disabled = false;
+  btnAdicionarFilaIA.disabled = false;
 }
 
 function atualizarModoPromptIA() {
@@ -164,28 +177,38 @@ async function resolverPromptParaEnvio() {
   return { promptId: novoPrompt.id };
 }
 
-btnAnalisarIA.addEventListener("click", async () => {
+// Fase 1, compartilhada pelos dois botões ("Analisar agora" e "Adicionar
+// à fila em lote"): extrai o texto e mostra a pré-visualização editável
+// (ver ANALISE_IA_TEXTO_PRONTO abaixo) antes de qualquer chamada real à
+// IA ou de enfileirar - "modo" so' diferencia o que acontece ao confirmar.
+async function iniciarExtracaoIA(modo) {
   const { documentosSelecionados, movimentacaoParaEnviar } = await obterSelecaoAtualParaEnvio();
 
+  const areaErro = modo === "fila" ? areaErrosFilaLoteIA : areaErrosIA;
   if (documentosSelecionados.length === 0 && movimentacaoParaEnviar.length === 0) {
-    areaErrosIA.hidden = false;
-    areaErrosIA.textContent =
+    areaErro.hidden = false;
+    areaErro.textContent =
       "Nada para analisar: nenhum documento selecionado e a movimentação está excluída. Marque ao menos um documento ou inclua a movimentação.";
     return;
   }
 
   const resolucaoPrompt = await resolverPromptParaEnvio();
   if (resolucaoPrompt.erro) {
-    areaErrosIA.hidden = false;
-    areaErrosIA.textContent = resolucaoPrompt.erro;
+    areaErro.hidden = false;
+    areaErro.textContent = resolucaoPrompt.erro;
     return;
   }
 
   const config = await obterConfiguracoes();
+  const provedor = modo === "fila" ? "claude" : config.provedorIA;
+  const modelo = provedor === "gemini" ? config.modeloGemini : config.modeloClaude;
 
   resetarAnaliseIA();
+  modoConfirmacaoIA = modo;
   promptEmUsoNaAnalise = { promptId: resolucaoPrompt.promptId || null, promptTextoAvulso: resolucaoPrompt.promptTextoAvulso || null };
+  configEmUsoNaAnalise = { provedor, modelo };
   btnAnalisarIA.disabled = true;
+  btnAdicionarFilaIA.disabled = true;
   areaProgressoIA.hidden = false;
   textoProgressoIA.textContent = "Extraindo o conteúdo dos documentos selecionados...";
 
@@ -194,22 +217,112 @@ btnAnalisarIA.addEventListener("click", async () => {
     documentos: documentosSelecionados,
     movimentacao: movimentacaoParaEnviar,
     anonimizar: chkAnonimizarIA.checked,
-    provedor: config.provedorIA,
-    modelo: config.provedorIA === "gemini" ? config.modeloGemini : config.modeloClaude,
+    provedor,
+    modelo,
     promptId: promptEmUsoNaAnalise.promptId,
     promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
   });
-});
+}
+
+btnAnalisarIA.addEventListener("click", () => iniciarExtracaoIA("enviar"));
+btnAdicionarFilaIA.addEventListener("click", () => iniciarExtracaoIA("fila"));
 
 btnCancelarAnaliseIA.addEventListener("click", () => {
   resetarAnaliseIA();
 });
 
+// Reestima o custo em cima do texto ATUAL da pré-visualização (o usuário
+// pode ter editado) - debounced para não disparar uma mensagem a cada
+// tecla digitada.
+let timeoutReestimarIA = null;
+textoPreviewIA.addEventListener("input", () => {
+  clearTimeout(timeoutReestimarIA);
+  timeoutReestimarIA = setTimeout(async () => {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "ANALISE_IA_REESTIMAR",
+      texto: textoPreviewIA.value,
+      promptId: promptEmUsoNaAnalise.promptId,
+      promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
+      provedor: configEmUsoNaAnalise.provedor,
+      modelo: configEmUsoNaAnalise.modelo,
+    });
+    if (resposta && resposta.ok) {
+      exibirEstimativaIA(resposta.estimativa);
+    }
+  }, 500);
+});
+
+btnAbrirPreviewJanelaIA.addEventListener("click", async () => {
+  const chave = `previewIA_${Date.now()}`;
+  await new Promise((resolve) => chrome.storage.local.set({ [chave]: { texto: textoPreviewIA.value } }, resolve));
+
+  const janela = await chrome.windows.create({
+    url: chrome.runtime.getURL(`preview-ia.html?chave=${encodeURIComponent(chave)}`),
+    type: "popup",
+    width: 900,
+    height: 800,
+  });
+
+  function aoMudarStorage(mudancas, area) {
+    if (area !== "local" || !(chave in mudancas)) return;
+    const novoValor = mudancas[chave].newValue;
+    if (novoValor && typeof novoValor.textoFinal === "string") {
+      textoPreviewIA.value = novoValor.textoFinal;
+      textoPreviewIA.dispatchEvent(new Event("input"));
+    }
+    chrome.storage.onChanged.removeListener(aoMudarStorage);
+    chrome.storage.local.remove(chave);
+  }
+  chrome.storage.onChanged.addListener(aoMudarStorage);
+});
+
+function exibirEstimativaIA(est) {
+  areaEstimativaIA.hidden = false;
+  textoEstimativaIA.textContent =
+    `Tamanho estimado: ~${(est.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens de entrada ` +
+    `(modelo ${nomeAmigavelModelo(est.modelo)}). Custo estimado: até ${FORMATADOR_USD.format(est.custoEstimadoUsd || 0)}` +
+    (modoConfirmacaoIA === "fila" ? " (mais 50% de desconto quando o lote for enviado)." : ". Confirme para enviar de verdade à IA.");
+  btnConfirmarAnaliseIA.textContent = modoConfirmacaoIA === "fila" ? "Confirmar e adicionar à fila" : "Confirmar e enviar";
+}
+
 btnConfirmarAnaliseIA.addEventListener("click", async () => {
-  if (!textoExtraidoParaIA) return;
+  const texto = textoPreviewIA.value;
+  if (!texto) return;
+
+  if (modoConfirmacaoIA === "fila") {
+    areaEstimativaIA.hidden = true;
+    areaProgressoIA.hidden = false;
+    textoProgressoIA.textContent = "Adicionando à fila em lote...";
+
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "IA_LOTE_ADICIONAR_TEXTO",
+      numeroProcesso: estadoAtual.numeroProcesso,
+      texto,
+      promptId: promptEmUsoNaAnalise.promptId,
+      promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
+      modelo: configEmUsoNaAnalise.modelo,
+    });
+
+    if (resposta && resposta.ok) {
+      renderizarFilaLoteIA(resposta.fila);
+      if (radioPromptAvulso.checked) {
+        inputPromptAvulsoTexto.value = "";
+        chkSalvarPromptAvulso.checked = false;
+        inputTituloPromptAvulso.value = "";
+        areaTituloPromptAvulso.hidden = true;
+      }
+      resetarAnaliseIA();
+    } else {
+      areaProgressoIA.hidden = true;
+      areaEstimativaIA.hidden = false;
+      areaErrosFilaLoteIA.hidden = false;
+      areaErrosFilaLoteIA.textContent = (resposta && resposta.erro) || "Falha ao adicionar à fila.";
+    }
+    return;
+  }
+
   const config = await obterConfiguracoes();
-  const apiKey = config.provedorIA === "gemini" ? config.chaveGemini : config.chaveClaude;
-  const modelo = config.provedorIA === "gemini" ? config.modeloGemini : config.modeloClaude;
+  const apiKey = configEmUsoNaAnalise.provedor === "gemini" ? config.chaveGemini : config.chaveClaude;
 
   areaEstimativaIA.hidden = true;
   areaProgressoIA.hidden = false;
@@ -217,11 +330,11 @@ btnConfirmarAnaliseIA.addEventListener("click", async () => {
 
   chrome.runtime.sendMessage({
     tipo: "ANALISAR_IA_ENVIAR",
-    texto: textoExtraidoParaIA,
+    texto,
     promptId: promptEmUsoNaAnalise.promptId,
     promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
-    provedor: config.provedorIA,
-    modelo,
+    provedor: configEmUsoNaAnalise.provedor,
+    modelo: configEmUsoNaAnalise.modelo,
     apiKey,
   });
 });
@@ -363,53 +476,6 @@ function atualizarListaCompletaIA() {
     renderizarLotesEnviadosIA(resposta.lotes);
   });
 }
-
-btnAdicionarFilaIA.addEventListener("click", async () => {
-  const { documentosSelecionados, movimentacaoParaEnviar } = await obterSelecaoAtualParaEnvio();
-
-  if (documentosSelecionados.length === 0 && movimentacaoParaEnviar.length === 0) {
-    areaErrosFilaLoteIA.hidden = false;
-    areaErrosFilaLoteIA.textContent =
-      "Nada para adicionar à fila: nenhum documento selecionado e a movimentação está excluída.";
-    return;
-  }
-
-  const resolucaoPrompt = await resolverPromptParaEnvio();
-  if (resolucaoPrompt.erro) {
-    areaErrosFilaLoteIA.hidden = false;
-    areaErrosFilaLoteIA.textContent = resolucaoPrompt.erro;
-    return;
-  }
-
-  const config = await obterConfiguracoes();
-
-  areaErrosFilaLoteIA.hidden = true;
-  btnAdicionarFilaIA.disabled = true;
-  const resposta = await chrome.runtime.sendMessage({
-    tipo: "IA_LOTE_ADICIONAR",
-    numeroProcesso: estadoAtual.numeroProcesso,
-    documentos: documentosSelecionados,
-    movimentacao: movimentacaoParaEnviar,
-    anonimizar: chkAnonimizarIA.checked,
-    promptId: resolucaoPrompt.promptId,
-    promptTextoAvulso: resolucaoPrompt.promptTextoAvulso,
-    modelo: config.modeloClaude,
-  });
-  btnAdicionarFilaIA.disabled = false;
-
-  if (resposta && resposta.ok) {
-    renderizarFilaLoteIA(resposta.fila);
-    if (radioPromptAvulso.checked) {
-      inputPromptAvulsoTexto.value = "";
-      chkSalvarPromptAvulso.checked = false;
-      inputTituloPromptAvulso.value = "";
-      areaTituloPromptAvulso.hidden = true;
-    }
-  } else {
-    areaErrosFilaLoteIA.hidden = false;
-    areaErrosFilaLoteIA.textContent = (resposta && resposta.erro) || "Falha ao adicionar à fila.";
-  }
-});
 
 btnEnviarLoteIA.addEventListener("click", async () => {
   const config = await obterConfiguracoes();
@@ -1665,23 +1731,21 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   if (mensagem.tipo === "ANALISE_IA_TEXTO_PRONTO") {
     areaProgressoIA.hidden = true;
     if (mensagem.ok) {
-      textoExtraidoParaIA = mensagem.texto;
-      const est = mensagem.estimativa || {};
-      areaEstimativaIA.hidden = false;
-      textoEstimativaIA.textContent =
-        `Tamanho estimado: ~${(est.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens de entrada ` +
-        `(modelo ${nomeAmigavelModelo(est.modelo)}). Custo estimado: até ${FORMATADOR_USD.format(est.custoEstimadoUsd || 0)}. ` +
-        `Confirme para enviar de verdade à IA.`;
+      textoPreviewIA.value = mensagem.texto || "";
+      exibirEstimativaIA(mensagem.estimativa || {});
     } else {
       btnAnalisarIA.disabled = false;
-      areaErrosIA.hidden = false;
-      areaErrosIA.textContent = mensagem.erro || "Falha desconhecida ao extrair o conteúdo dos documentos.";
+      btnAdicionarFilaIA.disabled = false;
+      const areaErro = modoConfirmacaoIA === "fila" ? areaErrosFilaLoteIA : areaErrosIA;
+      areaErro.hidden = false;
+      areaErro.textContent = mensagem.erro || "Falha desconhecida ao extrair o conteúdo dos documentos.";
     }
   }
 
   if (mensagem.tipo === "ANALISE_IA_RESULTADO") {
     areaProgressoIA.hidden = true;
     btnAnalisarIA.disabled = false;
+    btnAdicionarFilaIA.disabled = false;
     if (mensagem.ok) {
       areaResultadoIA.hidden = false;
       textoResultadoIA.value = mensagem.resposta || "";
@@ -1689,6 +1753,8 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         textoProgressoIA.textContent = "";
         areaEstimativaIA.hidden = false;
         areaEstimativaIA.querySelector(".modal-botoes").hidden = true;
+        textoPreviewIA.hidden = true;
+        btnAbrirPreviewJanelaIA.hidden = true;
         textoEstimativaIA.textContent = `Custo real desta chamada: ${FORMATADOR_USD.format(mensagem.custoRealUsd)}.`;
       }
     } else {
