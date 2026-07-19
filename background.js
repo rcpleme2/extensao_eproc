@@ -2063,6 +2063,25 @@ function salvarLotesEnviadosIA(lotes) {
   return new Promise((resolve) => chrome.storage.local.set({ [CHAVE_LOTES_ENVIADOS_IA]: lotes }, resolve));
 }
 
+// Nome opcional dado a` fila AINDA NAO enviada - so' para organizacao do
+// usuario (nunca e' mandado a` API da Claude, que so' conhece o
+// "batchId"). Persistido em chrome.storage.local para sobreviver a
+// fechar o painel, igual ao resto da fila. Ao enviar o lote de verdade
+// (ver "enviarLoteIA"), esse nome vira o "nome" do lote resultante (o
+// mesmo campo ja' usado para renomear lotes ja' enviados) e o campo e'
+// limpo, pronto para a proxima fila.
+const CHAVE_NOME_FILA_LOTE_IA = "nomeFilaLoteIA";
+
+function obterNomeFilaLoteIA() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [CHAVE_NOME_FILA_LOTE_IA]: "" }, (itens) => resolve(itens[CHAVE_NOME_FILA_LOTE_IA]));
+  });
+}
+
+function salvarNomeFilaLoteIA(nome) {
+  return new Promise((resolve) => chrome.storage.local.set({ [CHAVE_NOME_FILA_LOTE_IA]: (nome || "").trim() }, resolve));
+}
+
 function obterChaveClaudeConfigurada() {
   return new Promise((resolve) => {
     chrome.storage.local.get({ chaveClaude: "" }, (itens) => resolve(itens.chaveClaude));
@@ -2186,8 +2205,11 @@ async function enviarLoteIA(apiKey) {
     throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao enviar o lote.`);
   }
 
+  const nomeFila = await obterNomeFilaLoteIA();
+
   const lote = {
     batchId: dados.id,
+    nome: nomeFila || null,
     status: dados.processing_status === "ended" ? "ended" : "in_progress",
     contagens: dados.request_counts || null,
     criadoEm: Date.now(),
@@ -2199,6 +2221,7 @@ async function enviarLoteIA(apiKey) {
   lotes.push(lote);
   await salvarLotesEnviadosIA(lotes);
   await salvarFilaLoteIA([]);
+  await salvarNomeFilaLoteIA("");
 
   chrome.alarms.create(NOME_ALARME_LOTES_IA, { periodInMinutes: INTERVALO_ALARME_LOTES_IA_MINUTOS });
 
@@ -8996,8 +9019,15 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
 
   if (mensagem && mensagem.tipo === "IA_LOTE_LISTAR") {
-    Promise.all([obterFilaLoteIA(), obterLotesEnviadosIA()])
-      .then(([fila, lotes]) => sendResponse({ ok: true, fila, lotes }))
+    Promise.all([obterFilaLoteIA(), obterLotesEnviadosIA(), obterNomeFilaLoteIA()])
+      .then(([fila, lotes, nomeFila]) => sendResponse({ ok: true, fila, lotes, nomeFila }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_DEFINIR_NOME") {
+    salvarNomeFilaLoteIA(mensagem.nome)
+      .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
     return true;
   }

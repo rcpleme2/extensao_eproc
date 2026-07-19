@@ -534,6 +534,13 @@ configurações: aquele seletor só afeta a **análise imediata**
 ("Analisar agora"); a fila em lote sempre usa a chave/modelo da Claude
 configurados, mesmo que "Gemini" esteja selecionado ali.
 
+Opcionalmente, dê um **nome à fila** no campo logo acima da lista (ex.:
+"Audiências de família - julho") — é só para sua própria organização,
+salvo localmente e **nunca enviado à Anthropic**; quando o lote é enviado,
+esse nome vira o nome do lote em "Lotes enviados" (o mesmo campo que dá
+para editar depois com "Renomear", ver abaixo) e o campo volta a ficar em
+branco, pronto para a próxima fila.
+
 Fluxo:
 
 1. Em vez de (ou além de) "Analisar agora", clique em **"Adicionar à fila
@@ -546,7 +553,9 @@ Fluxo:
    lote.
 2. Repita para quantos processos quiser — navegue para outro processo,
    detecte, marque a seleção e "Adicionar à fila em lote" de novo. A fila
-   persiste mesmo fechando o painel.
+   persiste mesmo fechando o painel. Logo abaixo da lista aparece o
+   **custo total estimado** (soma de todos os itens, já com o desconto de
+   lote), além da estimativa individual de cada processo.
 3. Quando terminar de montar a fila, clique em **"Enviar lote"** — todos
    os itens da fila são enviados de uma vez, numa única chamada à API de
    lotes, e a fila é esvaziada.

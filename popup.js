@@ -72,9 +72,11 @@ const areaResultadoTranscricaoIA = document.getElementById("area-resultado-trans
 const textoResultadoTranscricaoIA = document.getElementById("texto-resultado-transcricao-ia");
 const btnCopiarResultadoTranscricaoIA = document.getElementById("btn-copiar-resultado-transcricao-ia");
 
+const inputNomeFilaLoteIA = document.getElementById("input-nome-fila-lote-ia");
 const areaErrosFilaLoteIA = document.getElementById("area-erros-fila-lote-ia");
 const listaFilaLoteIA = document.getElementById("lista-fila-lote-ia");
 const areaFilaLoteVazia = document.getElementById("area-fila-lote-vazia");
+const areaTotalFilaLoteIA = document.getElementById("area-total-fila-lote-ia");
 const btnEnviarLoteIA = document.getElementById("btn-enviar-lote-ia");
 const areaLotesEnviadosVazio = document.getElementById("area-lotes-enviados-vazio");
 const listaLotesEnviadosIA = document.getElementById("lista-lotes-enviados-ia");
@@ -394,6 +396,15 @@ function renderizarFilaLoteIA(fila) {
   btnEnviarLoteIA.disabled = itens.length === 0;
   btnEnviarLoteIA.textContent = `Enviar lote${itens.length > 0 ? ` (${itens.length})` : ""}`;
 
+  areaTotalFilaLoteIA.hidden = itens.length === 0;
+  if (itens.length > 0) {
+    const totalTokens = itens.reduce((soma, item) => soma + ((item.estimativa && item.estimativa.tokensEntradaEstimados) || 0), 0);
+    const totalCusto = itens.reduce((soma, item) => soma + ((item.estimativa && item.estimativa.custoEstimadoUsd) || 0) * 0.5, 0);
+    areaTotalFilaLoteIA.textContent =
+      `Total estimado (${itens.length} processo(s)): ~${totalTokens.toLocaleString("pt-BR")} tokens, até ` +
+      `${FORMATADOR_USD.format(totalCusto)} com desconto de lote.`;
+  }
+
   for (const item of itens) {
     const li = document.createElement("li");
     li.className = "item-fila-lote-ia";
@@ -529,8 +540,26 @@ function atualizarListaCompletaIA() {
     if (!resposta) return;
     renderizarFilaLoteIA(resposta.fila);
     renderizarLotesEnviadosIA(resposta.lotes);
+    // So' pisa no campo se o usuario nao estiver com foco nele digitando -
+    // evita "roubar" o cursor/apagar o que ja' foi digitado caso essa
+    // atualizacao venha de um evento em segundo plano (ex.: lote
+    // terminando) enquanto o usuario esta' nomeando a proxima fila.
+    if (document.activeElement !== inputNomeFilaLoteIA) {
+      inputNomeFilaLoteIA.value = resposta.nomeFila || "";
+    }
   });
 }
+
+// Persiste o nome da fila (so' organizacao do usuario, nunca enviado a`
+// Anthropic) conforme ele digita - debounced para nao mandar uma
+// mensagem a cada tecla.
+let timeoutNomeFilaLoteIA = null;
+inputNomeFilaLoteIA.addEventListener("input", () => {
+  clearTimeout(timeoutNomeFilaLoteIA);
+  timeoutNomeFilaLoteIA = setTimeout(() => {
+    chrome.runtime.sendMessage({ tipo: "IA_LOTE_DEFINIR_NOME", nome: inputNomeFilaLoteIA.value });
+  }, 400);
+});
 
 btnEnviarLoteIA.addEventListener("click", async () => {
   const config = await obterConfiguracoes();

@@ -413,9 +413,14 @@
         <p class="legenda-opcoes">
           📦 Fila em lote (Claude, 50% mais barato — processado em até 24h)
         </p>
+        <label class="campo-config-ia">
+          Nome da fila (opcional, só para sua organização — não é enviado à Anthropic)
+          <input type="text" id="input-nome-fila-lote-ia" placeholder='Ex.: "Audiências de família - julho"' />
+        </label>
         <div id="area-erros-fila-lote-ia" class="erros" hidden></div>
         <ul id="lista-fila-lote-ia" class="lista-ia-simples" hidden></ul>
         <div id="area-fila-lote-vazia" class="status">Nenhum item na fila ainda.</div>
+        <div id="area-total-fila-lote-ia" class="status" hidden></div>
         <div class="botoes">
           <button id="btn-enviar-lote-ia" class="btn" disabled>Enviar lote</button>
         </div>
@@ -484,8 +489,8 @@
             Adicionar processos filtrados à fila em lote
           </button>
           <p class="legenda-opcoes">
-            A fila em lote usa sempre a Claude (50% mais barato, até 24h). Depois de adicionados,
-            revise a fila acima e clique em "Enviar lote" quando quiser.
+            A fila em lote usa sempre a Anthropic/Claude (50% mais barato, até 24h para resposta).
+            Depois de adicionados, revise a fila acima e clique em "Enviar lote" quando quiser.
           </p>
         </div>
 
