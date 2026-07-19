@@ -614,6 +614,20 @@ checkboxes, só os grupos que de fato existem nos processos daquele
 localizador — nada de lista fixa adivinhada, o que aparece é sempre o que
 foi encontrado.
 
+Para deixar os grupos compreensíveis (siglas como `OUT`/`PROCADM` são
+crípticas), cada grupo aparece com um **nome amigável** para as siglas
+comuns (ex.: `Outros · OUT`, `Processo administrativo · PROCADM`; siglas
+não mapeadas ficam com a própria sigla) e, abaixo, as **descrições/
+observações** dos documentos daquele grupo (ex.: o grupo `OUT` mostra
+"RG CPF · TERMO DE CIENCIA · RELATORIO MEDICO · …"). Essas descrições são
+a observação que o próprio eproc guarda em cada documento — é o que melhor
+distingue um "OUT" de outro. (O nome exato do "Tipo de Documento" que o
+eproc mostra ao passar o mouse na sigla é carregado sob demanda e não fica
+na página que a extensão lê, por isso o nome amigável vem de um mapa
+interno das siglas mais comuns.) Essa mesma segunda linha (nome amigável
++ descrição) também aparece na lista de documentos por processo do
+"Analisar com IA" e do "Exportar Documentos".
+
 Fluxo:
 
 1. Clique em **"Carregar localizadores"** (o mesmo carregamento da seção

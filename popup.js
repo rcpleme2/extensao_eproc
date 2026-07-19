@@ -1045,12 +1045,99 @@ async function enviarSelecaoTodosDocumentosParaPagina(selecionado) {
 // nos dois containers ao mesmo tempo.
 const CONTAINERS_LISTA_DOCUMENTOS = [listaDocumentosEl, listaDocumentosIAEl];
 
+// Nome amigável para as siglas de documento mais comuns do eProc/TJPR, para
+// as listas e os grupos ficarem legíveis (ex.: "OUT" -> "Outros",
+// "PROCADM" -> "Processo administrativo"). O nome LEGÍVEL exato do "Tipo de
+// Documento" que o eProc mostra ao passar o mouse na sigla é carregado por
+// AJAX no hover e NÃO está na página que a extensão lê - por isso usamos
+// este mapa curado, com fallback para a própria sigla quando não conhecida.
+// A descrição/observação de cada documento (ex.: "RG CPF") vem à parte, do
+// próprio documento (doc.descricao), e é o que melhor diferencia um "OUT"
+// de outro.
+const NOMES_TIPO_DOCUMENTO = {
+  INIC: "Inicial",
+  PET: "Petição",
+  PROC: "Procuração",
+  PROCADM: "Processo administrativo",
+  OUT: "Outros",
+  CERT: "Certidão",
+  DESPADEC: "Despacho/Decisão",
+  DESP: "Despacho",
+  DEC: "Decisão",
+  SENT: "Sentença",
+  LAUDO: "Laudo",
+  CNIS: "CNIS",
+  RG: "RG",
+  CPF: "CPF",
+  CTPS: "CTPS",
+  END: "Comprovante de endereço",
+  COMP: "Comprovante",
+  ATESTMED: "Atestado médico",
+  ATESTAD: "Atestado",
+  EXMMED: "Exame médico",
+  RECEIT: "Receituário",
+  INFBEN: "Informação de benefício",
+  INF: "Informação",
+  OFIC: "Ofício",
+  MAND: "Mandado",
+  MANDCITACAO: "Mandado de citação",
+  CITACAO: "Citação",
+  INTIM: "Intimação",
+  NOTIF: "Notificação",
+  EDITAL: "Edital",
+  CONTEST: "Contestação",
+  REPLICA: "Réplica",
+  RECURSO: "Recurso",
+  APELACAO: "Apelação",
+  EMBDECL: "Embargos de declaração",
+  CONTR: "Contrato",
+  CONT: "Contrato",
+  DECL: "Declaração",
+  SUBST: "Substabelecimento",
+  ATOORD: "Ato ordinatório",
+  TERMO: "Termo",
+  ATAAUD: "Ata de audiência",
+  TERMOAUD: "Termo de audiência",
+};
+
+// Sigla (sem o número sequencial) a partir do nome exibido - espelha
+// "extrairSiglaDocumento" do background.js, para o painel poder achar o
+// nome amigável de um documento individual (ex.: "OUT3" -> "OUT").
+function siglaDoNome(nome) {
+  const texto = (nome || "").trim();
+  const semNumero = texto.replace(/\d+\s*$/, "").trim();
+  return (semNumero || texto).toUpperCase();
+}
+
+function nomeTipoDocumento(sigla) {
+  const s = (sigla || "").toUpperCase();
+  return NOMES_TIPO_DOCUMENTO[s] || s;
+}
+
+// Texto secundário de um documento para a lista: nome amigável do tipo
+// (só quando a sigla é conhecida, para não repetir a sigla crua) + a
+// descrição/observação do próprio documento. Devolve "" quando não há
+// nada útil a acrescentar além da sigla.
+function descricaoAmigavelDocumento(doc) {
+  const sigla = siglaDoNome(doc.nome);
+  const amigavel = nomeTipoDocumento(sigla);
+  const partes = [];
+  if (amigavel.toUpperCase() !== sigla) partes.push(amigavel);
+  const descricao = (doc.descricao || "").trim();
+  if (descricao) partes.push(descricao);
+  return partes.join(" — ");
+}
+
 function renderizarLista(documentos) {
   for (const container of CONTAINERS_LISTA_DOCUMENTOS) {
     container.innerHTML = "";
     for (const doc of documentos) {
       const li = document.createElement("li");
       li.dataset.idDocumento = doc.idDocumento;
+
+      // Linha de cima: checkbox + sigla + mimetype (mesmo layout de antes).
+      const linha = document.createElement("div");
+      linha.className = "item-doc-linha";
 
       const rotulo = document.createElement("label");
       rotulo.className = "item-documento";
@@ -1073,8 +1160,21 @@ function renderizarLista(documentos) {
       tipo.className = "tipo";
       tipo.textContent = doc.mimetype || "";
 
-      li.appendChild(rotulo);
-      li.appendChild(tipo);
+      linha.appendChild(rotulo);
+      linha.appendChild(tipo);
+      li.appendChild(linha);
+
+      // Segunda linha (discreta): nome amigável do tipo + descrição/observação
+      // do documento, para o usuário entender o que é aquele "OUT3"/"PROCADM3"
+      // sem depender só da sigla. Só aparece quando há algo a mostrar.
+      const secundario = descricaoAmigavelDocumento(doc);
+      if (secundario) {
+        const descricaoEl = document.createElement("span");
+        descricaoEl.className = "doc-descricao";
+        descricaoEl.textContent = secundario;
+        li.appendChild(descricaoEl);
+      }
+
       container.appendChild(li);
     }
   }
@@ -2547,15 +2647,51 @@ btnCancelarVarreduraLoteLocalizadorIA.addEventListener("click", () => {
   areaConfirmarVarreduraLoteLocalizadorIA.hidden = true;
 });
 
+// Descrições/observações distintas dos documentos de um grupo (sigla),
+// juntando o que foi varrido em todos os processos do localizador - é o
+// que deixa claro o que aquele "OUT"/"PROCADM" realmente contém. Dedup +
+// truncamento para não estourar a tela em grupos grandes.
+function descricoesDoGrupo(grupo, limite = 8) {
+  const vistas = new Set();
+  for (const processo of processosVarridosLoteLocalizadorIA) {
+    for (const doc of processo.documentos || []) {
+      if (doc.grupo !== grupo) continue;
+      const d = (doc.descricao || "").trim();
+      if (d) vistas.add(d);
+    }
+  }
+  const lista = [...vistas];
+  if (lista.length === 0) return "";
+  const mostradas = lista.slice(0, limite).join(" · ");
+  return lista.length > limite ? `${mostradas} · …` : mostradas;
+}
+
 function renderizarGruposLoteLocalizadorIA(grupos) {
   listaGruposLoteLocalizadorIA.innerHTML = "";
   for (const { grupo, contagem } of grupos) {
+    const nomeAmigavel = nomeTipoDocumento(grupo);
+    const rotulo = nomeAmigavel.toUpperCase() !== grupo ? `${nomeAmigavel} · ${grupo}` : grupo;
+    const descricoes = descricoesDoGrupo(grupo);
+
     const label = document.createElement("label");
-    label.className = "opcao";
-    label.innerHTML = `
-      <input type="checkbox" checked data-grupo-doc="${grupo}" />
-      ${grupo} (${contagem} documento(s))
-    `;
+    label.className = "opcao opcao-grupo-doc";
+    const primeiraLinha = document.createElement("span");
+    primeiraLinha.className = "grupo-doc-titulo";
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.checked = true;
+    chk.setAttribute("data-grupo-doc", grupo);
+    primeiraLinha.appendChild(chk);
+    primeiraLinha.appendChild(document.createTextNode(` ${rotulo} (${contagem} documento(s))`));
+    label.appendChild(primeiraLinha);
+
+    if (descricoes) {
+      const descEl = document.createElement("span");
+      descEl.className = "grupo-descricoes";
+      descEl.textContent = descricoes;
+      label.appendChild(descEl);
+    }
+
     listaGruposLoteLocalizadorIA.appendChild(label);
   }
 }
