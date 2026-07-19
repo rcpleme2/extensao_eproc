@@ -409,8 +409,14 @@ function renderizarFilaLoteIA(fila) {
   }
 
   listaFilaLoteIA.querySelectorAll("[data-remover-item]").forEach((botao) => {
-    botao.addEventListener("click", () => {
-      chrome.runtime.sendMessage({ tipo: "IA_LOTE_REMOVER", id: botao.dataset.removerItem });
+    botao.addEventListener("click", async () => {
+      botao.disabled = true;
+      const resposta = await chrome.runtime.sendMessage({ tipo: "IA_LOTE_REMOVER", id: botao.dataset.removerItem });
+      if (resposta && resposta.ok) {
+        renderizarFilaLoteIA(resposta.fila);
+      } else {
+        botao.disabled = false;
+      }
     });
   });
 }
@@ -461,10 +467,16 @@ function renderizarLotesEnviadosIA(lotes) {
       `;
     }
 
+    const nomeExibicao = (lote.nome || `Lote ${lote.batchId}`).replace(/</g, "&lt;");
+
     li.innerHTML = `
       <details>
-        <summary>Lote ${lote.batchId} — ${new Date(lote.criadoEm).toLocaleString("pt-BR")} (${resumoContagens})</summary>
-        ${lote.status !== "ended" ? '<button type="button" class="btn-ghost" data-verificar-lote="' + lote.batchId + '">Verificar agora</button>' : ""}
+        <summary>
+          ${nomeExibicao} — ${new Date(lote.criadoEm).toLocaleString("pt-BR")} (${resumoContagens})
+          ${lote.status !== "ended" ? '<button type="button" class="btn-ghost" data-verificar-lote="' + lote.batchId + '">Verificar agora</button>' : ""}
+          <button type="button" class="btn-ghost" data-renomear-lote="${lote.batchId}" data-nome-atual="${(lote.nome || "").replace(/"/g, "&quot;")}">Renomear</button>
+          <button type="button" class="btn-ghost" data-excluir-lote="${lote.batchId}">Excluir</button>
+        </summary>
         ${resultadosHtml}
       </details>
     `;
@@ -480,6 +492,34 @@ function renderizarLotesEnviadosIA(lotes) {
     botao.addEventListener("click", () => {
       const area = document.getElementById(botao.dataset.copiarResultado);
       if (area) copiarTexto(area.value);
+    });
+  });
+
+  // "Renomear"/"Excluir" ficam dentro do <summary> (mesmo lugar de
+  // "Verificar agora") para continuarem visíveis mesmo com o lote
+  // fechado - preventDefault() evita que o clique também abra/feche o
+  // <details>, efeito colateral do clique cair dentro do <summary>.
+  listaLotesEnviadosIA.querySelectorAll("[data-renomear-lote]").forEach((botao) => {
+    botao.addEventListener("click", async (evento) => {
+      evento.preventDefault();
+      const novoNome = prompt("Nome para este lote (deixe em branco para voltar ao padrão):", botao.dataset.nomeAtual || "");
+      if (novoNome === null) return;
+      const resposta = await chrome.runtime.sendMessage({
+        tipo: "IA_LOTE_RENOMEAR",
+        batchId: botao.dataset.renomearLote,
+        nome: novoNome,
+      });
+      if (resposta && resposta.ok) renderizarLotesEnviadosIA(resposta.lotes);
+    });
+  });
+  listaLotesEnviadosIA.querySelectorAll("[data-excluir-lote]").forEach((botao) => {
+    botao.addEventListener("click", async (evento) => {
+      evento.preventDefault();
+      if (!confirm("Excluir este lote da lista? Isso só remove o registro local (não afeta nada na API da Claude).")) {
+        return;
+      }
+      const resposta = await chrome.runtime.sendMessage({ tipo: "IA_LOTE_EXCLUIR", batchId: botao.dataset.excluirLote });
+      if (resposta && resposta.ok) renderizarLotesEnviadosIA(resposta.lotes);
     });
   });
 }

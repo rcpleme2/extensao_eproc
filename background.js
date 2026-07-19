@@ -2127,6 +2127,30 @@ async function removerItemFilaLoteIA(id) {
   return filaAtualizada;
 }
 
+// Renomeia um lote JA' ENVIADO (campo "nome", so' de exibicao no painel -
+// nao afeta nada na API da Claude, que so' conhece o "batchId"). Sem nome
+// definido (null), o painel mostra "Lote {batchId}" como ate' agora.
+async function renomearLoteIA(batchId, novoNome) {
+  const lotes = await obterLotesEnviadosIA();
+  const lote = lotes.find((l) => l.batchId === batchId);
+  if (!lote) throw new Error("Lote não encontrado.");
+  lote.nome = (novoNome || "").trim() || null;
+  await salvarLotesEnviadosIA(lotes);
+  return lotes;
+}
+
+// Remove um lote JA' ENVIADO da lista local ("Lotes enviados") - so' apaga
+// o registro guardado nesta extensao (chrome.storage.local), nao cancela
+// nem afeta o lote em si na API da Claude (que expira sozinha em 29 dias,
+// como ja documentado). Util para limpar lotes antigos ja' conferidos/
+// copiados, sem esperar a expiracao.
+async function excluirLoteIA(batchId) {
+  const lotes = await obterLotesEnviadosIA();
+  const lotesAtualizados = lotes.filter((l) => l.batchId !== batchId);
+  await salvarLotesEnviadosIA(lotesAtualizados);
+  return lotesAtualizados;
+}
+
 // Envia TODA a fila atual como um unico lote (uma unica chamada a` API de
 // lotes, com uma requisicao por item) - a fila e' esvaziada so' se o envio
 // for bem sucedido.
@@ -8855,6 +8879,20 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "IA_LOTE_REMOVER") {
     removerItemFilaLoteIA(mensagem.id)
       .then((fila) => sendResponse({ ok: true, fila }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_RENOMEAR") {
+    renomearLoteIA(mensagem.batchId, mensagem.nome)
+      .then((lotes) => sendResponse({ ok: true, lotes }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_EXCLUIR") {
+    excluirLoteIA(mensagem.batchId)
+      .then((lotes) => sendResponse({ ok: true, lotes }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
     return true;
   }

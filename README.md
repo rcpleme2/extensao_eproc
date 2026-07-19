@@ -568,6 +568,12 @@ Os resultados dos lotes ficam disponíveis por 29 dias na Claude — depois
 disso, um lote muito antigo que ainda não tenha sido verificado pode não
 conseguir mais recuperar os resultados.
 
+Cada lote em "Lotes enviados" tem ainda os botões **"Renomear"** (dá um
+nome de sua escolha ao lote — por padrão aparece só como "Lote
+{identificador da Claude}") e **"Excluir"** (remove o lote dessa lista
+local; não cancela nem afeta o lote na API da Claude, que expira sozinha
+em 29 dias — útil só para limpar a lista de lotes já conferidos/copiados).
+
 ### Lote por localizador (rodar um prompt em todos os processos de um localizador)
 
 Ainda dentro de "Analisar com IA", logo abaixo de "Lotes enviados", o bloco
