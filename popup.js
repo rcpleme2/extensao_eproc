@@ -2148,15 +2148,26 @@ chrome.runtime.onMessage.addListener((mensagem) => {
 
       selectLocalizadorProcessos.innerHTML =
         '<option value="" selected disabled>Selecione um localizador...</option>';
-      selectLoteLocalizadorIA.innerHTML =
-        '<option value="" selected disabled>Selecione um localizador...</option>';
       for (const loc of localizadores) {
         const opcao = document.createElement("option");
         opcao.value = loc.urlProcessos;
         opcao.textContent = `${loc.nome} (${loc.totalProcessos})`;
         selectLocalizadorProcessos.appendChild(opcao);
+      }
 
-        const opcaoLote = opcao.cloneNode(true);
+      // "Lote por localizador" (processamento em lote por IA): ordena do
+      // localizador com MAIS processos para o com menos, para priorizar os
+      // maiores acervos. Desempate alfabético. Só este dropdown muda de
+      // ordem - a "Busca de localizadores" acima segue alfabética.
+      const localizadoresPorTamanho = [...localizadores].sort(
+        (a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0) || a.nome.localeCompare(b.nome, "pt-BR")
+      );
+      selectLoteLocalizadorIA.innerHTML =
+        '<option value="" selected disabled>Selecione um localizador...</option>';
+      for (const loc of localizadoresPorTamanho) {
+        const opcaoLote = document.createElement("option");
+        opcaoLote.value = loc.urlProcessos;
+        opcaoLote.textContent = `${loc.nome} (${loc.totalProcessos})`;
         selectLoteLocalizadorIA.appendChild(opcaoLote);
       }
       areaSelectLocalizador.hidden = localizadores.length === 0;

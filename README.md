@@ -617,8 +617,11 @@ foi encontrado.
 Fluxo:
 
 1. Clique em **"Carregar localizadores"** (o mesmo carregamento da seção
-   "Busca específica de localizadores" mais abaixo — os dois dropdowns são
-   preenchidos juntos) e escolha um localizador no select.
+   "Busca de localizadores" — os dois dropdowns são preenchidos juntos) e
+   escolha um localizador no select. Aqui, no lote por IA, os localizadores
+   aparecem em **ordem decrescente por número de processos** (os maiores
+   acervos primeiro), para priorizar quem tem mais processos; a "Busca de
+   localizadores" segue em ordem alfabética.
 2. Clique em **"Varrer documentos deste localizador"**. A extensão abre
    cada processo do localizador numa aba oculta (um de cada vez) só para
    ler a lista de documentos — nada é enviado à IA nessa etapa. Localizadores
