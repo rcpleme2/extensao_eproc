@@ -72,6 +72,17 @@ const areaResultadoTranscricaoIA = document.getElementById("area-resultado-trans
 const textoResultadoTranscricaoIA = document.getElementById("texto-resultado-transcricao-ia");
 const btnCopiarResultadoTranscricaoIA = document.getElementById("btn-copiar-resultado-transcricao-ia");
 
+// Indicadores de setup de IA (provedor/modelo/chave) mostrados no topo de
+// "Analisar com IA" e "Transcrever Depoimentos", com atalho para as
+// Configurações quando falta a chave.
+const areaSetupIA = document.getElementById("area-setup-ia");
+const areaSetupIABotao = document.getElementById("area-setup-ia-botao");
+const btnConfigIaAtalho = document.getElementById("btn-config-ia-atalho");
+const areaSetupTranscricaoIA = document.getElementById("area-setup-transcricao-ia");
+const areaSetupTranscricaoIABotao = document.getElementById("area-setup-transcricao-ia-botao");
+const btnConfigTranscricaoIaAtalho = document.getElementById("btn-config-transcricao-ia-atalho");
+const blocoLoteIA = document.getElementById("bloco-lote-ia");
+
 const inputNomeFilaLoteIA = document.getElementById("input-nome-fila-lote-ia");
 const areaErrosFilaLoteIA = document.getElementById("area-erros-fila-lote-ia");
 const listaFilaLoteIA = document.getElementById("lista-fila-lote-ia");
@@ -322,6 +333,7 @@ btnConfirmarAnaliseIA.addEventListener("click", async () => {
 
     if (resposta && resposta.ok) {
       renderizarFilaLoteIA(resposta.fila);
+      blocoLoteIA.open = true;
       if (radioPromptAvulso.checked) {
         inputPromptAvulsoTexto.value = "";
         chkSalvarPromptAvulso.checked = false;
@@ -526,7 +538,7 @@ function renderizarLotesEnviadosIA(lotes) {
   listaLotesEnviadosIA.querySelectorAll("[data-excluir-lote]").forEach((botao) => {
     botao.addEventListener("click", async (evento) => {
       evento.preventDefault();
-      if (!confirm("Excluir este lote da lista? Isso só remove o registro local (não afeta nada na API da Claude).")) {
+      if (!confirm("Excluir este lote da lista? Isso só remove o registro local (não afeta nada na API da Anthropic (Claude)).")) {
         return;
       }
       const resposta = await chrome.runtime.sendMessage({ tipo: "IA_LOTE_EXCLUIR", batchId: botao.dataset.excluirLote });
@@ -565,7 +577,7 @@ btnEnviarLoteIA.addEventListener("click", async () => {
   const config = await obterConfiguracoes();
   if (!config.chaveClaude) {
     areaErrosFilaLoteIA.hidden = false;
-    areaErrosFilaLoteIA.textContent = 'A fila em lote usa a API da Claude - configure a "Chave de API da Claude" nas configurações.';
+    areaErrosFilaLoteIA.textContent = 'A fila em lote usa a API da Anthropic (Claude) - configure a "Chave de API da Anthropic (Claude)" nas configurações.';
     return;
   }
 
@@ -633,6 +645,36 @@ function obterConfiguracoes() {
 function salvarConfiguracao(chave, valor) {
   chrome.storage.local.set({ [chave]: valor });
 }
+
+// Preenche uma linha de status de setup (provedor/modelo ativos + se a
+// chave está configurada) e mostra/esconde o atalho "Configurar chave".
+// Usada em "Analisar com IA" (provedor conforme config) e "Transcrever"
+// (sempre Gemini).
+function aplicarStatusSetupIA(config, provedor, areaTexto, areaBotao) {
+  const ehGemini = provedor === "gemini";
+  const chave = ehGemini ? config.chaveGemini : config.chaveClaude;
+  const nomeProvedor = ehGemini ? "Gemini" : "Anthropic (Claude)";
+  const nomeModelo = nomeAmigavelModelo(ehGemini ? config.modeloGemini : config.modeloClaude);
+  if (chave) {
+    areaTexto.textContent = `Provedor: ${nomeProvedor} · Modelo: ${nomeModelo} · Chave ✓`;
+    areaTexto.classList.add("status--ok");
+    areaBotao.hidden = true;
+  } else {
+    areaTexto.textContent = `⚠ Chave de API não configurada para ${nomeProvedor}. Configure para usar a IA.`;
+    areaTexto.classList.remove("status--ok");
+    areaBotao.hidden = false;
+  }
+}
+
+function atualizarStatusSetupIA() {
+  obterConfiguracoes().then((config) => {
+    aplicarStatusSetupIA(config, config.provedorIA, areaSetupIA, areaSetupIABotao);
+    aplicarStatusSetupIA(config, "gemini", areaSetupTranscricaoIA, areaSetupTranscricaoIABotao);
+  });
+}
+
+btnConfigIaAtalho.addEventListener("click", () => btnAbrirConfiguracoes.click());
+btnConfigTranscricaoIaAtalho.addEventListener("click", () => btnAbrirConfiguracoes.click());
 
 const btnAbrirConfiguracoes = document.getElementById("btn-abrir-configuracoes");
 const modalConfiguracoes = document.getElementById("modal-configuracoes");
@@ -712,6 +754,9 @@ chkConfigAnexarMagistradoConclusos.addEventListener("change", () => {
 
 modalConfigFechar.addEventListener("click", () => {
   modalConfiguracoes.hidden = true;
+  // Refletir na hora qualquer troca de provedor/modelo/chave feita no modal
+  // nos indicadores de setup de "Analisar com IA" e "Transcrever".
+  atualizarStatusSetupIA();
 });
 
 // ---- Gerenciar prompts de análise (editar, excluir, cadastrar) ----
@@ -2626,6 +2671,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         areaErrosLoteLocalizadorIA.textContent = erros.map((e) => `${e.nome}: ${e.mensagem}`).join("\n");
       }
       atualizarListaCompletaIA();
+      blocoLoteIA.open = true;
     } else {
       setStatusLoteLocalizadorIA("Erro ao adicionar os processos à fila.", "erro");
       areaErrosLoteLocalizadorIA.hidden = false;
@@ -2795,5 +2841,16 @@ listaCardsPerfil.querySelectorAll(".card").forEach((card) => {
   });
 });
 
+// Ao abrir cada card de IA, reavaliar o setup (provedor/modelo/chave) para
+// o indicador nunca ficar defasado se o usuário configurou entre uma
+// abertura e outra.
+document.getElementById("card-analise-ia").addEventListener("toggle", (e) => {
+  if (e.target.open) atualizarStatusSetupIA();
+});
+document.getElementById("card-transcricao-ia").addEventListener("toggle", (e) => {
+  if (e.target.open) atualizarStatusSetupIA();
+});
+
+atualizarStatusSetupIA();
 atualizarPromptsIA();
 atualizarListaCompletaIA();

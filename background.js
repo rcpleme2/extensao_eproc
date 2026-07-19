@@ -1676,11 +1676,11 @@ async function chamarClaudeAPI(apiKey, promptCompleto, modelo) {
       max_tokens: 8192,
       messages: [{ role: "user", content: promptCompleto }],
     }),
-  }, "API da Claude");
+  }, "API da Anthropic (Claude)");
 
   const dados = await resposta.json().catch(() => null);
   if (!resposta.ok) {
-    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API da Claude.`);
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API da Anthropic (Claude).`);
   }
 
   const texto = (dados.content || []).map((bloco) => bloco.text || "").join("");
@@ -1713,11 +1713,11 @@ async function chamarGeminiAPI(apiKey, promptCompleto, modelo) {
 
 // ---- Transcrever Depoimentos (arquivos "VIDEO*" via Gemini) ----
 //
-// Exclusiva do Gemini: a Claude nao tem capacidade de processar audio/
+// Exclusiva do Gemini: a Anthropic (Claude) nao tem capacidade de processar audio/
 // video (so' texto/imagem/PDF), entao essa ferramenta sempre usa a chave e
 // o modelo Gemini configurados nas Configuracoes, independente do
 // provedor escolhido em "Analisar com IA" - mesmo padrao ja usado na fila
-// em lote (exclusiva da Claude, so' que ao contrario).
+// em lote (exclusiva da Anthropic (Claude), so' que ao contrario).
 //
 // v1: envia o VIDEO ORIGINAL para o Gemini (sem extrair/recodificar a
 // trilha de audio localmente antes). O Gemini processa video nativamente
@@ -2024,7 +2024,7 @@ async function executarAnaliseIA(texto, promptId, promptTextoAvulso, provedor, m
 
 // ---- Fila em lote (Claude Message Batches API) ----
 //
-// A API de lotes da Claude (POST /v1/messages/batches) processa varias
+// A API de lotes da Anthropic (Claude) (POST /v1/messages/batches) processa varias
 // requisicoes de uma vez com 50% de desconto no preco - mas de forma
 // ASSINCRONA (pode levar ate' 24h). So' esta' disponivel para o provedor
 // Claude aqui (o Gemini nao tem uma API de lote assincrona equivalente
@@ -2064,7 +2064,7 @@ function salvarLotesEnviadosIA(lotes) {
 }
 
 // Nome opcional dado a` fila AINDA NAO enviada - so' para organizacao do
-// usuario (nunca e' mandado a` API da Claude, que so' conhece o
+// usuario (nunca e' mandado a` API da Anthropic (Claude), que so' conhece o
 // "batchId"). Persistido em chrome.storage.local para sobreviver a
 // fechar o painel, igual ao resto da fila. Ao enviar o lote de verdade
 // (ver "enviarLoteIA"), esse nome vira o "nome" do lote resultante (o
@@ -2147,7 +2147,7 @@ async function removerItemFilaLoteIA(id) {
 }
 
 // Renomeia um lote JA' ENVIADO (campo "nome", so' de exibicao no painel -
-// nao afeta nada na API da Claude, que so' conhece o "batchId"). Sem nome
+// nao afeta nada na API da Anthropic (Claude), que so' conhece o "batchId"). Sem nome
 // definido (null), o painel mostra "Lote {batchId}" como ate' agora.
 async function renomearLoteIA(batchId, novoNome) {
   const lotes = await obterLotesEnviadosIA();
@@ -2160,7 +2160,7 @@ async function renomearLoteIA(batchId, novoNome) {
 
 // Remove um lote JA' ENVIADO da lista local ("Lotes enviados") - so' apaga
 // o registro guardado nesta extensao (chrome.storage.local), nao cancela
-// nem afeta o lote em si na API da Claude (que expira sozinha em 29 dias,
+// nem afeta o lote em si na API da Anthropic (Claude) (que expira sozinha em 29 dias,
 // como ja documentado). Util para limpar lotes antigos ja' conferidos/
 // copiados, sem esperar a expiracao.
 async function excluirLoteIA(batchId) {
@@ -2198,7 +2198,7 @@ async function enviarLoteIA(apiKey) {
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({ requests }),
-  }, "API de lotes da Claude");
+  }, "API de lotes da Anthropic (Claude)");
 
   const dados = await resposta.json().catch(() => null);
   if (!resposta.ok) {
@@ -2238,7 +2238,7 @@ async function consultarStatusLoteIA(batchId, apiKey) {
     "anthropic-dangerous-direct-browser-access": "true",
   };
 
-  const resposta = await fetchComDiagnostico(`https://api.anthropic.com/v1/messages/batches/${batchId}`, { headers }, "API de lotes da Claude");
+  const resposta = await fetchComDiagnostico(`https://api.anthropic.com/v1/messages/batches/${batchId}`, { headers }, "API de lotes da Anthropic (Claude)");
   const dados = await resposta.json().catch(() => null);
   if (!resposta.ok) {
     throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao consultar o lote.`);
@@ -2248,7 +2248,7 @@ async function consultarStatusLoteIA(batchId, apiKey) {
     return { status: "in_progress", contagens: dados.request_counts || null };
   }
 
-  const respostaResultados = await fetchComDiagnostico(dados.results_url, { headers }, "API de lotes da Claude (resultados)");
+  const respostaResultados = await fetchComDiagnostico(dados.results_url, { headers }, "API de lotes da Anthropic (Claude) (resultados)");
   const textoJsonl = await respostaResultados.text();
   const linhas = textoJsonl.split("\n").map((l) => l.trim()).filter(Boolean);
 

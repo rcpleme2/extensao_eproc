@@ -9,12 +9,13 @@ Extensão para Chrome/Edge com funcionalidades para o sistema **eproc** do
 TJPR, restrita aos endereços `https://eproc1g.tjpr.jus.br/eproc/` e
 `https://eproc1g.tre.tjpr.jus.br/eproc/` (únicos hosts com permissão no
 `manifest.json` — a extensão não roda em nenhum outro domínio),
-organizadas em cartões colapsáveis no painel lateral: **Gestão
-Gabinete** (Exportar Documentos + Busca específica de localizadores),
-**Gestão da Unidade** (Exportar Relatório da Unidade em PDF, sem exigir
-escolha de unidade — ver seção própria abaixo) e **Corregedoria**
-(exclusivo desse perfil, com o Relatório para Correição de uma unidade
-escolhida). O painel abre enxuto (**todos os cartões fechados**,
+organizadas em cartões colapsáveis no painel lateral, **um cartão por
+função** (sem "menu dentro de menu"): **Corregedoria** (exclusivo desse
+perfil, com o Relatório para Correição de uma unidade escolhida),
+**Relatório da Unidade** (Exportar Relatório da Unidade em PDF, sem
+exigir escolha de unidade), **Exportar Documentos**, **Analisar com
+IA**, **Transcrever Depoimentos** e **Busca de localizadores** — cada
+um achável direto num clique. O painel abre enxuto (**todos os cartões fechados**,
 nenhum aberto por padrão); cada cartão expande ao clicar no título, e
 reabre sozinho quando alguma operação dele progride, conclui ou falha.
 Sucessos aparecem em verde e erros em vermelho na linha de status de
@@ -37,8 +38,9 @@ O cartão **Corregedoria** é o único realmente condicional - só aparece
 quando esse é o perfil ativo (ver seção própria abaixo); os demais
 ficam sempre visíveis e utilizáveis por qualquer perfil.
 
-A ordem padrão dos cartões é **Corregedoria > Gestão da Unidade >
-Gestão Gabinete**, mas cada um tem uma alça (⠿) ao lado do ícone
+A ordem padrão dos cartões é **Corregedoria > Relatório da Unidade >
+Exportar Documentos > Analisar com IA > Transcrever Depoimentos > Busca
+de localizadores**, mas cada um tem uma alça (⠿) ao lado do ícone
 que pode ser arrastada com o mouse para reordená-los como preferir; a
 ordem escolhida fica salva (`chrome.storage.local`) e é reaplicada da
 próxima vez que o painel for aberto.
@@ -460,22 +462,36 @@ exportação).
 
 ## Analisar com IA
 
-**"Analisar com IA"** é sua própria subseção dentro do cartão "Gestão
-Gabinete" — separada de "Exportar Documentos", com título e recolhimento
-próprios — mas com o mesmo botão **"Detectar documentos"**, a mesma lista
-de documentos com checkboxes, os mesmos atalhos "Marcar tudo"/"Desmarcar
-tudo" e o mesmo checkbox de "incluir a movimentação" repetidos aqui, para
-não precisar alternar entre as duas subseções. As duas telas compartilham
-o mesmo estado: detectar ou marcar/desmarcar um documento em qualquer uma
-das duas (ou direto na página do processo) atualiza a outra na hora.
+**"Analisar com IA"** é um cartão próprio no painel (não mais uma
+subseção enterrada dentro de outro cartão) — com o mesmo botão
+**"Detectar documentos"**, a mesma lista de documentos com checkboxes, os
+mesmos atalhos "Marcar tudo"/"Desmarcar tudo" e o mesmo checkbox de
+"incluir a movimentação" do "Exportar Documentos". Os cartões compartilham
+o mesmo estado: detectar ou marcar/desmarcar um documento em qualquer um
+deles (ou direto na página do processo) atualiza os outros na hora.
+
+No topo do cartão há um **indicador de setup**: mostra o provedor e o
+modelo ativos e se a chave de API já está configurada ("Provedor:
+Anthropic (Claude) · Modelo: … · Chave ✓"). Se faltar a chave, aparece um
+aviso com o botão **"Configurar chave de API"**, que abre direto as
+Configurações — assim não é preciso descobrir só depois, no erro, que a
+chave não estava configurada. O mesmo indicador existe no cartão
+"Transcrever Depoimentos" (para a chave do Gemini).
+
+O fluxo é organizado em **três passos numerados** (1. Detectar
+documentos → 2. Escolher o prompt → 3. Analisar), e o maquinário de lote
+(fila, lotes enviados, lote por localizador) fica recolhido num bloco
+**"Processamento em lote"** — quem só quer analisar um processo na hora vê
+só o essencial; quem usa lote expande esse bloco (ele também abre sozinho
+quando você adiciona um item à fila).
 
 ### Análise imediata
 
-1. Clique em "Detectar documentos" (nesta subseção ou em "Exportar
+1. **Passo 1 — Detectar documentos** (neste cartão ou em "Exportar
    Documentos" — tanto faz) e marque quais documentos entram na análise
    (na lista ou direto na página do processo) e se a movimentação deve
    ser incluída.
-2. Escolha o **tipo de prompt** (por enquanto só há um cadastrado, ver
+2. **Passo 2 —** Escolha o **prompt** (por enquanto só há um cadastrado, ver
    abaixo) e se o conteúdo deve ser **anonimizado antes de enviar** (mesma
    anonimização de melhor esforço do "MD único" — CPF/CNPJ, telefone,
    e-mail, endereços removidos e nomes abreviados; ver aviso na seção "MD
@@ -524,14 +540,14 @@ enviado à IA — nada sai da extensão enquanto essa tela estiver aberta.
 
 Ao lado da análise imediata, a mesma subseção tem um bloco **"Fila em
 lote"**, usando a [Message Batches API da
-Claude](https://platform.claude.com/docs/en/api/creating-message-batches):
+Anthropic (Claude)](https://platform.claude.com/docs/en/api/creating-message-batches):
 o mesmo pedido custa **50% menos**, mas a resposta não sai na hora — o
 lote é processado em segundo plano e pode levar até 24h (a maioria
 termina bem mais rápido). **Só funciona com o provedor Claude** — o Gemini
 não tem uma API de lote assíncrona equivalente cadastrada nesta extensão
 ainda. Isso é independente do rádio "Usar Claude"/"Usar Gemini" nas
 configurações: aquele seletor só afeta a **análise imediata**
-("Analisar agora"); a fila em lote sempre usa a chave/modelo da Claude
+("Analisar agora"); a fila em lote sempre usa a chave/modelo da Anthropic (Claude)
 configurados, mesmo que "Gemini" esteja selecionado ali.
 
 Opcionalmente, dê um **nome à fila** no campo logo acima da lista (ex.:
@@ -573,14 +589,14 @@ Fluxo:
    campo de texto e um botão "Copiar" individual — nenhuma resposta fica
    misturada com a de outro processo do mesmo lote.
 
-Os resultados dos lotes ficam disponíveis por 29 dias na Claude — depois
+Os resultados dos lotes ficam disponíveis por 29 dias na Anthropic (Claude) — depois
 disso, um lote muito antigo que ainda não tenha sido verificado pode não
 conseguir mais recuperar os resultados.
 
 Cada lote em "Lotes enviados" tem ainda os botões **"Renomear"** (dá um
 nome de sua escolha ao lote — por padrão aparece só como "Lote
-{identificador da Claude}") e **"Excluir"** (remove o lote dessa lista
-local; não cancela nem afeta o lote na API da Claude, que expira sozinha
+{identificador da Anthropic (Claude)}") e **"Excluir"** (remove o lote dessa lista
+local; não cancela nem afeta o lote na API da Anthropic (Claude), que expira sozinha
 em 29 dias — útil só para limpar a lista de lotes já conferidos/copiados).
 
 ### Lote por localizador (rodar um prompt em todos os processos de um localizador)
@@ -620,13 +636,13 @@ Fluxo:
    mesmo fluxo de sempre: revise a fila e clique em "Enviar lote" quando
    quiser — nada é enviado automaticamente.
 
-Assim como o restante da fila em lote, essa varredura sempre usa a Claude
+Assim como o restante da fila em lote, essa varredura sempre usa a Anthropic (Claude)
 (a fila em lote não tem integração de lote com o Gemini).
 
 ## Transcrever Depoimentos
 
-Nova subseção do cartão "Gestão Gabinete" (ícone 🎙️), independente das
-demais: identifica os documentos de **vídeo de audiência** do processo (nome
+Cartão próprio no painel (ícone 🎙️): identifica os documentos de **vídeo
+de audiência** do processo (nome
 começando com `VIDEO`, ex. `VIDEO1`, `VIDEO2` — mesma convenção de sigla +
 número usada em todo o resto do eproc) e transcreve o(s) escolhido(s) via
 IA, usando o seguinte prompt fixo:
@@ -636,11 +652,11 @@ IA, usando o seguinte prompt fixo:
 > trecho inaudível colocar [inaudível]. Use timestamps e se possível
 > identifique os interlocutores."
 
-**Exclusiva do Gemini** — a Claude não tem capacidade de processar áudio/
+**Exclusiva do Gemini** — a Anthropic (Claude) não tem capacidade de processar áudio/
 vídeo (só texto, imagem e PDF), então essa ferramenta sempre usa a chave e
 o modelo Gemini configurados nas configurações, independente do provedor
 escolhido em "Analisar com IA" (mesmo padrão já usado na fila em lote,
-exclusiva da Claude, só que ao contrário).
+exclusiva da Anthropic (Claude), só que ao contrário).
 
 Fluxo:
 
@@ -771,7 +787,7 @@ essa opção, nada é salvo: o texto só existe para aquela chamada.
 A extensão detecta automaticamente quando uma chamada à API de IA nem
 chega a sair do navegador (o "Failed to fetch" genérico que o próprio
 navegador dá, sem detalhe nenhum, sempre que a requisição é bloqueada
-antes de sair - não é um erro vindo da Claude/Gemini) e mostra essa
+antes de sair - não é um erro vindo da Anthropic (Claude)/Gemini) e mostra essa
 mensagem mais amigável em vez do erro técnico cru. O cenário mais comum é
 a rede/firewall da instituição bloqueando o domínio daquele provedor
 (indicado na própria mensagem). O detalhe técnico completo (nome do

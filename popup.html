@@ -143,7 +143,7 @@
     <summary class="card-titulo">
       <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
       <span class="card-icone" aria-hidden="true">🏢</span>
-      <span class="card-rotulo">Gestão da Unidade</span>
+      <span class="card-rotulo">Relatório da Unidade</span>
     </summary>
     <div class="card-corpo">
       <div id="area-relatorio-unidade-alt-info" class="status">
@@ -221,18 +221,13 @@
     </div>
   </details>
 
-  <details class="card card--privilegiado" id="card-documentos">
+  <details class="card" id="card-documentos">
     <summary class="card-titulo">
       <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
       <span class="card-icone" aria-hidden="true">🗄️</span>
-      <span class="card-rotulo">Gestão Gabinete</span>
+      <span class="card-rotulo">Exportar Documentos</span>
     </summary>
     <div class="card-corpo">
-      <details class="subsecao subsecao--colapsavel">
-        <summary class="subsecao-titulo">
-          <span class="subsecao-icone" aria-hidden="true">📄</span>
-          Exportar Documentos
-        </summary>
         <div id="area-status" class="status">
           Abra um processo no eproc e clique em "Detectar documentos".
         </div>
@@ -289,15 +284,23 @@
         <ul id="lista-documentos" class="lista-documentos" hidden></ul>
 
         <div id="area-erros" class="erros" hidden></div>
-      </details>
+    </div>
+  </details>
 
-      <hr class="separador-subsecao" />
+  <details class="card" id="card-analise-ia">
+    <summary class="card-titulo">
+      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
+      <span class="card-icone" aria-hidden="true">🤖</span>
+      <span class="card-rotulo">Analisar com IA</span>
+    </summary>
+    <div class="card-corpo">
 
-      <details class="subsecao subsecao--colapsavel" id="subsecao-analise-ia">
-        <summary class="subsecao-titulo">
-          <span class="subsecao-icone" aria-hidden="true">🤖</span>
-          Analisar com IA
-        </summary>
+        <div id="area-setup-ia" class="status"></div>
+        <div class="botoes" id="area-setup-ia-botao" hidden>
+          <button type="button" id="btn-config-ia-atalho" class="btn-secundario">Configurar chave de API</button>
+        </div>
+
+        <p class="passo-legenda"><span class="passo-num">1</span> Detectar documentos</p>
 
         <div id="area-status-ia" class="status">
           Abra um processo no eproc e clique em "Detectar documentos".
@@ -329,6 +332,7 @@
         </label>
 
         <div id="area-analise-ia" hidden>
+          <p class="passo-legenda"><span class="passo-num">2</span> Escolher o prompt</p>
           <div class="opcoes">
             <p class="legenda-opcoes">Tipo de prompt</p>
             <label class="opcao">
@@ -363,14 +367,17 @@
               <input type="checkbox" id="chk-anonimizar-ia" checked />
               Anonimizar antes de enviar (remove CPF/CNPJ, telefone, e-mail, endereços, abrevia nomes)
             </label>
+
+            <p class="passo-legenda"><span class="passo-num">3</span> Analisar</p>
             <div class="linha-formatos">
               <button id="btn-analisar-ia" class="btn">Analisar agora</button>
               <button id="btn-adicionar-fila-ia" class="btn-secundario">Adicionar à fila em lote</button>
             </div>
             <p class="legenda-opcoes">
-              "Analisar agora" usa o provedor escolhido acima (Claude ou Gemini). A fila em lote abaixo
-              sempre usa a Claude, independente do provedor selecionado — o Gemini ainda não tem
-              processamento em lote nesta extensão.
+              <strong>Analisar agora</strong> → resposta na hora, usando o provedor configurado acima
+              (Anthropic (Claude) ou Gemini).<br />
+              <strong>Adicionar à fila em lote</strong> → só Anthropic (Claude), ~50% mais barato,
+              resposta em até 24h (revise e envie a fila no bloco "Processamento em lote" abaixo).
             </p>
           </div>
 
@@ -410,8 +417,14 @@
 
         <hr class="separador-subsecao" />
 
+        <details class="subsecao subsecao--colapsavel" id="bloco-lote-ia">
+          <summary class="subsecao-titulo">
+            <span class="subsecao-icone" aria-hidden="true">📦</span>
+            Processamento em lote (mais barato · resposta em até 24h)
+          </summary>
+
         <p class="legenda-opcoes">
-          📦 Fila em lote (Claude, 50% mais barato — processado em até 24h)
+          Fila em lote — só Anthropic (Claude), ~50% mais barato, resposta em até 24h.
         </p>
         <label class="campo-config-ia">
           Nome da fila (opcional, só para sua organização — não é enviado à Anthropic)
@@ -489,21 +502,28 @@
             Adicionar processos filtrados à fila em lote
           </button>
           <p class="legenda-opcoes">
-            A fila em lote usa sempre a Anthropic/Claude (50% mais barato, até 24h para resposta).
+            A fila em lote usa sempre a Anthropic (Claude) (50% mais barato, até 24h para resposta).
             Depois de adicionados, revise a fila acima e clique em "Enviar lote" quando quiser.
           </p>
         </div>
 
         <div id="area-erros-lote-localizador-ia" class="erros" hidden></div>
-      </details>
+        </details>
+    </div>
+  </details>
 
-      <hr class="separador-subsecao" />
+  <details class="card" id="card-transcricao-ia">
+    <summary class="card-titulo">
+      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
+      <span class="card-icone" aria-hidden="true">🎙️</span>
+      <span class="card-rotulo">Transcrever Depoimentos</span>
+    </summary>
+    <div class="card-corpo">
 
-      <details class="subsecao subsecao--colapsavel" id="subsecao-transcricao-ia">
-        <summary class="subsecao-titulo">
-          <span class="subsecao-icone" aria-hidden="true">🎙️</span>
-          Transcrever Depoimentos
-        </summary>
+        <div id="area-setup-transcricao-ia" class="status"></div>
+        <div class="botoes" id="area-setup-transcricao-ia-botao" hidden>
+          <button type="button" id="btn-config-transcricao-ia-atalho" class="btn-secundario">Configurar chave de API</button>
+        </div>
 
         <div id="area-status-transcricao-ia" class="status">
           Abra um processo no eproc e clique em "Detectar vídeos".
@@ -555,15 +575,16 @@
             <button id="btn-copiar-resultado-transcricao-ia" class="btn-secundario">Copiar</button>
           </div>
         </div>
-      </details>
+    </div>
+  </details>
 
-      <hr class="separador-subsecao" />
-
-      <details class="subsecao subsecao--colapsavel">
-        <summary class="subsecao-titulo">
-          <span class="subsecao-icone" aria-hidden="true">🔎</span>
-          Busca específica de localizadores
-        </summary>
+  <details class="card" id="card-localizadores">
+    <summary class="card-titulo">
+      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
+      <span class="card-icone" aria-hidden="true">🔎</span>
+      <span class="card-rotulo">Busca de localizadores</span>
+    </summary>
+    <div class="card-corpo">
         <div id="area-nav-localizadores-info" class="status">
           Escolha um localizador para abrir ou exportar seus processos.
         </div>
@@ -610,7 +631,6 @@
         </div>
 
         <div id="area-erros-nav-localizadores" class="erros" hidden></div>
-      </details>
     </div>
   </details>
 
@@ -644,11 +664,11 @@
           Usar Gemini (Google)
         </label>
         <label class="campo-config-ia">
-          Chave de API da Claude
+          Chave de API da Anthropic (Claude)
           <input type="password" id="config-chave-claude" placeholder="sk-ant-..." autocomplete="off" />
         </label>
         <label class="campo-config-ia">
-          Modelo da Claude
+          Modelo da Anthropic (Claude)
           <select id="select-config-modelo-claude"></select>
         </label>
         <label class="campo-config-ia">
