@@ -253,6 +253,35 @@ body {
   margin: var(--espaco-3) 0;
 }
 
+/* Rótulo de passo numerado (fluxo guiado de "Analisar com IA"): pequeno
+   selo com número + título do passo, marcando as etapas 1/2/3 sem virar
+   mais um nível de menu. */
+.passo-legenda {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-1);
+  margin: var(--espaco-2) 0 var(--espaco-1);
+  font-size: var(--fonte-pequena);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--cor-primaria);
+}
+
+.passo-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--cor-primaria);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
 /* Cartão "de perfil" (Corregedoria, Gestão da Unidade, Magistrado):
    borda esquerda na cor primária + selo no cabeçalho, sinalizando a qual
    perfil aquela funcionalidade se destina. Só o cartão Corregedoria é
@@ -687,6 +716,15 @@ progress {
 .lista-documentos li {
   padding: 4px 8px;
   border-bottom: 1px solid var(--cor-borda-suave);
+  /* Coluna: a linha de cima (sigla + mimetype) e a linha secundária
+     opcional (nome amigável + descrição) empilhadas. */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Linha de cima do item: sigla à esquerda, mimetype à direita (o layout
+   flex-row de antes, agora dentro de um wrapper para caber a 2ª linha). */
+.item-doc-linha {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -714,6 +752,34 @@ progress {
   font-size: 11px;
   flex-shrink: 0;
   margin-left: 8px;
+}
+
+/* Segunda linha discreta de um documento (nome amigável do tipo +
+   descrição/observação) e a linha de descrições de um grupo do lote. */
+.doc-descricao {
+  color: var(--cor-texto-suave);
+  font-size: 11px;
+  line-height: 1.35;
+  margin: 1px 0 1px 20px;
+}
+
+.opcao-grupo-doc {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.grupo-doc-titulo {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-1);
+}
+
+.grupo-descricoes {
+  color: var(--cor-texto-suave);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-left: 20px;
 }
 
 /* ---- Erros ---- */

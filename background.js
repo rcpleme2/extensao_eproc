@@ -1417,7 +1417,7 @@ const CHAVE_PROMPTS_IA = "promptsIA";
 
 const PROMPT_PADRAO_ANALISE_FAMILIA = {
   id: "analise-inicial-familia",
-    titulo: "Análise inicial - família",
+    titulo: "Relatório - Inicial - Família",
     texto:
       'Persona: Aja como um juiz de direito especialista em direito de família e sucessões, respondendo com tom profissional e de autoridade.\n\n' +
       'Instruções de Estilo:\n\n' +
@@ -1450,11 +1450,29 @@ const PROMPT_PADRAO_ANALISE_FAMILIA = {
       '    Qual o nome e a idade dos menores envolvidos?',
 };
 
+// Renomeacao do titulo padrao ("Análise inicial - família" -> "Relatório -
+// Inicial - Família"): quem ja' tinha o prompt semeado antes dessa mudanca
+// fica com o titulo antigo gravado no storage (o seed so' roda uma vez).
+// Migra automaticamente so' quando o titulo salvo ainda e' o antigo (nao'
+// mexe se o usuario ja' tiver editado o titulo manualmente).
+const TITULO_PADRAO_ANALISE_FAMILIA_ANTIGO = "Análise inicial - família";
+
 function obterPromptsIA() {
   return new Promise((resolve) => {
     chrome.storage.local.get({ [CHAVE_PROMPTS_IA]: null }, (itens) => {
       const lista = itens[CHAVE_PROMPTS_IA];
-      resolve(Array.isArray(lista) && lista.length > 0 ? lista : [PROMPT_PADRAO_ANALISE_FAMILIA]);
+      if (!Array.isArray(lista) || lista.length === 0) {
+        resolve([PROMPT_PADRAO_ANALISE_FAMILIA]);
+        return;
+      }
+      const prompt = lista.find(
+        (p) => p && p.id === PROMPT_PADRAO_ANALISE_FAMILIA.id && p.titulo === TITULO_PADRAO_ANALISE_FAMILIA_ANTIGO
+      );
+      if (prompt) {
+        prompt.titulo = PROMPT_PADRAO_ANALISE_FAMILIA.titulo;
+        salvarPromptsIA(lista);
+      }
+      resolve(lista);
     });
   });
 }
@@ -1658,11 +1676,11 @@ async function chamarClaudeAPI(apiKey, promptCompleto, modelo) {
       max_tokens: 8192,
       messages: [{ role: "user", content: promptCompleto }],
     }),
-  }, "API da Claude");
+  }, "API da Anthropic (Claude)");
 
   const dados = await resposta.json().catch(() => null);
   if (!resposta.ok) {
-    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API da Claude.`);
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API da Anthropic (Claude).`);
   }
 
   const texto = (dados.content || []).map((bloco) => bloco.text || "").join("");
@@ -1693,15 +1711,240 @@ async function chamarGeminiAPI(apiKey, promptCompleto, modelo) {
   return { texto, tokensEntrada, tokensSaida };
 }
 
-// Fase 1 do fluxo (mensagem "ANALISAR_IA_EXTRAIR"): extrai o texto e devolve
-// junto uma ESTIMATIVA de custo, sem chamar a API de IA ainda - a chamada de
-// verdade so' acontece se o usuario confirmar (fase 2, "ANALISAR_IA_ENVIAR"),
-// depois de ver a estimativa.
-async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, modelo, promptId, promptTextoAvulso, aoProgredir) {
-  if (aoProgredir) aoProgredir("Extraindo o conteúdo dos documentos selecionados...");
-  const obterUrlResolvida = criarResolvedorUrlDocumento();
-  const texto = await construirTextoProcessoParaIA(documentos, obterUrlResolvida, movimentacao, anonimizar);
+// ---- Transcrever Depoimentos (arquivos "VIDEO*" via Gemini) ----
+//
+// Exclusiva do Gemini: a Anthropic (Claude) nao tem capacidade de processar audio/
+// video (so' texto/imagem/PDF), entao essa ferramenta sempre usa a chave e
+// o modelo Gemini configurados nas Configuracoes, independente do
+// provedor escolhido em "Analisar com IA" - mesmo padrao ja usado na fila
+// em lote (exclusiva da Anthropic (Claude), so' que ao contrario).
+//
+// v1: envia o VIDEO ORIGINAL para o Gemini (sem extrair/recodificar a
+// trilha de audio localmente antes). O Gemini processa video nativamente
+// (incluindo a trilha de audio), entao funciona sem nenhum passo extra -
+// mas cobra tokens tambem pelos frames de video (bem mais caro que so'
+// audio) e cada minuto de gravacao consome mais do contexto do modelo.
+// Extrair so' a trilha de audio (sem recodificar, so' remontando o AAC ja'
+// existente num .m4a) reduziria bastante o custo e o tamanho do upload,
+// mas exigiria um parser de MP4/AAC vendorizado e testado contra uma
+// gravacao real de audiencia (que nao esta' disponivel neste ambiente de
+// desenvolvimento) - fica documentado como possivel evolucao futura, sem
+// arriscar corromper audio silenciosamente numa implementacao nao
+// validada contra arquivo real.
+const PROMPT_TRANSCRICAO_AUDIENCIA =
+  "Essa é a gravação de uma audiência judicial. Transcreva o ato sem criar nenhum elemento, apenas transcreva o " +
+  "que está escrito. Se tiver algum trecho inaudível colocar [inaudível]. Use timestamps e se possível identifique " +
+  "os interlocutores.";
 
+// Mapa de sigla/mimetype curto (mesmo padrao de "EXTENSAO_POR_MIMETYPE")
+// para o mime type completo que a API do Gemini espera no upload.
+const MIMETYPE_VIDEO_COMPLETO = {
+  mp4: "video/mp4",
+  mpeg: "video/mpeg",
+  mpg: "video/mpg",
+  mov: "video/mov",
+  avi: "video/avi",
+  flv: "video/x-flv",
+  webm: "video/webm",
+  wmv: "video/wmv",
+  "3gp": "video/3gpp",
+};
+
+function mimetypeVideoCompleto(mimetypeCurto) {
+  const chave = (mimetypeCurto || "").toLowerCase();
+  return MIMETYPE_VIDEO_COMPLETO[chave] || "video/mp4";
+}
+
+// Baixa os bytes de um video de "doc.href". Diferente de
+// "criarResolvedorUrlDocumento" (usado no resto da extensao, que sempre
+// faz um fetch + ".text()" so' para verificar se a URL e' uma pagina HTML
+// com um iframe embutido apontando pro arquivo de verdade), aqui isso so'
+// acontece se a resposta realmente vier como "text/html" (checado pelo
+// cabecalho Content-Type, sem ler o corpo) - assim um video de varios
+// GB nunca e' baixado/decodificado como texto por engano, so' quando
+// realmente esbarra numa pagina-invólucro (raro, e small).
+async function baixarBytesVideo(doc) {
+  const resposta = await fetchComDiagnostico(doc.href, { credentials: "same-origin" }, `Download de "${doc.nome}"`);
+  if (!resposta.ok) {
+    throw new Error(`Falha ao baixar "${doc.nome}" (HTTP ${resposta.status}).`);
+  }
+
+  const contentType = (resposta.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("text/html")) {
+    const texto = await resposta.text();
+    const match = texto.match(REGEX_IFRAME_CONTEUDO);
+    if (!match) {
+      throw new Error(`"${doc.nome}" devolveu uma página HTML em vez do vídeo, e não foi possível achar o link real dentro dela.`);
+    }
+    const urlReal = new URL(match[1].replace(/&amp;/g, "&"), doc.href).toString();
+    const respostaReal = await fetchComDiagnostico(urlReal, { credentials: "same-origin" }, `Download de "${doc.nome}"`);
+    if (!respostaReal.ok) {
+      throw new Error(`Falha ao baixar "${doc.nome}" (HTTP ${respostaReal.status}).`);
+    }
+    return new Uint8Array(await respostaReal.arrayBuffer());
+  }
+
+  return new Uint8Array(await resposta.arrayBuffer());
+}
+
+// Upload resumable de um arquivo para o Gemini File API (necessario para
+// qualquer arquivo acima de ~20MB - na pratica, todo video de audiencia).
+// Protocolo em 2 passos: (1) inicia o upload e recebe uma URL dedicada no
+// cabecalho "x-goog-upload-url" da resposta; (2) envia os bytes de fato
+// para essa URL. Devolve o objeto "file" (com "name"/"uri"/"state") que a
+// API do Gemini devolveu.
+async function enviarArquivoParaGeminiFileAPI(apiKey, bytes, mimetype, nomeExibicao, aoProgredir) {
+  const respostaInicio = await fetchComDiagnostico(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(bytes.byteLength),
+        "X-Goog-Upload-Header-Content-Type": mimetype,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file: { display_name: nomeExibicao } }),
+    },
+    "Upload de arquivo do Gemini"
+  );
+
+  if (!respostaInicio.ok) {
+    const erro = await respostaInicio.json().catch(() => null);
+    throw new Error(
+      (erro && erro.error && erro.error.message) || `Erro HTTP ${respostaInicio.status} ao iniciar o upload no Gemini.`
+    );
+  }
+
+  const urlUpload = respostaInicio.headers.get("x-goog-upload-url");
+  if (!urlUpload) throw new Error("O Gemini não devolveu a URL de upload (resposta inesperada).");
+
+  if (aoProgredir) {
+    aoProgredir(`Enviando "${nomeExibicao}" (${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB) ao Gemini...`);
+  }
+
+  const respostaUpload = await fetchComDiagnostico(
+    urlUpload,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Offset": "0",
+        "X-Goog-Upload-Command": "upload, finalize",
+      },
+      body: bytes,
+    },
+    "Upload de arquivo do Gemini"
+  );
+
+  const dadosArquivo = await respostaUpload.json().catch(() => null);
+  if (!respostaUpload.ok || !dadosArquivo || !dadosArquivo.file) {
+    throw new Error(
+      (dadosArquivo && dadosArquivo.error && dadosArquivo.error.message) ||
+        `Erro HTTP ${respostaUpload.status} ao enviar o arquivo ao Gemini.`
+    );
+  }
+
+  return dadosArquivo.file;
+}
+
+// O Gemini processa arquivos de video/audio de forma assincrona apos o
+// upload (estado "PROCESSING" -> "ACTIVE") - so' pode ser referenciado
+// numa chamada a` generateContent depois de "ACTIVE". Consulta a cada 5s
+// (ate' 5 minutos) em vez de so' uma vez, ja' que o processamento pode
+// levar mais tempo para gravacoes longas.
+async function aguardarArquivoAtivoGemini(apiKey, nomeArquivo, aoProgredir) {
+  for (let tentativa = 0; tentativa < 60; tentativa += 1) {
+    const resposta = await fetchComDiagnostico(
+      `https://generativelanguage.googleapis.com/v1beta/${nomeArquivo}?key=${encodeURIComponent(apiKey)}`,
+      { method: "GET" },
+      "Consulta de arquivo do Gemini"
+    );
+    const dados = await resposta.json().catch(() => null);
+    if (!resposta.ok) {
+      throw new Error(
+        (dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao consultar o arquivo no Gemini.`
+      );
+    }
+    if (dados.state === "ACTIVE") return dados;
+    if (dados.state === "FAILED") {
+      throw new Error(`O Gemini falhou ao processar o arquivo "${nomeArquivo}" enviado.`);
+    }
+    if (aoProgredir) aoProgredir(`Aguardando o Gemini processar o arquivo (${dados.state || "processando"})...`);
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
+  throw new Error("Tempo esgotado aguardando o Gemini processar o arquivo enviado.");
+}
+
+// Orquestra a transcricao de 1+ documentos "VIDEO*" ja' selecionados pelo
+// usuario no painel: baixa cada video (mesmo dominio do eproc, ja'
+// autenticado), envia ao Gemini File API, aguarda ficar "ACTIVE" e por
+// fim chama generateContent com o prompt fixo de transcricao - todos os
+// videos selecionados entram na MESMA chamada (partes multiplas), para o
+// usuario poder mandar varios atos de uma vez e receber uma transcricao
+// so'. Quando ha' mais de 1 video, acrescenta uma frase extra pedindo pra
+// separar claramente a transcricao de cada arquivo (o prompt principal,
+// pedido pelo usuario, permanece inalterado).
+async function transcreverDepoimentosIA(documentos, apiKey, modelo, aoProgredir) {
+  if (!apiKey) {
+    throw new Error('Nenhuma chave de API do Gemini configurada. Configure-a nas configurações da extensão.');
+  }
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const partesArquivo = [];
+
+  for (const doc of documentos) {
+    notificar(`Baixando "${doc.nome}"...`);
+    const bytes = await baixarBytesVideo(doc);
+    const mimetypeCompleto = mimetypeVideoCompleto(doc.mimetype);
+
+    const arquivoEnviado = await enviarArquivoParaGeminiFileAPI(apiKey, bytes, mimetypeCompleto, doc.nome, notificar);
+    const arquivoAtivo = await aguardarArquivoAtivoGemini(apiKey, arquivoEnviado.name, notificar);
+    partesArquivo.push({ file_data: { mime_type: arquivoAtivo.mimeType, file_uri: arquivoAtivo.uri } });
+  }
+
+  const promptFinal =
+    documentos.length > 1
+      ? `${PROMPT_TRANSCRICAO_AUDIENCIA}\n\nOs ${documentos.length} arquivos acima correspondem a atos/gravações ` +
+        `diferentes, na mesma ordem em que foram enviados (${documentos.map((d) => d.nome).join(", ")}) - identifique ` +
+        `claramente, com um cabeçalho, onde a transcrição de cada um começa.`
+      : PROMPT_TRANSCRICAO_AUDIENCIA;
+
+  notificar("Transcrevendo com a IA (pode demorar, dependendo da duração da gravação)...");
+  const modeloEscolhido = modelo || modeloPadrao("gemini");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modeloEscolhido}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const resposta = await fetchComDiagnostico(
+    url,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [...partesArquivo, { text: promptFinal }] }] }),
+    },
+    "API do Gemini (transcrição)"
+  );
+
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API do Gemini.`);
+  }
+
+  const candidato = dados.candidates && dados.candidates[0];
+  const texto = candidato && candidato.content && candidato.content.parts
+    ? candidato.content.parts.map((parte) => parte.text || "").join("")
+    : "";
+
+  return { texto };
+}
+
+// Estimativa de custo a partir de um texto JA' PRONTO (documentos +
+// eventual movimentacao, ja' anonimizado se for o caso) - fatorado para
+// fora de "extrairTextoParaAnaliseIA" para poder ser chamado de novo
+// depois que o usuario EDITA o texto na pre-visualizacao (o texto extraido
+// e' so' um ponto de partida editavel, nao o que necessariamente e'
+// enviado - ver "ANALISE_IA_REESTIMAR"/"IA_LOTE_ADICIONAR_TEXTO").
+async function construirEstimativaIA(texto, promptId, promptTextoAvulso, provedor, modelo) {
   const modeloEscolhido = modelo || modeloPadrao(provedor);
   const precos = obterInfoModelo(provedor, modeloEscolhido);
   const textoPrompt = promptTextoAvulso || (await obterTextoPromptEscolhido(promptId));
@@ -1713,14 +1956,24 @@ async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, p
   const custoEstimadoUsd = estimarCustoUsd(tokensEntradaEstimados, tokensEntradaEstimados, precos);
 
   return {
-    texto,
-    estimativa: {
-      provedor,
-      modelo: modeloEscolhido,
-      tokensEntradaEstimados,
-      custoEstimadoUsd,
-    },
+    provedor,
+    modelo: modeloEscolhido,
+    tokensEntradaEstimados,
+    custoEstimadoUsd,
   };
+}
+
+// Fase 1 do fluxo (mensagem "ANALISAR_IA_EXTRAIR"): extrai o texto e devolve
+// junto uma ESTIMATIVA de custo, sem chamar a API de IA ainda - a chamada de
+// verdade so' acontece se o usuario confirmar (fase 2, "ANALISAR_IA_ENVIAR"),
+// depois de ver (e poder editar) a pre-visualizacao.
+async function extrairTextoParaAnaliseIA(documentos, movimentacao, anonimizar, provedor, modelo, promptId, promptTextoAvulso, aoProgredir) {
+  if (aoProgredir) aoProgredir("Extraindo o conteúdo dos documentos selecionados...");
+  const obterUrlResolvida = criarResolvedorUrlDocumento();
+  const texto = await construirTextoProcessoParaIA(documentos, obterUrlResolvida, movimentacao, anonimizar);
+  const estimativa = await construirEstimativaIA(texto, promptId, promptTextoAvulso, provedor, modelo);
+
+  return { texto, estimativa };
 }
 
 // Devolve so' o texto do prompt salvo (sem lancar erro se nao encontrar -
@@ -1771,7 +2024,7 @@ async function executarAnaliseIA(texto, promptId, promptTextoAvulso, provedor, m
 
 // ---- Fila em lote (Claude Message Batches API) ----
 //
-// A API de lotes da Claude (POST /v1/messages/batches) processa varias
+// A API de lotes da Anthropic (Claude) (POST /v1/messages/batches) processa varias
 // requisicoes de uma vez com 50% de desconto no preco - mas de forma
 // ASSINCRONA (pode levar ate' 24h). So' esta' disponivel para o provedor
 // Claude aqui (o Gemini nao tem uma API de lote assincrona equivalente
@@ -1810,6 +2063,25 @@ function salvarLotesEnviadosIA(lotes) {
   return new Promise((resolve) => chrome.storage.local.set({ [CHAVE_LOTES_ENVIADOS_IA]: lotes }, resolve));
 }
 
+// Nome opcional dado a` fila AINDA NAO enviada - so' para organizacao do
+// usuario (nunca e' mandado a` API da Anthropic (Claude), que so' conhece o
+// "batchId"). Persistido em chrome.storage.local para sobreviver a
+// fechar o painel, igual ao resto da fila. Ao enviar o lote de verdade
+// (ver "enviarLoteIA"), esse nome vira o "nome" do lote resultante (o
+// mesmo campo ja' usado para renomear lotes ja' enviados) e o campo e'
+// limpo, pronto para a proxima fila.
+const CHAVE_NOME_FILA_LOTE_IA = "nomeFilaLoteIA";
+
+function obterNomeFilaLoteIA() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [CHAVE_NOME_FILA_LOTE_IA]: "" }, (itens) => resolve(itens[CHAVE_NOME_FILA_LOTE_IA]));
+  });
+}
+
+function salvarNomeFilaLoteIA(nome) {
+  return new Promise((resolve) => chrome.storage.local.set({ [CHAVE_NOME_FILA_LOTE_IA]: (nome || "").trim() }, resolve));
+}
+
 function obterChaveClaudeConfigurada() {
   return new Promise((resolve) => {
     chrome.storage.local.get({ chaveClaude: "" }, (itens) => resolve(itens.chaveClaude));
@@ -1841,11 +2113,61 @@ async function adicionarItemFilaLoteIA(numeroProcesso, documentos, movimentacao,
   return fila;
 }
 
+// Mesma coisa que "adicionarItemFilaLoteIA", mas para quando o texto JA'
+// foi extraido antes (e possivelmente editado pelo usuario na
+// pre-visualizacao, ver "ANALISAR_IA_EXTRAIR"/"ANALISE_IA_TEXTO_PRONTO" em
+// popup.js) - nao extrai de novo dos documentos, so' reestima o custo em
+// cima do texto final recebido e guarda esse mesmo texto na fila.
+async function adicionarItemFilaLoteIAComTexto(numeroProcesso, texto, promptId, promptTextoAvulso, modelo) {
+  const modeloEscolhido = modelo || modeloPadrao("claude");
+  const estimativa = await construirEstimativaIA(texto, promptId, promptTextoAvulso, "claude", modeloEscolhido);
+
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    numeroProcesso,
+    promptId: promptTextoAvulso ? null : promptId,
+    promptTextoAvulso: promptTextoAvulso || null,
+    modelo: modeloEscolhido,
+    texto,
+    estimativa,
+    criadoEm: Date.now(),
+  };
+
+  const fila = await obterFilaLoteIA();
+  fila.push(item);
+  await salvarFilaLoteIA(fila);
+  return fila;
+}
+
 async function removerItemFilaLoteIA(id) {
   const fila = await obterFilaLoteIA();
   const filaAtualizada = fila.filter((item) => item.id !== id);
   await salvarFilaLoteIA(filaAtualizada);
   return filaAtualizada;
+}
+
+// Renomeia um lote JA' ENVIADO (campo "nome", so' de exibicao no painel -
+// nao afeta nada na API da Anthropic (Claude), que so' conhece o "batchId"). Sem nome
+// definido (null), o painel mostra "Lote {batchId}" como ate' agora.
+async function renomearLoteIA(batchId, novoNome) {
+  const lotes = await obterLotesEnviadosIA();
+  const lote = lotes.find((l) => l.batchId === batchId);
+  if (!lote) throw new Error("Lote não encontrado.");
+  lote.nome = (novoNome || "").trim() || null;
+  await salvarLotesEnviadosIA(lotes);
+  return lotes;
+}
+
+// Remove um lote JA' ENVIADO da lista local ("Lotes enviados") - so' apaga
+// o registro guardado nesta extensao (chrome.storage.local), nao cancela
+// nem afeta o lote em si na API da Anthropic (Claude) (que expira sozinha em 29 dias,
+// como ja documentado). Util para limpar lotes antigos ja' conferidos/
+// copiados, sem esperar a expiracao.
+async function excluirLoteIA(batchId) {
+  const lotes = await obterLotesEnviadosIA();
+  const lotesAtualizados = lotes.filter((l) => l.batchId !== batchId);
+  await salvarLotesEnviadosIA(lotesAtualizados);
+  return lotesAtualizados;
 }
 
 // Envia TODA a fila atual como um unico lote (uma unica chamada a` API de
@@ -1876,15 +2198,18 @@ async function enviarLoteIA(apiKey) {
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({ requests }),
-  }, "API de lotes da Claude");
+  }, "API de lotes da Anthropic (Claude)");
 
   const dados = await resposta.json().catch(() => null);
   if (!resposta.ok) {
     throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao enviar o lote.`);
   }
 
+  const nomeFila = await obterNomeFilaLoteIA();
+
   const lote = {
     batchId: dados.id,
+    nome: nomeFila || null,
     status: dados.processing_status === "ended" ? "ended" : "in_progress",
     contagens: dados.request_counts || null,
     criadoEm: Date.now(),
@@ -1896,6 +2221,7 @@ async function enviarLoteIA(apiKey) {
   lotes.push(lote);
   await salvarLotesEnviadosIA(lotes);
   await salvarFilaLoteIA([]);
+  await salvarNomeFilaLoteIA("");
 
   chrome.alarms.create(NOME_ALARME_LOTES_IA, { periodInMinutes: INTERVALO_ALARME_LOTES_IA_MINUTOS });
 
@@ -1912,7 +2238,7 @@ async function consultarStatusLoteIA(batchId, apiKey) {
     "anthropic-dangerous-direct-browser-access": "true",
   };
 
-  const resposta = await fetchComDiagnostico(`https://api.anthropic.com/v1/messages/batches/${batchId}`, { headers }, "API de lotes da Claude");
+  const resposta = await fetchComDiagnostico(`https://api.anthropic.com/v1/messages/batches/${batchId}`, { headers }, "API de lotes da Anthropic (Claude)");
   const dados = await resposta.json().catch(() => null);
   if (!resposta.ok) {
     throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} ao consultar o lote.`);
@@ -1922,7 +2248,7 @@ async function consultarStatusLoteIA(batchId, apiKey) {
     return { status: "in_progress", contagens: dados.request_counts || null };
   }
 
-  const respostaResultados = await fetchComDiagnostico(dados.results_url, { headers }, "API de lotes da Claude (resultados)");
+  const respostaResultados = await fetchComDiagnostico(dados.results_url, { headers }, "API de lotes da Anthropic (Claude) (resultados)");
   const textoJsonl = await respostaResultados.text();
   const linhas = textoJsonl.split("\n").map((l) => l.trim()).filter(Boolean);
 
@@ -7552,6 +7878,144 @@ async function abrirAbaEListarDocumentosDoProcesso(urlProcesso) {
   }
 }
 
+// Grupo/sigla de um documento a partir do nome exibido pelo eproc (ex.:
+// "INIC1" -> "INIC", "OUT23" -> "OUT", "MANDCITACAO1" -> "MANDCITACAO") -
+// mesma convencao ja documentada no README (sigla + numero sequencial
+// dentro do evento). So' remove o numero final; sem numero, usa o nome
+// inteiro (alguns tipos raros nao tem sufixo numerico).
+function extrairSiglaDocumento(nome) {
+  const texto = (nome || "").trim();
+  const semNumero = texto.replace(/\d+\s*$/, "").trim();
+  return (semNumero || texto).toUpperCase();
+}
+
+// Varre TODOS os processos de um localizador (mesma coleta de
+// "abrirAbaEColetarProcessosDoLocalizador" usada nas exportacoes acima) e,
+// para cada um, abre uma aba oculta e le a lista de documentos (mesma
+// "abrirAbaEListarDocumentosDoProcesso"). Nao envia nada para a IA aqui -
+// so' coleta documentos+movimentacao de cada processo (guardados em
+// memoria, devolvidos para o painel) e a contagem de quantos documentos
+// existem por grupo/sigla, para o usuario escolher quais grupos entram na
+// analise em lote (feito depois, sem precisar varrer os processos de
+// novo - ver "adicionarProcessosLocalizadorNaFilaIA").
+async function varrerDocumentosProcessosLocalizador(urlProcessos, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  if (!urlProcessos) {
+    throw new Error("URL do localizador não informada.");
+  }
+
+  notificar(`Listando os processos deste localizador...`);
+  const { itens, erro: erroColeta } = await abrirAbaEColetarProcessosDoLocalizador(urlProcessos);
+
+  if (itens.length === 0) {
+    throw new Error(erroColeta || "Nenhum processo encontrado para esse localizador.");
+  }
+
+  const total = itens.length;
+  const processos = [];
+  const erros = [];
+  const contagemGrupos = new Map();
+  let concluidos = 0;
+
+  for (const item of itens) {
+    const numeroProcesso = item.numeroProcesso || `processo_${concluidos + 1}`;
+    notificar(`Lendo documentos ${concluidos + 1} de ${total}: ${numeroProcesso}...`);
+
+    if (!item.url) {
+      erros.push({ nome: numeroProcesso, mensagem: "Link do processo não encontrado na listagem." });
+      concluidos += 1;
+      continue;
+    }
+
+    const { documentos, movimentacao, erro: erroAba } = await abrirAbaEListarDocumentosDoProcesso(item.url);
+
+    if (erroAba) {
+      erros.push({ nome: numeroProcesso, mensagem: erroAba });
+      concluidos += 1;
+      continue;
+    }
+    if (documentos.length === 0) {
+      erros.push({ nome: numeroProcesso, mensagem: "Nenhum documento encontrado neste processo." });
+      concluidos += 1;
+      continue;
+    }
+
+    const documentosComGrupo = documentos.map((doc) => ({ ...doc, grupo: extrairSiglaDocumento(doc.nome) }));
+    for (const doc of documentosComGrupo) {
+      contagemGrupos.set(doc.grupo, (contagemGrupos.get(doc.grupo) || 0) + 1);
+    }
+
+    processos.push({ numeroProcesso, documentos: documentosComGrupo, movimentacao });
+    concluidos += 1;
+  }
+
+  const grupos = [...contagemGrupos.entries()]
+    .map(([grupo, contagem]) => ({ grupo, contagem }))
+    .sort((a, b) => b.contagem - a.contagem || a.grupo.localeCompare(b.grupo, "pt-BR"));
+
+  notificar("Finalizando varredura...");
+  return { total, processos, grupos, erros, erroColeta };
+}
+
+// Recebe a colecao ja' feita por "varrerDocumentosProcessosLocalizador"
+// (sem varrer os processos de novo) e adiciona um item na mesma fila em
+// lote usada pelo fluxo de um processo so' (chrome.storage.local,
+// "adicionarItemFilaLoteIA") para cada processo que tiver ao menos 1
+// documento nos grupos escolhidos pelo usuario. Processos sem nenhum
+// documento no(s) grupo(s) escolhido(s) sao pulados (registrados como
+// aviso, nao como erro fatal).
+async function adicionarProcessosLocalizadorNaFilaIA(
+  processos,
+  gruposEscolhidos,
+  promptId,
+  promptTextoAvulso,
+  anonimizar,
+  modelo,
+  aoProgredir
+) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const conjuntoGrupos = new Set((gruposEscolhidos || []).map((g) => (g || "").toUpperCase()));
+  const total = (processos || []).length;
+  const erros = [];
+  let adicionados = 0;
+  let concluidos = 0;
+
+  for (const processo of processos || []) {
+    concluidos += 1;
+    notificar(`Adicionando à fila ${concluidos} de ${total}: ${processo.numeroProcesso}...`);
+
+    const documentosFiltrados = (processo.documentos || []).filter((doc) => conjuntoGrupos.has(doc.grupo));
+    if (documentosFiltrados.length === 0) {
+      erros.push({ nome: processo.numeroProcesso, mensagem: "Nenhum documento dos grupos selecionados neste processo." });
+      continue;
+    }
+
+    try {
+      await adicionarItemFilaLoteIA(
+        processo.numeroProcesso,
+        documentosFiltrados,
+        processo.movimentacao,
+        anonimizar,
+        promptId,
+        promptTextoAvulso,
+        modelo
+      );
+      adicionados += 1;
+    } catch (e) {
+      erros.push({ nome: processo.numeroProcesso, mensagem: e && e.message ? e.message : String(e) });
+    }
+  }
+
+  notificar("Finalizando...");
+  return { total, adicionados, erros };
+}
+
 // Exportacao em lote: para cada processo da lista de UM localizador
 // (recebida do painel, ja' capturada durante a listagem de "Processos
 // por Localizador"), abre o processo numa aba oculta, coleta todos os
@@ -8406,10 +8870,130 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     return true;
   }
 
+  if (mensagem && mensagem.tipo === "ANALISE_IA_REESTIMAR") {
+    // Recalcula a estimativa de custo em cima do texto ATUAL da
+    // pre-visualizacao (o usuario pode ter editado o texto extraido antes
+    // de confirmar) - nao extrai nada de novo, so' reconta caracteres.
+    construirEstimativaIA(
+      mensagem.texto || "",
+      mensagem.promptId,
+      mensagem.promptTextoAvulso,
+      mensagem.provedor,
+      mensagem.modelo
+    )
+      .then((estimativa) => sendResponse({ ok: true, estimativa }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_ADICIONAR_TEXTO") {
+    adicionarItemFilaLoteIAComTexto(
+      mensagem.numeroProcesso,
+      mensagem.texto,
+      mensagem.promptId,
+      mensagem.promptTextoAvulso,
+      mensagem.modelo
+    )
+      .then((fila) => sendResponse({ ok: true, fila }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
   if (mensagem && mensagem.tipo === "IA_LOTE_REMOVER") {
     removerItemFilaLoteIA(mensagem.id)
       .then((fila) => sendResponse({ ok: true, fila }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_RENOMEAR") {
+    renomearLoteIA(mensagem.batchId, mensagem.nome)
+      .then((lotes) => sendResponse({ ok: true, lotes }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_EXCLUIR") {
+    excluirLoteIA(mensagem.batchId)
+      .then((lotes) => sendResponse({ ok: true, lotes }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_LOCALIZADOR_VARRER") {
+    // Mesmo padrao das demais operacoes em segundo plano com localizador
+    // (EXPORTAR_DOCUMENTOS_LOCALIZADOR): pode demorar bastante (um
+    // processo de cada vez, cada um com sua propria aba oculta), entao
+    // confirma o recebimento na hora e avisa o resultado final por uma
+    // mensagem separada.
+    varrerDocumentosProcessosLocalizador(mensagem.urlProcessos, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_IA_LOTE_LOCALIZADOR", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "IA_LOTE_LOCALIZADOR_VARRIDO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "IA_LOTE_LOCALIZADOR_VARRIDO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_LOCALIZADOR_ADICIONAR") {
+    adicionarProcessosLocalizadorNaFilaIA(
+      mensagem.processos,
+      mensagem.grupos,
+      mensagem.promptId,
+      mensagem.promptTextoAvulso,
+      !!mensagem.anonimizar,
+      mensagem.modelo,
+      (texto) => {
+        chrome.runtime.sendMessage({ tipo: "PROGRESSO_IA_LOTE_LOCALIZADOR", texto }).catch(() => {});
+      }
+    )
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "IA_LOTE_LOCALIZADOR_ADICIONADO", ok: true, resultado })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "IA_LOTE_LOCALIZADOR_ADICIONADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "TRANSCREVER_IA") {
+    // Mesmo padrao das demais operacoes em segundo plano que podem
+    // demorar (download + upload de video + espera do Gemini processar):
+    // confirma o recebimento na hora e avisa o resultado final por uma
+    // mensagem separada.
+    transcreverDepoimentosIA(mensagem.documentos, mensagem.apiKey, mensagem.modelo, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_TRANSCRICAO_IA", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime.sendMessage({ tipo: "TRANSCRICAO_IA_PRONTA", ok: true, ...resultado }).catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({ tipo: "TRANSCRICAO_IA_PRONTA", ok: false, erro: e && e.message ? e.message : String(e) })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
     return true;
   }
 
@@ -8435,8 +9019,15 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
 
   if (mensagem && mensagem.tipo === "IA_LOTE_LISTAR") {
-    Promise.all([obterFilaLoteIA(), obterLotesEnviadosIA()])
-      .then(([fila, lotes]) => sendResponse({ ok: true, fila, lotes }))
+    Promise.all([obterFilaLoteIA(), obterLotesEnviadosIA(), obterNomeFilaLoteIA()])
+      .then(([fila, lotes, nomeFila]) => sendResponse({ ok: true, fila, lotes, nomeFila }))
+      .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "IA_LOTE_DEFINIR_NOME") {
+    salvarNomeFilaLoteIA(mensagem.nome)
+      .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) }));
     return true;
   }

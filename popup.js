@@ -48,6 +48,8 @@ const areaProgressoIA = document.getElementById("area-progresso-ia");
 const textoProgressoIA = document.getElementById("texto-progresso-ia");
 const areaEstimativaIA = document.getElementById("area-estimativa-ia");
 const textoEstimativaIA = document.getElementById("texto-estimativa-ia");
+const textoPreviewIA = document.getElementById("texto-preview-ia");
+const btnAbrirPreviewJanelaIA = document.getElementById("btn-abrir-preview-janela-ia");
 const btnConfirmarAnaliseIA = document.getElementById("btn-confirmar-analise-ia");
 const btnCancelarAnaliseIA = document.getElementById("btn-cancelar-analise-ia");
 const areaErrosIA = document.getElementById("area-erros-ia");
@@ -55,9 +57,37 @@ const areaResultadoIA = document.getElementById("area-resultado-ia");
 const textoResultadoIA = document.getElementById("texto-resultado-ia");
 const btnCopiarResultadoIA = document.getElementById("btn-copiar-resultado-ia");
 
+const areaStatusTranscricaoIA = document.getElementById("area-status-transcricao-ia");
+const btnDetectarTranscricaoIA = document.getElementById("btn-detectar-transcricao-ia");
+const areaListaVideosTranscricaoIA = document.getElementById("area-lista-videos-transcricao-ia");
+const listaVideosTranscricaoIA = document.getElementById("lista-videos-transcricao-ia");
+const btnMarcarTudoVideosIA = document.getElementById("btn-marcar-tudo-videos-ia");
+const btnDesmarcarTudoVideosIA = document.getElementById("btn-desmarcar-tudo-videos-ia");
+const areaSemVideosTranscricaoIA = document.getElementById("area-sem-videos-transcricao-ia");
+const btnTranscreverIA = document.getElementById("btn-transcrever-ia");
+const areaProgressoTranscricaoIA = document.getElementById("area-progresso-transcricao-ia");
+const textoProgressoTranscricaoIA = document.getElementById("texto-progresso-transcricao-ia");
+const areaErrosTranscricaoIA = document.getElementById("area-erros-transcricao-ia");
+const areaResultadoTranscricaoIA = document.getElementById("area-resultado-transcricao-ia");
+const textoResultadoTranscricaoIA = document.getElementById("texto-resultado-transcricao-ia");
+const btnCopiarResultadoTranscricaoIA = document.getElementById("btn-copiar-resultado-transcricao-ia");
+
+// Indicadores de setup de IA (provedor/modelo/chave) mostrados no topo de
+// "Analisar com IA" e "Transcrever Depoimentos", com atalho para as
+// Configurações quando falta a chave.
+const areaSetupIA = document.getElementById("area-setup-ia");
+const areaSetupIABotao = document.getElementById("area-setup-ia-botao");
+const btnConfigIaAtalho = document.getElementById("btn-config-ia-atalho");
+const areaSetupTranscricaoIA = document.getElementById("area-setup-transcricao-ia");
+const areaSetupTranscricaoIABotao = document.getElementById("area-setup-transcricao-ia-botao");
+const btnConfigTranscricaoIaAtalho = document.getElementById("btn-config-transcricao-ia-atalho");
+const blocoLoteIA = document.getElementById("bloco-lote-ia");
+
+const inputNomeFilaLoteIA = document.getElementById("input-nome-fila-lote-ia");
 const areaErrosFilaLoteIA = document.getElementById("area-erros-fila-lote-ia");
 const listaFilaLoteIA = document.getElementById("lista-fila-lote-ia");
 const areaFilaLoteVazia = document.getElementById("area-fila-lote-vazia");
+const areaTotalFilaLoteIA = document.getElementById("area-total-fila-lote-ia");
 const btnEnviarLoteIA = document.getElementById("btn-enviar-lote-ia");
 const areaLotesEnviadosVazio = document.getElementById("area-lotes-enviados-vazio");
 const listaLotesEnviadosIA = document.getElementById("lista-lotes-enviados-ia");
@@ -69,18 +99,23 @@ const listaLotesEnviadosIA = document.getElementById("lista-lotes-enviados-ia");
 // cadastro/edição/exclusão.
 let PROMPTS_IA_PAINEL = [];
 
-function atualizarSelectPromptIA() {
-  const valorAtual = selectPromptIA.value;
-  selectPromptIA.innerHTML = "";
+function preencherSelectComPromptsIA(select) {
+  const valorAtual = select.value;
+  select.innerHTML = "";
   for (const prompt of PROMPTS_IA_PAINEL) {
     const option = document.createElement("option");
     option.value = prompt.id;
     option.textContent = prompt.titulo;
-    selectPromptIA.appendChild(option);
+    select.appendChild(option);
   }
   if (PROMPTS_IA_PAINEL.some((p) => p.id === valorAtual)) {
-    selectPromptIA.value = valorAtual;
+    select.value = valorAtual;
   }
+}
+
+function atualizarSelectPromptIA() {
+  preencherSelectComPromptsIA(selectPromptIA);
+  preencherSelectComPromptsIA(selectPromptLoteLocalizadorIA);
 }
 
 async function atualizarPromptsIA() {
@@ -98,22 +133,33 @@ function nomeAmigavelModelo(modeloId) {
   return encontrado ? encontrado.nome : modeloId;
 }
 
-let textoExtraidoParaIA = null;
 // Guarda qual prompt foi de fato usado na extração (fase 1), pra fase 2
-// ("Confirmar e enviar") reenviar EXATAMENTE o mesmo prompt - mesmo que o
-// usuário tenha mexido nos campos de prompt avulso enquanto aguardava a
-// estimativa.
+// ("Confirmar e enviar"/"Confirmar e adicionar à fila") reenviar
+// EXATAMENTE o mesmo prompt - mesmo que o usuário tenha mexido nos campos
+// de prompt avulso enquanto aguardava a estimativa.
 let promptEmUsoNaAnalise = { promptId: null, promptTextoAvulso: null };
+// "enviar" (Analisar agora) ou "fila" (Adicionar à fila em lote) - os dois
+// fluxos compartilham a mesma pré-visualização/edição de texto antes de
+// confirmar; só o botão final muda de comportamento.
+let modoConfirmacaoIA = null;
+// Config (provedor/modelo) usada na extração - reaproveitada para
+// reestimar o custo quando o usuário edita o texto na pré-visualização.
+let configEmUsoNaAnalise = { provedor: "claude", modelo: null };
 
 function resetarAnaliseIA() {
-  textoExtraidoParaIA = null;
+  modoConfirmacaoIA = null;
   promptEmUsoNaAnalise = { promptId: null, promptTextoAvulso: null };
   areaProgressoIA.hidden = true;
   areaEstimativaIA.hidden = true;
+  areaEstimativaIA.querySelector(".modal-botoes").hidden = false;
   areaErrosIA.hidden = true;
   areaResultadoIA.hidden = true;
   textoResultadoIA.value = "";
+  textoPreviewIA.value = "";
+  textoPreviewIA.hidden = false;
+  btnAbrirPreviewJanelaIA.hidden = false;
   btnAnalisarIA.disabled = false;
+  btnAdicionarFilaIA.disabled = false;
 }
 
 function atualizarModoPromptIA() {
@@ -159,28 +205,38 @@ async function resolverPromptParaEnvio() {
   return { promptId: novoPrompt.id };
 }
 
-btnAnalisarIA.addEventListener("click", async () => {
+// Fase 1, compartilhada pelos dois botões ("Analisar agora" e "Adicionar
+// à fila em lote"): extrai o texto e mostra a pré-visualização editável
+// (ver ANALISE_IA_TEXTO_PRONTO abaixo) antes de qualquer chamada real à
+// IA ou de enfileirar - "modo" so' diferencia o que acontece ao confirmar.
+async function iniciarExtracaoIA(modo) {
   const { documentosSelecionados, movimentacaoParaEnviar } = await obterSelecaoAtualParaEnvio();
 
+  const areaErro = modo === "fila" ? areaErrosFilaLoteIA : areaErrosIA;
   if (documentosSelecionados.length === 0 && movimentacaoParaEnviar.length === 0) {
-    areaErrosIA.hidden = false;
-    areaErrosIA.textContent =
+    areaErro.hidden = false;
+    areaErro.textContent =
       "Nada para analisar: nenhum documento selecionado e a movimentação está excluída. Marque ao menos um documento ou inclua a movimentação.";
     return;
   }
 
   const resolucaoPrompt = await resolverPromptParaEnvio();
   if (resolucaoPrompt.erro) {
-    areaErrosIA.hidden = false;
-    areaErrosIA.textContent = resolucaoPrompt.erro;
+    areaErro.hidden = false;
+    areaErro.textContent = resolucaoPrompt.erro;
     return;
   }
 
   const config = await obterConfiguracoes();
+  const provedor = modo === "fila" ? "claude" : config.provedorIA;
+  const modelo = provedor === "gemini" ? config.modeloGemini : config.modeloClaude;
 
   resetarAnaliseIA();
+  modoConfirmacaoIA = modo;
   promptEmUsoNaAnalise = { promptId: resolucaoPrompt.promptId || null, promptTextoAvulso: resolucaoPrompt.promptTextoAvulso || null };
+  configEmUsoNaAnalise = { provedor, modelo };
   btnAnalisarIA.disabled = true;
+  btnAdicionarFilaIA.disabled = true;
   areaProgressoIA.hidden = false;
   textoProgressoIA.textContent = "Extraindo o conteúdo dos documentos selecionados...";
 
@@ -189,22 +245,113 @@ btnAnalisarIA.addEventListener("click", async () => {
     documentos: documentosSelecionados,
     movimentacao: movimentacaoParaEnviar,
     anonimizar: chkAnonimizarIA.checked,
-    provedor: config.provedorIA,
-    modelo: config.provedorIA === "gemini" ? config.modeloGemini : config.modeloClaude,
+    provedor,
+    modelo,
     promptId: promptEmUsoNaAnalise.promptId,
     promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
   });
-});
+}
+
+btnAnalisarIA.addEventListener("click", () => iniciarExtracaoIA("enviar"));
+btnAdicionarFilaIA.addEventListener("click", () => iniciarExtracaoIA("fila"));
 
 btnCancelarAnaliseIA.addEventListener("click", () => {
   resetarAnaliseIA();
 });
 
+// Reestima o custo em cima do texto ATUAL da pré-visualização (o usuário
+// pode ter editado) - debounced para não disparar uma mensagem a cada
+// tecla digitada.
+let timeoutReestimarIA = null;
+textoPreviewIA.addEventListener("input", () => {
+  clearTimeout(timeoutReestimarIA);
+  timeoutReestimarIA = setTimeout(async () => {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "ANALISE_IA_REESTIMAR",
+      texto: textoPreviewIA.value,
+      promptId: promptEmUsoNaAnalise.promptId,
+      promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
+      provedor: configEmUsoNaAnalise.provedor,
+      modelo: configEmUsoNaAnalise.modelo,
+    });
+    if (resposta && resposta.ok) {
+      exibirEstimativaIA(resposta.estimativa);
+    }
+  }, 500);
+});
+
+btnAbrirPreviewJanelaIA.addEventListener("click", async () => {
+  const chave = `previewIA_${Date.now()}`;
+  await new Promise((resolve) => chrome.storage.local.set({ [chave]: { texto: textoPreviewIA.value } }, resolve));
+
+  const janela = await chrome.windows.create({
+    url: chrome.runtime.getURL(`preview-ia.html?chave=${encodeURIComponent(chave)}`),
+    type: "popup",
+    width: 900,
+    height: 800,
+  });
+
+  function aoMudarStorage(mudancas, area) {
+    if (area !== "local" || !(chave in mudancas)) return;
+    const novoValor = mudancas[chave].newValue;
+    if (novoValor && typeof novoValor.textoFinal === "string") {
+      textoPreviewIA.value = novoValor.textoFinal;
+      textoPreviewIA.dispatchEvent(new Event("input"));
+    }
+    chrome.storage.onChanged.removeListener(aoMudarStorage);
+    chrome.storage.local.remove(chave);
+  }
+  chrome.storage.onChanged.addListener(aoMudarStorage);
+});
+
+function exibirEstimativaIA(est) {
+  areaEstimativaIA.hidden = false;
+  textoEstimativaIA.textContent =
+    `Tamanho estimado: ~${(est.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens de entrada ` +
+    `(modelo ${nomeAmigavelModelo(est.modelo)}). Custo estimado: até ${FORMATADOR_USD.format(est.custoEstimadoUsd || 0)}` +
+    (modoConfirmacaoIA === "fila" ? " (mais 50% de desconto quando o lote for enviado)." : ". Confirme para enviar de verdade à IA.");
+  btnConfirmarAnaliseIA.textContent = modoConfirmacaoIA === "fila" ? "Confirmar e adicionar à fila" : "Confirmar e enviar";
+}
+
 btnConfirmarAnaliseIA.addEventListener("click", async () => {
-  if (!textoExtraidoParaIA) return;
+  const texto = textoPreviewIA.value;
+  if (!texto) return;
+
+  if (modoConfirmacaoIA === "fila") {
+    areaEstimativaIA.hidden = true;
+    areaProgressoIA.hidden = false;
+    textoProgressoIA.textContent = "Adicionando à fila em lote...";
+
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "IA_LOTE_ADICIONAR_TEXTO",
+      numeroProcesso: estadoAtual.numeroProcesso,
+      texto,
+      promptId: promptEmUsoNaAnalise.promptId,
+      promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
+      modelo: configEmUsoNaAnalise.modelo,
+    });
+
+    if (resposta && resposta.ok) {
+      renderizarFilaLoteIA(resposta.fila);
+      blocoLoteIA.open = true;
+      if (radioPromptAvulso.checked) {
+        inputPromptAvulsoTexto.value = "";
+        chkSalvarPromptAvulso.checked = false;
+        inputTituloPromptAvulso.value = "";
+        areaTituloPromptAvulso.hidden = true;
+      }
+      resetarAnaliseIA();
+    } else {
+      areaProgressoIA.hidden = true;
+      areaEstimativaIA.hidden = false;
+      areaErrosFilaLoteIA.hidden = false;
+      areaErrosFilaLoteIA.textContent = (resposta && resposta.erro) || "Falha ao adicionar à fila.";
+    }
+    return;
+  }
+
   const config = await obterConfiguracoes();
-  const apiKey = config.provedorIA === "gemini" ? config.chaveGemini : config.chaveClaude;
-  const modelo = config.provedorIA === "gemini" ? config.modeloGemini : config.modeloClaude;
+  const apiKey = configEmUsoNaAnalise.provedor === "gemini" ? config.chaveGemini : config.chaveClaude;
 
   areaEstimativaIA.hidden = true;
   areaProgressoIA.hidden = false;
@@ -212,11 +359,11 @@ btnConfirmarAnaliseIA.addEventListener("click", async () => {
 
   chrome.runtime.sendMessage({
     tipo: "ANALISAR_IA_ENVIAR",
-    texto: textoExtraidoParaIA,
+    texto,
     promptId: promptEmUsoNaAnalise.promptId,
     promptTextoAvulso: promptEmUsoNaAnalise.promptTextoAvulso,
-    provedor: config.provedorIA,
-    modelo,
+    provedor: configEmUsoNaAnalise.provedor,
+    modelo: configEmUsoNaAnalise.modelo,
     apiKey,
   });
 });
@@ -261,6 +408,15 @@ function renderizarFilaLoteIA(fila) {
   btnEnviarLoteIA.disabled = itens.length === 0;
   btnEnviarLoteIA.textContent = `Enviar lote${itens.length > 0 ? ` (${itens.length})` : ""}`;
 
+  areaTotalFilaLoteIA.hidden = itens.length === 0;
+  if (itens.length > 0) {
+    const totalTokens = itens.reduce((soma, item) => soma + ((item.estimativa && item.estimativa.tokensEntradaEstimados) || 0), 0);
+    const totalCusto = itens.reduce((soma, item) => soma + ((item.estimativa && item.estimativa.custoEstimadoUsd) || 0) * 0.5, 0);
+    areaTotalFilaLoteIA.textContent =
+      `Total estimado (${itens.length} processo(s)): ~${totalTokens.toLocaleString("pt-BR")} tokens, até ` +
+      `${FORMATADOR_USD.format(totalCusto)} com desconto de lote.`;
+  }
+
   for (const item of itens) {
     const li = document.createElement("li");
     li.className = "item-fila-lote-ia";
@@ -276,8 +432,14 @@ function renderizarFilaLoteIA(fila) {
   }
 
   listaFilaLoteIA.querySelectorAll("[data-remover-item]").forEach((botao) => {
-    botao.addEventListener("click", () => {
-      chrome.runtime.sendMessage({ tipo: "IA_LOTE_REMOVER", id: botao.dataset.removerItem });
+    botao.addEventListener("click", async () => {
+      botao.disabled = true;
+      const resposta = await chrome.runtime.sendMessage({ tipo: "IA_LOTE_REMOVER", id: botao.dataset.removerItem });
+      if (resposta && resposta.ok) {
+        renderizarFilaLoteIA(resposta.fila);
+      } else {
+        botao.disabled = false;
+      }
     });
   });
 }
@@ -328,10 +490,16 @@ function renderizarLotesEnviadosIA(lotes) {
       `;
     }
 
+    const nomeExibicao = (lote.nome || `Lote ${lote.batchId}`).replace(/</g, "&lt;");
+
     li.innerHTML = `
       <details>
-        <summary>Lote ${lote.batchId} — ${new Date(lote.criadoEm).toLocaleString("pt-BR")} (${resumoContagens})</summary>
-        ${lote.status !== "ended" ? '<button type="button" class="btn-ghost" data-verificar-lote="' + lote.batchId + '">Verificar agora</button>' : ""}
+        <summary>
+          ${nomeExibicao} — ${new Date(lote.criadoEm).toLocaleString("pt-BR")} (${resumoContagens})
+          ${lote.status !== "ended" ? '<button type="button" class="btn-ghost" data-verificar-lote="' + lote.batchId + '">Verificar agora</button>' : ""}
+          <button type="button" class="btn-ghost" data-renomear-lote="${lote.batchId}" data-nome-atual="${(lote.nome || "").replace(/"/g, "&quot;")}">Renomear</button>
+          <button type="button" class="btn-ghost" data-excluir-lote="${lote.batchId}">Excluir</button>
+        </summary>
         ${resultadosHtml}
       </details>
     `;
@@ -349,6 +517,34 @@ function renderizarLotesEnviadosIA(lotes) {
       if (area) copiarTexto(area.value);
     });
   });
+
+  // "Renomear"/"Excluir" ficam dentro do <summary> (mesmo lugar de
+  // "Verificar agora") para continuarem visíveis mesmo com o lote
+  // fechado - preventDefault() evita que o clique também abra/feche o
+  // <details>, efeito colateral do clique cair dentro do <summary>.
+  listaLotesEnviadosIA.querySelectorAll("[data-renomear-lote]").forEach((botao) => {
+    botao.addEventListener("click", async (evento) => {
+      evento.preventDefault();
+      const novoNome = prompt("Nome para este lote (deixe em branco para voltar ao padrão):", botao.dataset.nomeAtual || "");
+      if (novoNome === null) return;
+      const resposta = await chrome.runtime.sendMessage({
+        tipo: "IA_LOTE_RENOMEAR",
+        batchId: botao.dataset.renomearLote,
+        nome: novoNome,
+      });
+      if (resposta && resposta.ok) renderizarLotesEnviadosIA(resposta.lotes);
+    });
+  });
+  listaLotesEnviadosIA.querySelectorAll("[data-excluir-lote]").forEach((botao) => {
+    botao.addEventListener("click", async (evento) => {
+      evento.preventDefault();
+      if (!confirm("Excluir este lote da lista? Isso só remove o registro local (não afeta nada na API da Anthropic (Claude)).")) {
+        return;
+      }
+      const resposta = await chrome.runtime.sendMessage({ tipo: "IA_LOTE_EXCLUIR", batchId: botao.dataset.excluirLote });
+      if (resposta && resposta.ok) renderizarLotesEnviadosIA(resposta.lotes);
+    });
+  });
 }
 
 function atualizarListaCompletaIA() {
@@ -356,61 +552,32 @@ function atualizarListaCompletaIA() {
     if (!resposta) return;
     renderizarFilaLoteIA(resposta.fila);
     renderizarLotesEnviadosIA(resposta.lotes);
+    // So' pisa no campo se o usuario nao estiver com foco nele digitando -
+    // evita "roubar" o cursor/apagar o que ja' foi digitado caso essa
+    // atualizacao venha de um evento em segundo plano (ex.: lote
+    // terminando) enquanto o usuario esta' nomeando a proxima fila.
+    if (document.activeElement !== inputNomeFilaLoteIA) {
+      inputNomeFilaLoteIA.value = resposta.nomeFila || "";
+    }
   });
 }
 
-btnAdicionarFilaIA.addEventListener("click", async () => {
-  const { documentosSelecionados, movimentacaoParaEnviar } = await obterSelecaoAtualParaEnvio();
-
-  if (documentosSelecionados.length === 0 && movimentacaoParaEnviar.length === 0) {
-    areaErrosFilaLoteIA.hidden = false;
-    areaErrosFilaLoteIA.textContent =
-      "Nada para adicionar à fila: nenhum documento selecionado e a movimentação está excluída.";
-    return;
-  }
-
-  const resolucaoPrompt = await resolverPromptParaEnvio();
-  if (resolucaoPrompt.erro) {
-    areaErrosFilaLoteIA.hidden = false;
-    areaErrosFilaLoteIA.textContent = resolucaoPrompt.erro;
-    return;
-  }
-
-  const config = await obterConfiguracoes();
-
-  areaErrosFilaLoteIA.hidden = true;
-  btnAdicionarFilaIA.disabled = true;
-  const resposta = await chrome.runtime.sendMessage({
-    tipo: "IA_LOTE_ADICIONAR",
-    numeroProcesso: estadoAtual.numeroProcesso,
-    documentos: documentosSelecionados,
-    movimentacao: movimentacaoParaEnviar,
-    anonimizar: chkAnonimizarIA.checked,
-    promptId: resolucaoPrompt.promptId,
-    promptTextoAvulso: resolucaoPrompt.promptTextoAvulso,
-    modelo: config.modeloClaude,
-  });
-  btnAdicionarFilaIA.disabled = false;
-
-  if (resposta && resposta.ok) {
-    renderizarFilaLoteIA(resposta.fila);
-    if (radioPromptAvulso.checked) {
-      inputPromptAvulsoTexto.value = "";
-      chkSalvarPromptAvulso.checked = false;
-      inputTituloPromptAvulso.value = "";
-      areaTituloPromptAvulso.hidden = true;
-    }
-  } else {
-    areaErrosFilaLoteIA.hidden = false;
-    areaErrosFilaLoteIA.textContent = (resposta && resposta.erro) || "Falha ao adicionar à fila.";
-  }
+// Persiste o nome da fila (so' organizacao do usuario, nunca enviado a`
+// Anthropic) conforme ele digita - debounced para nao mandar uma
+// mensagem a cada tecla.
+let timeoutNomeFilaLoteIA = null;
+inputNomeFilaLoteIA.addEventListener("input", () => {
+  clearTimeout(timeoutNomeFilaLoteIA);
+  timeoutNomeFilaLoteIA = setTimeout(() => {
+    chrome.runtime.sendMessage({ tipo: "IA_LOTE_DEFINIR_NOME", nome: inputNomeFilaLoteIA.value });
+  }, 400);
 });
 
 btnEnviarLoteIA.addEventListener("click", async () => {
   const config = await obterConfiguracoes();
   if (!config.chaveClaude) {
     areaErrosFilaLoteIA.hidden = false;
-    areaErrosFilaLoteIA.textContent = 'A fila em lote usa a API da Claude - configure a "Chave de API da Claude" nas configurações.';
+    areaErrosFilaLoteIA.textContent = 'A fila em lote usa a API da Anthropic (Claude) - configure a "Chave de API da Anthropic (Claude)" nas configurações.';
     return;
   }
 
@@ -478,6 +645,36 @@ function obterConfiguracoes() {
 function salvarConfiguracao(chave, valor) {
   chrome.storage.local.set({ [chave]: valor });
 }
+
+// Preenche uma linha de status de setup (provedor/modelo ativos + se a
+// chave está configurada) e mostra/esconde o atalho "Configurar chave".
+// Usada em "Analisar com IA" (provedor conforme config) e "Transcrever"
+// (sempre Gemini).
+function aplicarStatusSetupIA(config, provedor, areaTexto, areaBotao) {
+  const ehGemini = provedor === "gemini";
+  const chave = ehGemini ? config.chaveGemini : config.chaveClaude;
+  const nomeProvedor = ehGemini ? "Gemini" : "Anthropic (Claude)";
+  const nomeModelo = nomeAmigavelModelo(ehGemini ? config.modeloGemini : config.modeloClaude);
+  if (chave) {
+    areaTexto.textContent = `Provedor: ${nomeProvedor} · Modelo: ${nomeModelo} · Chave ✓`;
+    areaTexto.classList.add("status--ok");
+    areaBotao.hidden = true;
+  } else {
+    areaTexto.textContent = `⚠ Chave de API não configurada para ${nomeProvedor}. Configure para usar a IA.`;
+    areaTexto.classList.remove("status--ok");
+    areaBotao.hidden = false;
+  }
+}
+
+function atualizarStatusSetupIA() {
+  obterConfiguracoes().then((config) => {
+    aplicarStatusSetupIA(config, config.provedorIA, areaSetupIA, areaSetupIABotao);
+    aplicarStatusSetupIA(config, "gemini", areaSetupTranscricaoIA, areaSetupTranscricaoIABotao);
+  });
+}
+
+btnConfigIaAtalho.addEventListener("click", () => btnAbrirConfiguracoes.click());
+btnConfigTranscricaoIaAtalho.addEventListener("click", () => btnAbrirConfiguracoes.click());
 
 const btnAbrirConfiguracoes = document.getElementById("btn-abrir-configuracoes");
 const modalConfiguracoes = document.getElementById("modal-configuracoes");
@@ -557,6 +754,9 @@ chkConfigAnexarMagistradoConclusos.addEventListener("change", () => {
 
 modalConfigFechar.addEventListener("click", () => {
   modalConfiguracoes.hidden = true;
+  // Refletir na hora qualquer troca de provedor/modelo/chave feita no modal
+  // nos indicadores de setup de "Analisar com IA" e "Transcrever".
+  atualizarStatusSetupIA();
 });
 
 // ---- Gerenciar prompts de análise (editar, excluir, cadastrar) ----
@@ -796,16 +996,18 @@ function abrirCartaoDe(el) {
   }
 }
 
-// Aplica em AMBOS os status ("Exportar Documentos" e "Analisar com IA") -
-// as duas subseções compartilham a mesma detecção/seleção de documentos,
-// então mostram sempre a mesma mensagem. So' abre o CARTAO de quem
-// originou a acao ("origem": "exportar", padrão, ou "ia") - sem isso,
-// detectar pela subseção "Analisar com IA" abriria também "Exportar
-// Documentos" (e vice-versa), já que as duas áreas de status são
-// atualizadas juntas.
+// Aplica nas TRÊS áreas de status ("Exportar Documentos", "Analisar com
+// IA" e "Transcrever Depoimentos") - as três subseções compartilham a
+// mesma detecção de documentos (a lista de vídeos da transcrição é so'
+// um filtro da mesma lista), então mostram sempre a mesma mensagem. So'
+// abre o CARTAO de quem originou a acao ("origem": "exportar" padrão,
+// "ia" ou "transcricao") - sem isso, detectar por uma subseção abriria
+// as outras duas junto, ja' que as três áreas de status são atualizadas
+// juntas.
 function setStatus(texto, tipo, origem = "exportar") {
-  aplicarStatus(areaStatus, texto, tipo, origem !== "ia");
+  aplicarStatus(areaStatus, texto, tipo, origem === "exportar");
   aplicarStatus(areaStatusIA, texto, tipo, origem === "ia");
+  aplicarStatus(areaStatusTranscricaoIA, texto, tipo, origem === "transcricao");
 }
 
 async function getAbaAtiva() {
@@ -843,12 +1045,99 @@ async function enviarSelecaoTodosDocumentosParaPagina(selecionado) {
 // nos dois containers ao mesmo tempo.
 const CONTAINERS_LISTA_DOCUMENTOS = [listaDocumentosEl, listaDocumentosIAEl];
 
+// Nome amigável para as siglas de documento mais comuns do eProc/TJPR, para
+// as listas e os grupos ficarem legíveis (ex.: "OUT" -> "Outros",
+// "PROCADM" -> "Processo administrativo"). O nome LEGÍVEL exato do "Tipo de
+// Documento" que o eProc mostra ao passar o mouse na sigla é carregado por
+// AJAX no hover e NÃO está na página que a extensão lê - por isso usamos
+// este mapa curado, com fallback para a própria sigla quando não conhecida.
+// A descrição/observação de cada documento (ex.: "RG CPF") vem à parte, do
+// próprio documento (doc.descricao), e é o que melhor diferencia um "OUT"
+// de outro.
+const NOMES_TIPO_DOCUMENTO = {
+  INIC: "Inicial",
+  PET: "Petição",
+  PROC: "Procuração",
+  PROCADM: "Processo administrativo",
+  OUT: "Outros",
+  CERT: "Certidão",
+  DESPADEC: "Despacho/Decisão",
+  DESP: "Despacho",
+  DEC: "Decisão",
+  SENT: "Sentença",
+  LAUDO: "Laudo",
+  CNIS: "CNIS",
+  RG: "RG",
+  CPF: "CPF",
+  CTPS: "CTPS",
+  END: "Comprovante de endereço",
+  COMP: "Comprovante",
+  ATESTMED: "Atestado médico",
+  ATESTAD: "Atestado",
+  EXMMED: "Exame médico",
+  RECEIT: "Receituário",
+  INFBEN: "Informação de benefício",
+  INF: "Informação",
+  OFIC: "Ofício",
+  MAND: "Mandado",
+  MANDCITACAO: "Mandado de citação",
+  CITACAO: "Citação",
+  INTIM: "Intimação",
+  NOTIF: "Notificação",
+  EDITAL: "Edital",
+  CONTEST: "Contestação",
+  REPLICA: "Réplica",
+  RECURSO: "Recurso",
+  APELACAO: "Apelação",
+  EMBDECL: "Embargos de declaração",
+  CONTR: "Contrato",
+  CONT: "Contrato",
+  DECL: "Declaração",
+  SUBST: "Substabelecimento",
+  ATOORD: "Ato ordinatório",
+  TERMO: "Termo",
+  ATAAUD: "Ata de audiência",
+  TERMOAUD: "Termo de audiência",
+};
+
+// Sigla (sem o número sequencial) a partir do nome exibido - espelha
+// "extrairSiglaDocumento" do background.js, para o painel poder achar o
+// nome amigável de um documento individual (ex.: "OUT3" -> "OUT").
+function siglaDoNome(nome) {
+  const texto = (nome || "").trim();
+  const semNumero = texto.replace(/\d+\s*$/, "").trim();
+  return (semNumero || texto).toUpperCase();
+}
+
+function nomeTipoDocumento(sigla) {
+  const s = (sigla || "").toUpperCase();
+  return NOMES_TIPO_DOCUMENTO[s] || s;
+}
+
+// Texto secundário de um documento para a lista: nome amigável do tipo
+// (só quando a sigla é conhecida, para não repetir a sigla crua) + a
+// descrição/observação do próprio documento. Devolve "" quando não há
+// nada útil a acrescentar além da sigla.
+function descricaoAmigavelDocumento(doc) {
+  const sigla = siglaDoNome(doc.nome);
+  const amigavel = nomeTipoDocumento(sigla);
+  const partes = [];
+  if (amigavel.toUpperCase() !== sigla) partes.push(amigavel);
+  const descricao = (doc.descricao || "").trim();
+  if (descricao) partes.push(descricao);
+  return partes.join(" — ");
+}
+
 function renderizarLista(documentos) {
   for (const container of CONTAINERS_LISTA_DOCUMENTOS) {
     container.innerHTML = "";
     for (const doc of documentos) {
       const li = document.createElement("li");
       li.dataset.idDocumento = doc.idDocumento;
+
+      // Linha de cima: checkbox + sigla + mimetype (mesmo layout de antes).
+      const linha = document.createElement("div");
+      linha.className = "item-doc-linha";
 
       const rotulo = document.createElement("label");
       rotulo.className = "item-documento";
@@ -871,8 +1160,21 @@ function renderizarLista(documentos) {
       tipo.className = "tipo";
       tipo.textContent = doc.mimetype || "";
 
-      li.appendChild(rotulo);
-      li.appendChild(tipo);
+      linha.appendChild(rotulo);
+      linha.appendChild(tipo);
+      li.appendChild(linha);
+
+      // Segunda linha (discreta): nome amigável do tipo + descrição/observação
+      // do documento, para o usuário entender o que é aquele "OUT3"/"PROCADM3"
+      // sem depender só da sigla. Só aparece quando há algo a mostrar.
+      const secundario = descricaoAmigavelDocumento(doc);
+      if (secundario) {
+        const descricaoEl = document.createElement("span");
+        descricaoEl.className = "doc-descricao";
+        descricaoEl.textContent = secundario;
+        li.appendChild(descricaoEl);
+      }
+
       container.appendChild(li);
     }
   }
@@ -927,6 +1229,54 @@ function definirMovimentacaoIncluida(incluida) {
 chkIncluirMovimentacao.addEventListener("change", () => definirMovimentacaoIncluida(chkIncluirMovimentacao.checked));
 chkIncluirMovimentacaoIA.addEventListener("change", () => definirMovimentacaoIncluida(chkIncluirMovimentacaoIA.checked));
 
+// Mesma convenção de nomenclatura já documentada no README (sigla +
+// número sequencial, ex. "INIC1", "OUT2") - um documento de vídeo de
+// audiência é identificado pelo nome começar com "VIDEO" (ex. "VIDEO1").
+function ehDocumentoVideo(nome) {
+  return /^video\d*$/i.test((nome || "").trim());
+}
+
+// Filtra a MESMA lista de documentos já detectada (estadoAtual.documentos,
+// compartilhada com "Exportar Documentos"/"Analisar com IA") pelos que são
+// vídeo - não faz nenhuma detecção própria, so' reaproveita.
+function renderizarListaVideos(documentos) {
+  const videos = (documentos || []).filter((doc) => ehDocumentoVideo(doc.nome));
+  listaVideosTranscricaoIA.innerHTML = "";
+
+  areaSemVideosTranscricaoIA.hidden = videos.length > 0;
+  areaListaVideosTranscricaoIA.hidden = videos.length === 0;
+  btnTranscreverIA.disabled = videos.length === 0;
+
+  for (const doc of videos) {
+    const label = document.createElement("label");
+    label.className = "opcao";
+    label.innerHTML = `<input type="checkbox" checked data-video-doc="${doc.idDocumento}" /> ${doc.nome}`;
+    listaVideosTranscricaoIA.appendChild(label);
+  }
+  atualizarEstadoBotaoTranscrever();
+}
+
+function checkboxesVideosTranscricaoIA() {
+  return Array.from(listaVideosTranscricaoIA.querySelectorAll("[data-video-doc]"));
+}
+
+function atualizarEstadoBotaoTranscrever() {
+  const algumSelecionado = checkboxesVideosTranscricaoIA().some((chk) => chk.checked);
+  btnTranscreverIA.disabled = checkboxesVideosTranscricaoIA().length === 0 || !algumSelecionado;
+}
+
+listaVideosTranscricaoIA.addEventListener("change", atualizarEstadoBotaoTranscrever);
+
+btnMarcarTudoVideosIA.addEventListener("click", () => {
+  checkboxesVideosTranscricaoIA().forEach((chk) => (chk.checked = true));
+  atualizarEstadoBotaoTranscrever();
+});
+
+btnDesmarcarTudoVideosIA.addEventListener("click", () => {
+  checkboxesVideosTranscricaoIA().forEach((chk) => (chk.checked = false));
+  atualizarEstadoBotaoTranscrever();
+});
+
 // Compartilhada pelos dois botões "Detectar documentos" ("Exportar
 // Documentos" e "Analisar com IA") - as duas subseções mostram a mesma
 // detecção/seleção, só a UI é repetida.
@@ -961,6 +1311,7 @@ async function executarDeteccao(origem = "exportar") {
       listaDocumentosIAEl.innerHTML = "";
       areaAnaliseIA.hidden = true;
       resetarAnaliseIA();
+      renderizarListaVideos([]);
       return;
     }
 
@@ -1007,6 +1358,7 @@ async function executarDeteccao(origem = "exportar") {
       areaMarcarDocumentosIA.hidden = false;
       renderizarLista(documentos);
     }
+    renderizarListaVideos(documentos);
 
     atualizarEstadoBotaoBaixar();
     setStatus(
@@ -1027,6 +1379,7 @@ async function executarDeteccao(origem = "exportar") {
 
 btnDetectar.addEventListener("click", () => executarDeteccao("exportar"));
 btnDetectarIA.addEventListener("click", () => executarDeteccao("ia"));
+btnDetectarTranscricaoIA.addEventListener("click", () => executarDeteccao("transcricao"));
 
 // Confere o estado ATUAL dos checkboxes direto na página do processo antes
 // de usar a seleção - cobre o caso do usuário ter ajustado a seleção lá
@@ -1660,23 +2013,21 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   if (mensagem.tipo === "ANALISE_IA_TEXTO_PRONTO") {
     areaProgressoIA.hidden = true;
     if (mensagem.ok) {
-      textoExtraidoParaIA = mensagem.texto;
-      const est = mensagem.estimativa || {};
-      areaEstimativaIA.hidden = false;
-      textoEstimativaIA.textContent =
-        `Tamanho estimado: ~${(est.tokensEntradaEstimados || 0).toLocaleString("pt-BR")} tokens de entrada ` +
-        `(modelo ${nomeAmigavelModelo(est.modelo)}). Custo estimado: até ${FORMATADOR_USD.format(est.custoEstimadoUsd || 0)}. ` +
-        `Confirme para enviar de verdade à IA.`;
+      textoPreviewIA.value = mensagem.texto || "";
+      exibirEstimativaIA(mensagem.estimativa || {});
     } else {
       btnAnalisarIA.disabled = false;
-      areaErrosIA.hidden = false;
-      areaErrosIA.textContent = mensagem.erro || "Falha desconhecida ao extrair o conteúdo dos documentos.";
+      btnAdicionarFilaIA.disabled = false;
+      const areaErro = modoConfirmacaoIA === "fila" ? areaErrosFilaLoteIA : areaErrosIA;
+      areaErro.hidden = false;
+      areaErro.textContent = mensagem.erro || "Falha desconhecida ao extrair o conteúdo dos documentos.";
     }
   }
 
   if (mensagem.tipo === "ANALISE_IA_RESULTADO") {
     areaProgressoIA.hidden = true;
     btnAnalisarIA.disabled = false;
+    btnAdicionarFilaIA.disabled = false;
     if (mensagem.ok) {
       areaResultadoIA.hidden = false;
       textoResultadoIA.value = mensagem.resposta || "";
@@ -1684,6 +2035,8 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         textoProgressoIA.textContent = "";
         areaEstimativaIA.hidden = false;
         areaEstimativaIA.querySelector(".modal-botoes").hidden = true;
+        textoPreviewIA.hidden = true;
+        btnAbrirPreviewJanelaIA.hidden = true;
         textoEstimativaIA.textContent = `Custo real desta chamada: ${FORMATADOR_USD.format(mensagem.custoRealUsd)}.`;
       }
     } else {
@@ -1877,10 +2230,13 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   if (mensagem.tipo === "PROGRESSO_LISTAR_LOCALIZADORES") {
     textoProgressoNavLocalizadores.textContent = mensagem.texto || "Processando...";
     setStatusNavLocalizadores(mensagem.texto || "Processando...");
+    textoProgressoCarregarLoteLocalizadorIA.textContent = mensagem.texto || "Processando...";
+    aplicarStatus(areaStatusLoteLocalizadorIA, mensagem.texto || "Processando...");
   }
 
   if (mensagem.tipo === "LISTAR_LOCALIZADORES_FINALIZADO") {
     areaProgressoNavLocalizadores.hidden = true;
+    areaProgressoCarregarLoteLocalizadorIA.hidden = true;
 
     if (mensagem.ok) {
       const resultado = mensagem.resultado || {};
@@ -1898,14 +2254,40 @@ chrome.runtime.onMessage.addListener((mensagem) => {
         opcao.textContent = `${loc.nome} (${loc.totalProcessos})`;
         selectLocalizadorProcessos.appendChild(opcao);
       }
+
+      // "Lote por localizador" (processamento em lote por IA): ordena do
+      // localizador com MAIS processos para o com menos, para priorizar os
+      // maiores acervos. Desempate alfabético. Só este dropdown muda de
+      // ordem - a "Busca de localizadores" acima segue alfabética.
+      const localizadoresPorTamanho = [...localizadores].sort(
+        (a, b) => (b.totalProcessos || 0) - (a.totalProcessos || 0) || a.nome.localeCompare(b.nome, "pt-BR")
+      );
+      selectLoteLocalizadorIA.innerHTML =
+        '<option value="" selected disabled>Selecione um localizador...</option>';
+      for (const loc of localizadoresPorTamanho) {
+        const opcaoLote = document.createElement("option");
+        opcaoLote.value = loc.urlProcessos;
+        opcaoLote.textContent = `${loc.nome} (${loc.totalProcessos})`;
+        selectLoteLocalizadorIA.appendChild(opcaoLote);
+      }
       areaSelectLocalizador.hidden = localizadores.length === 0;
+      areaSelectLoteLocalizadorIA.hidden = localizadores.length === 0;
       // Sem nenhum localizador encontrado nao ha' nada mais a fazer com
       // a lista carregada - reaparece o botao para tentar de novo.
-      if (localizadores.length === 0) btnCarregarLocalizadores.hidden = false;
+      if (localizadores.length === 0) {
+        btnCarregarLocalizadores.hidden = false;
+        btnCarregarLocalizadoresLoteIA.hidden = false;
+      }
 
       setStatusNavLocalizadores(
         localizadores.length > 0
           ? `${localizadores.length} localizador(es) com processos - selecione um para navegar até ele ou exportar um relatório.`
+          : "Nenhum localizador com processos foi encontrado."
+      );
+      aplicarStatus(
+        areaStatusLoteLocalizadorIA,
+        localizadores.length > 0
+          ? `${localizadores.length} localizador(es) com processos - selecione um para varrer os documentos.`
           : "Nenhum localizador com processos foi encontrado."
       );
       if (resultado.erroColeta) {
@@ -1918,6 +2300,9 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosNavLocalizadores.textContent =
         mensagem.erro || "Falha desconhecida ao carregar os localizadores.";
       btnCarregarLocalizadores.hidden = false;
+
+      aplicarStatus(areaStatusLoteLocalizadorIA, "Erro ao carregar os localizadores.", "erro");
+      btnCarregarLocalizadoresLoteIA.hidden = false;
     }
   }
 
@@ -1997,10 +2382,38 @@ const btnExportarDocumentosLocalizador = document.getElementById("btn-exportar-d
 const areaProgressoDocumentosLocalizador = document.getElementById("area-progresso-documentos-localizador");
 const textoProgressoDocumentosLocalizador = document.getElementById("texto-progresso-documentos-localizador");
 
+const areaStatusLoteLocalizadorIA = document.getElementById("area-status-lote-localizador-ia");
+const btnCarregarLocalizadoresLoteIA = document.getElementById("btn-carregar-localizadores-lote-ia");
+const areaProgressoCarregarLoteLocalizadorIA = document.getElementById("area-progresso-carregar-lote-localizador-ia");
+const textoProgressoCarregarLoteLocalizadorIA = document.getElementById("texto-progresso-carregar-lote-localizador-ia");
+const areaSelectLoteLocalizadorIA = document.getElementById("area-select-lote-localizador-ia");
+const selectLoteLocalizadorIA = document.getElementById("select-lote-localizador-ia");
+const btnVarrerLoteLocalizadorIA = document.getElementById("btn-varrer-lote-localizador-ia");
+const areaConfirmarVarreduraLoteLocalizadorIA = document.getElementById("area-confirmar-varredura-lote-localizador-ia");
+const textoConfirmarVarreduraLoteLocalizadorIA = document.getElementById("texto-confirmar-varredura-lote-localizador-ia");
+const btnConfirmarVarreduraLoteLocalizadorIA = document.getElementById("btn-confirmar-varredura-lote-localizador-ia");
+const btnCancelarVarreduraLoteLocalizadorIA = document.getElementById("btn-cancelar-varredura-lote-localizador-ia");
+const areaProgressoLoteLocalizadorIA = document.getElementById("area-progresso-lote-localizador-ia");
+const textoProgressoLoteLocalizadorIA = document.getElementById("texto-progresso-lote-localizador-ia");
+const areaGruposLoteLocalizadorIA = document.getElementById("area-grupos-lote-localizador-ia");
+const listaGruposLoteLocalizadorIA = document.getElementById("lista-grupos-lote-localizador-ia");
+const btnMarcarTudoGruposLoteIA = document.getElementById("btn-marcar-tudo-grupos-lote-ia");
+const btnDesmarcarTudoGruposLoteIA = document.getElementById("btn-desmarcar-tudo-grupos-lote-ia");
+const selectPromptLoteLocalizadorIA = document.getElementById("select-prompt-lote-localizador-ia");
+const chkAnonimizarLoteLocalizadorIA = document.getElementById("chk-anonimizar-lote-localizador-ia");
+const btnAdicionarLoteLocalizadorIA = document.getElementById("btn-adicionar-lote-localizador-ia");
+const areaErrosLoteLocalizadorIA = document.getElementById("area-erros-lote-localizador-ia");
+
 // Guarda a ultima lista carregada (nome + urlProcessos de cada
 // localizador) para poder identificar qual localizador esta' selecionado
 // no dropdown na hora de exportar o relatorio de processos dele.
 let localizadoresCarregados = [];
+
+// Resultado da ultima varredura de documentos de um localizador (lote por
+// localizador) - guardado so' em memoria do painel (nao persiste), para
+// "Adicionar à fila" poder filtrar pelos grupos escolhidos sem precisar
+// varrer os processos de novo.
+let processosVarridosLoteLocalizadorIA = [];
 
 function setStatusNavLocalizadores(texto, tipo) {
   aplicarStatus(areaNavLocalizadoresInfo, texto, tipo);
@@ -2153,6 +2566,348 @@ btnExportarDocumentosLocalizador.addEventListener("click", async () => {
   }
 });
 
+// ---- Lote por localizador (rodar um prompt pré-cadastrado em todos os
+// processos de um localizador, filtrando por grupo/sigla de documento) ----
+
+function setStatusLoteLocalizadorIA(texto, tipo) {
+  aplicarStatus(areaStatusLoteLocalizadorIA, texto, tipo);
+}
+
+btnCarregarLocalizadoresLoteIA.addEventListener("click", () => {
+  // Reaproveita o mesmo carregamento (e a mesma mensagem em segundo
+  // plano) do botão "Carregar localizadores" da seção "Busca específica
+  // de localizadores" logo abaixo - o resultado preenche os dois
+  // dropdowns ao mesmo tempo (ver LISTAR_LOCALIZADORES_FINALIZADO acima).
+  btnCarregarLocalizadores.click();
+});
+
+selectLoteLocalizadorIA.addEventListener("change", () => {
+  areaErrosLoteLocalizadorIA.hidden = true;
+  areaGruposLoteLocalizadorIA.hidden = true;
+  areaConfirmarVarreduraLoteLocalizadorIA.hidden = true;
+  processosVarridosLoteLocalizadorIA = [];
+});
+
+// Localizadores podem ter muitos processos - cada um custa abrir uma aba
+// oculta e esperar a pagina carregar, entao acima de 50 processos pede
+// confirmacao explicita antes de comecar (poderia levar minutos).
+const LIMITE_PROCESSOS_SEM_CONFIRMACAO_LOTE_LOCALIZADOR = 50;
+
+function iniciarVarreduraLoteLocalizadorIA(localizador) {
+  areaErrosLoteLocalizadorIA.hidden = true;
+  areaConfirmarVarreduraLoteLocalizadorIA.hidden = true;
+  areaGruposLoteLocalizadorIA.hidden = true;
+  processosVarridosLoteLocalizadorIA = [];
+  btnVarrerLoteLocalizadorIA.disabled = true;
+  areaProgressoLoteLocalizadorIA.hidden = false;
+  textoProgressoLoteLocalizadorIA.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaStatusLoteLocalizadorIA);
+  setStatusLoteLocalizadorIA(`Varrendo os documentos de cada processo de "${localizador.nome}" (pode demorar)...`);
+
+  chrome.runtime
+    .sendMessage({ tipo: "IA_LOTE_LOCALIZADOR_VARRER", urlProcessos: localizador.urlProcessos })
+    .then((resposta) => {
+      if (!resposta || !resposta.ok) {
+        throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a varredura.");
+      }
+    })
+    .catch((e) => {
+      setStatusLoteLocalizadorIA("Erro ao iniciar a varredura.", "erro");
+      areaErrosLoteLocalizadorIA.hidden = false;
+      areaErrosLoteLocalizadorIA.textContent = e && e.message ? e.message : String(e);
+      areaProgressoLoteLocalizadorIA.hidden = true;
+      btnVarrerLoteLocalizadorIA.disabled = false;
+    });
+}
+
+btnVarrerLoteLocalizadorIA.addEventListener("click", () => {
+  const url = selectLoteLocalizadorIA.value;
+  const localizador = localizadoresCarregados.find((loc) => loc.urlProcessos === url);
+  if (!localizador) return;
+
+  if ((localizador.totalProcessos || 0) > LIMITE_PROCESSOS_SEM_CONFIRMACAO_LOTE_LOCALIZADOR) {
+    areaConfirmarVarreduraLoteLocalizadorIA.hidden = false;
+    textoConfirmarVarreduraLoteLocalizadorIA.textContent =
+      `"${localizador.nome}" tem ${localizador.totalProcessos} processos - varrer todos pode demorar vários ` +
+      `minutos (uma aba oculta por processo, um de cada vez). Confirma?`;
+    return;
+  }
+
+  iniciarVarreduraLoteLocalizadorIA(localizador);
+});
+
+btnConfirmarVarreduraLoteLocalizadorIA.addEventListener("click", () => {
+  const url = selectLoteLocalizadorIA.value;
+  const localizador = localizadoresCarregados.find((loc) => loc.urlProcessos === url);
+  if (!localizador) return;
+  iniciarVarreduraLoteLocalizadorIA(localizador);
+});
+
+btnCancelarVarreduraLoteLocalizadorIA.addEventListener("click", () => {
+  areaConfirmarVarreduraLoteLocalizadorIA.hidden = true;
+});
+
+// Descrições/observações distintas dos documentos de um grupo (sigla),
+// juntando o que foi varrido em todos os processos do localizador - é o
+// que deixa claro o que aquele "OUT"/"PROCADM" realmente contém. Dedup +
+// truncamento para não estourar a tela em grupos grandes.
+function descricoesDoGrupo(grupo, limite = 8) {
+  const vistas = new Set();
+  for (const processo of processosVarridosLoteLocalizadorIA) {
+    for (const doc of processo.documentos || []) {
+      if (doc.grupo !== grupo) continue;
+      const d = (doc.descricao || "").trim();
+      if (d) vistas.add(d);
+    }
+  }
+  const lista = [...vistas];
+  if (lista.length === 0) return "";
+  const mostradas = lista.slice(0, limite).join(" · ");
+  return lista.length > limite ? `${mostradas} · …` : mostradas;
+}
+
+function renderizarGruposLoteLocalizadorIA(grupos) {
+  listaGruposLoteLocalizadorIA.innerHTML = "";
+  for (const { grupo, contagem } of grupos) {
+    const nomeAmigavel = nomeTipoDocumento(grupo);
+    const rotulo = nomeAmigavel.toUpperCase() !== grupo ? `${nomeAmigavel} · ${grupo}` : grupo;
+    const descricoes = descricoesDoGrupo(grupo);
+
+    const label = document.createElement("label");
+    label.className = "opcao opcao-grupo-doc";
+    const primeiraLinha = document.createElement("span");
+    primeiraLinha.className = "grupo-doc-titulo";
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.checked = true;
+    chk.setAttribute("data-grupo-doc", grupo);
+    primeiraLinha.appendChild(chk);
+    primeiraLinha.appendChild(document.createTextNode(` ${rotulo} (${contagem} documento(s))`));
+    label.appendChild(primeiraLinha);
+
+    if (descricoes) {
+      const descEl = document.createElement("span");
+      descEl.className = "grupo-descricoes";
+      descEl.textContent = descricoes;
+      label.appendChild(descEl);
+    }
+
+    listaGruposLoteLocalizadorIA.appendChild(label);
+  }
+}
+
+function checkboxesGruposLoteLocalizadorIA() {
+  return Array.from(listaGruposLoteLocalizadorIA.querySelectorAll("[data-grupo-doc]"));
+}
+
+btnMarcarTudoGruposLoteIA.addEventListener("click", () => {
+  checkboxesGruposLoteLocalizadorIA().forEach((chk) => (chk.checked = true));
+});
+
+btnDesmarcarTudoGruposLoteIA.addEventListener("click", () => {
+  checkboxesGruposLoteLocalizadorIA().forEach((chk) => (chk.checked = false));
+});
+
+btnAdicionarLoteLocalizadorIA.addEventListener("click", async () => {
+  const gruposEscolhidos = checkboxesGruposLoteLocalizadorIA()
+    .filter((chk) => chk.checked)
+    .map((chk) => chk.dataset.grupoDoc);
+
+  if (gruposEscolhidos.length === 0) {
+    areaErrosLoteLocalizadorIA.hidden = false;
+    areaErrosLoteLocalizadorIA.textContent = "Marque ao menos um grupo de documentos.";
+    return;
+  }
+  if (processosVarridosLoteLocalizadorIA.length === 0) {
+    areaErrosLoteLocalizadorIA.hidden = false;
+    areaErrosLoteLocalizadorIA.textContent = "Varra os documentos de um localizador antes de adicionar à fila.";
+    return;
+  }
+  if (!selectPromptLoteLocalizadorIA.value) {
+    areaErrosLoteLocalizadorIA.hidden = false;
+    areaErrosLoteLocalizadorIA.textContent = "Escolha um prompt cadastrado para aplicar em todos os processos.";
+    return;
+  }
+
+  areaErrosLoteLocalizadorIA.hidden = true;
+  btnAdicionarLoteLocalizadorIA.disabled = true;
+  areaProgressoLoteLocalizadorIA.hidden = false;
+  textoProgressoLoteLocalizadorIA.textContent = "Iniciando...";
+  setStatusLoteLocalizadorIA("Adicionando os processos filtrados à fila em lote...");
+
+  const config = await obterConfiguracoes();
+
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "IA_LOTE_LOCALIZADOR_ADICIONAR",
+      processos: processosVarridosLoteLocalizadorIA,
+      grupos: gruposEscolhidos,
+      promptId: selectPromptLoteLocalizadorIA.value,
+      promptTextoAvulso: null,
+      anonimizar: chkAnonimizarLoteLocalizadorIA.checked,
+      modelo: config.modeloClaude,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao adicionar à fila.");
+    }
+  } catch (e) {
+    setStatusLoteLocalizadorIA("Erro ao adicionar os processos à fila.", "erro");
+    areaErrosLoteLocalizadorIA.hidden = false;
+    areaErrosLoteLocalizadorIA.textContent = e && e.message ? e.message : String(e);
+    areaProgressoLoteLocalizadorIA.hidden = true;
+    btnAdicionarLoteLocalizadorIA.disabled = false;
+  }
+});
+
+chrome.runtime.onMessage.addListener((mensagem) => {
+  if (!mensagem) return;
+
+  if (mensagem.tipo === "PROGRESSO_IA_LOTE_LOCALIZADOR") {
+    textoProgressoLoteLocalizadorIA.textContent = mensagem.texto || "Processando...";
+    setStatusLoteLocalizadorIA(mensagem.texto || "Processando...");
+  }
+
+  if (mensagem.tipo === "IA_LOTE_LOCALIZADOR_VARRIDO") {
+    areaProgressoLoteLocalizadorIA.hidden = true;
+    btnVarrerLoteLocalizadorIA.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      processosVarridosLoteLocalizadorIA = resultado.processos || [];
+      const grupos = resultado.grupos || [];
+      const erros = resultado.erros || [];
+
+      if (grupos.length > 0) {
+        renderizarGruposLoteLocalizadorIA(grupos);
+        areaGruposLoteLocalizadorIA.hidden = false;
+      }
+
+      setStatusLoteLocalizadorIA(
+        `Varredura concluída: ${processosVarridosLoteLocalizadorIA.length} de ${resultado.total || 0} processo(s) ` +
+          `com documentos lidos${erros.length > 0 ? ` (${erros.length} com aviso/erro - veja abaixo)` : ""}.`,
+        erros.length > 0 ? "erro" : "ok"
+      );
+      if (erros.length > 0 || resultado.erroColeta) {
+        areaErrosLoteLocalizadorIA.hidden = false;
+        const linhas = erros.map((e) => `${e.nome}: ${e.mensagem}`);
+        if (resultado.erroColeta) linhas.unshift(`Aviso: ${resultado.erroColeta}`);
+        areaErrosLoteLocalizadorIA.textContent = linhas.join("\n");
+      }
+    } else {
+      setStatusLoteLocalizadorIA("Erro ao varrer os documentos do localizador.", "erro");
+      areaErrosLoteLocalizadorIA.hidden = false;
+      areaErrosLoteLocalizadorIA.textContent =
+        mensagem.erro || "Falha desconhecida ao varrer os documentos do localizador.";
+    }
+  }
+
+  if (mensagem.tipo === "IA_LOTE_LOCALIZADOR_ADICIONADO") {
+    areaProgressoLoteLocalizadorIA.hidden = true;
+    btnAdicionarLoteLocalizadorIA.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      const erros = resultado.erros || [];
+      setStatusLoteLocalizadorIA(
+        `Concluído! ${resultado.adicionados || 0} de ${resultado.total || 0} processo(s) adicionado(s) à fila em lote acima` +
+          (erros.length > 0 ? ` (${erros.length} pulado(s) - veja abaixo).` : "."),
+        erros.length > 0 ? "erro" : "ok"
+      );
+      if (erros.length > 0) {
+        areaErrosLoteLocalizadorIA.hidden = false;
+        areaErrosLoteLocalizadorIA.textContent = erros.map((e) => `${e.nome}: ${e.mensagem}`).join("\n");
+      }
+      atualizarListaCompletaIA();
+      blocoLoteIA.open = true;
+    } else {
+      setStatusLoteLocalizadorIA("Erro ao adicionar os processos à fila.", "erro");
+      areaErrosLoteLocalizadorIA.hidden = false;
+      areaErrosLoteLocalizadorIA.textContent =
+        mensagem.erro || "Falha desconhecida ao adicionar os processos à fila.";
+    }
+  }
+});
+
+// ---- Transcrever Depoimentos (arquivos "VIDEO*" via Gemini) ----
+
+btnTranscreverIA.addEventListener("click", async () => {
+  const selecionados = checkboxesVideosTranscricaoIA()
+    .filter((chk) => chk.checked)
+    .map((chk) => chk.dataset.videoDoc);
+
+  const documentos = (estadoAtual.documentos || []).filter((doc) => selecionados.includes(doc.idDocumento));
+  if (documentos.length === 0) {
+    areaErrosTranscricaoIA.hidden = false;
+    areaErrosTranscricaoIA.textContent = "Selecione ao menos um vídeo antes de transcrever.";
+    return;
+  }
+
+  const config = await obterConfiguracoes();
+  if (!config.chaveGemini) {
+    areaErrosTranscricaoIA.hidden = false;
+    areaErrosTranscricaoIA.textContent =
+      'A transcrição usa a API do Gemini - configure a "Chave de API do Gemini" nas configurações.';
+    return;
+  }
+
+  areaErrosTranscricaoIA.hidden = true;
+  areaResultadoTranscricaoIA.hidden = true;
+  btnTranscreverIA.disabled = true;
+  areaProgressoTranscricaoIA.hidden = false;
+  textoProgressoTranscricaoIA.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaStatusTranscricaoIA);
+  setStatus(`Transcrevendo ${documentos.length} vídeo(s) selecionado(s) (pode demorar)...`, undefined, "transcricao");
+
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "TRANSCREVER_IA",
+      documentos: documentos.map((doc) => ({
+        idDocumento: doc.idDocumento,
+        nome: doc.nome,
+        href: doc.href,
+        mimetype: doc.mimetype,
+      })),
+      modelo: config.modeloGemini,
+      apiKey: config.chaveGemini,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a transcrição.");
+    }
+  } catch (e) {
+    setStatus("Erro ao iniciar a transcrição.", "erro", "transcricao");
+    areaErrosTranscricaoIA.hidden = false;
+    areaErrosTranscricaoIA.textContent = e && e.message ? e.message : String(e);
+    areaProgressoTranscricaoIA.hidden = true;
+    btnTranscreverIA.disabled = false;
+  }
+});
+
+btnCopiarResultadoTranscricaoIA.addEventListener("click", () => copiarTexto(textoResultadoTranscricaoIA.value));
+
+chrome.runtime.onMessage.addListener((mensagem) => {
+  if (!mensagem) return;
+
+  if (mensagem.tipo === "PROGRESSO_TRANSCRICAO_IA") {
+    textoProgressoTranscricaoIA.textContent = mensagem.texto || "Processando...";
+    setStatus(mensagem.texto || "Processando...", undefined, "transcricao");
+  }
+
+  if (mensagem.tipo === "TRANSCRICAO_IA_PRONTA") {
+    areaProgressoTranscricaoIA.hidden = true;
+    btnTranscreverIA.disabled = false;
+
+    if (mensagem.ok) {
+      areaResultadoTranscricaoIA.hidden = false;
+      textoResultadoTranscricaoIA.value = mensagem.texto || "";
+      setStatus("Transcrição concluída.", "ok", "transcricao");
+    } else {
+      setStatus("Erro ao transcrever.", "erro", "transcricao");
+      areaErrosTranscricaoIA.hidden = false;
+      areaErrosTranscricaoIA.textContent = mensagem.erro || "Falha desconhecida ao transcrever.";
+    }
+  }
+});
+
 // ---- Reordenar os cartões de perfil arrastando com o mouse ----
 //
 // A ordem padrão (Corregedoria > Gestão da Unidade > Magistrado, já
@@ -2233,5 +2988,16 @@ listaCardsPerfil.querySelectorAll(".card").forEach((card) => {
   });
 });
 
+// Ao abrir cada card de IA, reavaliar o setup (provedor/modelo/chave) para
+// o indicador nunca ficar defasado se o usuário configurou entre uma
+// abertura e outra.
+document.getElementById("card-analise-ia").addEventListener("toggle", (e) => {
+  if (e.target.open) atualizarStatusSetupIA();
+});
+document.getElementById("card-transcricao-ia").addEventListener("toggle", (e) => {
+  if (e.target.open) atualizarStatusSetupIA();
+});
+
+atualizarStatusSetupIA();
 atualizarPromptsIA();
 atualizarListaCompletaIA();
