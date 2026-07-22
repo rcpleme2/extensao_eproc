@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Extensão Auxiliar eProc</title>
-<meta name="description" content="Extensão para Chrome/Edge com ferramentas de exportação de documentos, relatórios em PDF e automações para o sistema eProc do TJPR." />
+<meta name="description" content="Extensão para Chrome/Edge com análise de processos por IA (Claude/Gemini), transcrição de audiências, exportação de documentos, relatórios em PDF e automações para o sistema eProc do TJPR." />
 <style>
   /* Mesmos tokens de design de popup.css - a página usa deliberadamente
      a mesma paleta/tipografia/componentes do próprio painel da extensão
@@ -352,7 +352,7 @@
     </summary>
     <div class="card-corpo">
       <div class="linha-versao">
-        <span class="versao-numero">v1.2.0</span>
+        <span class="versao-numero">v6.4.0</span>
         <a class="btn-secundario" href="https://github.com/rcpleme2/extensao_eproc/archive/refs/heads/main.zip">⬇ Baixar versão atual (.zip)</a>
       </div>
       <p style="font-size: var(--fonte-pequena); color: var(--cor-texto-suave);">
@@ -362,22 +362,23 @@
       </p>
 
       <div class="novidades">
-        <h3>Novidades da v1.2.0 <span class="versao-numero-pequena">desde a v1.1.0</span></h3>
+        <h3>Novidades da v6.4.0 <span class="versao-numero-pequena">últimos ajustes</span></h3>
         <ul>
-          <li>Novo modo <strong>"Separação por competência"</strong> no Relatório da Unidade (cartão Gestão da Unidade): além do total da unidade, cada seção (processos ativos, suspensos/sobrestados, conclusos para decisão/sentença, sem movimentação e paralisados) ganha um <strong>subtotal por competência</strong> no resumo, e as seções com relação de processos ganham uma <strong>subseção com tabela própria por competência</strong>.</li>
+          <li>No <strong>processamento em lote por IA</strong>, os documentos aparecem com <strong>nome amigável do tipo + descrição</strong> (ex.: "Petição — RG CPF"), tanto por documento quanto nos grupos por localizador.</li>
+          <li>Localizadores do "Lote por localizador" <strong>ordenados por nº de processos</strong> (do maior ao menor).</li>
+          <li><strong>Reforma da barra lateral:</strong> cartões organizados <strong>por função</strong>, fluxo de IA guiado em passos, <strong>indicador de configuração</strong> (provedor/modelo/chave) e nomenclatura padronizada <strong>"Anthropic (Claude)"</strong>.</li>
         </ul>
       </div>
 
       <div class="novidades">
-        <h3>Novidades da v1.1.0 <span class="versao-numero-pequena">desde a v1.0.0</span></h3>
+        <h3>Grandes novidades <span class="versao-numero-pequena">desde a v1.2.0 — chegada da IA</span></h3>
         <ul>
-          <li>Nova <strong>comparação de dados de resumo entre unidades</strong> (Corregedoria): escolha 2 ou mais unidades e exporte um único PDF comparando os números lado a lado.</li>
-          <li>O Relatório para Correição agora aceita <strong>escolher várias unidades de uma vez</strong>, gerando um PDF separado por unidade, em sequência.</li>
-          <li>Novo <strong>gráfico de distribuição por rito processual</strong> no Relatório da Unidade.</li>
-          <li>Botões <strong>"Marcar tudo"/"Desmarcar tudo"</strong> nos itens do PDF do Relatório para Correição.</li>
-          <li>"Primeiro de Maio" incluída na lista de exceções de comarca (mesmo tratamento de "Cândido de Abreu").</li>
-          <li>Correção: caixas de fluxo com muitos critérios não ultrapassam mais o rodapé da página no PDF de Regras de Automação.</li>
-          <li>Correção: texto sobreposto entre colunas na tabela de processos paralisados do PDF.</li>
+          <li><strong>🤖 Analisar com IA:</strong> gera relatórios/análises dos documentos de um processo usando IA (Anthropic/Claude ou Google/Gemini), com estimativa de custo e <strong>pré-visualização editável</strong> do texto antes de enviar.</li>
+          <li><strong>📦 Fila em lote:</strong> enfileira vários processos e envia de uma vez pela Message Batches API da Anthropic — cerca de <strong>50% mais barato</strong>, com resposta em até 24h e resultado separado por processo.</li>
+          <li><strong>🗂️ Lote por localizador:</strong> roda um prompt em <strong>todos os processos de um localizador</strong>, filtrando por grupo de documento (petições, inicial, etc.).</li>
+          <li><strong>🎙️ Transcrever Depoimentos:</strong> detecta os vídeos de audiência do processo e transcreve por IA, com <strong>timestamps</strong>, identificação de interlocutores e marcação de trechos <code>[inaudível]</code>.</li>
+          <li><strong>📝 Prompts:</strong> cadastro de prompts reutilizáveis (criar/editar/excluir) ou prompt avulso digitado na hora.</li>
+          <li>As funções de IA usam <strong>as suas próprias chaves de API</strong> e o conteúdo vai direto do navegador ao provedor escolhido — veja a <a href="privacy.html">Política de Privacidade</a>.</li>
         </ul>
       </div>
     </div>
@@ -407,12 +408,27 @@
       <div class="lista-funcoes">
 
         <div class="funcao">
-          <div class="funcao-cabecalho"><strong>Exportar Documentos</strong><span class="selo">Gestão Gabinete</span></div>
+          <div class="funcao-cabecalho"><strong>🤖 Analisar com IA</strong><span class="selo">IA</span></div>
+          <p>Gera relatórios/análises dos documentos de um processo com IA (Anthropic/Claude ou Google/Gemini). Mostra a estimativa de custo e permite <strong>revisar e editar</strong> o texto anonimizado antes de enviar. Inclui uma <strong>fila em lote</strong> (Message Batches da Anthropic) para enviar vários processos de uma vez, cerca de 50% mais barato, com resultado separado por processo.</p>
+        </div>
+
+        <div class="funcao">
+          <div class="funcao-cabecalho"><strong>🗂️ Lote por localizador (IA)</strong><span class="selo">IA</span></div>
+          <p>Roda um prompt pré-cadastrado em <strong>todos os processos de um localizador</strong>, filtrando por grupo de documento (petições, inicial, etc.). Localizadores ordenados por nº de processos.</p>
+        </div>
+
+        <div class="funcao">
+          <div class="funcao-cabecalho"><strong>🎙️ Transcrever Depoimentos</strong><span class="selo">IA</span></div>
+          <p>Detecta os vídeos de audiência do processo e os transcreve por IA (Gemini), com timestamps, identificação de interlocutores e marcação de trechos <code>[inaudível]</code>.</p>
+        </div>
+
+        <div class="funcao">
+          <div class="funcao-cabecalho"><strong>Exportar Documentos</strong></div>
           <p>Baixa todos os documentos de um processo de uma vez, organizados em pastas por processo. Pode combinar tudo num único PDF ou gerar um Markdown anonimizado com a movimentação e o texto dos documentos.</p>
         </div>
 
         <div class="funcao">
-          <div class="funcao-cabecalho"><strong>Busca específica de localizadores</strong><span class="selo">Gestão Gabinete</span></div>
+          <div class="funcao-cabecalho"><strong>Busca específica de localizadores</strong></div>
           <p>Lista os processos de um localizador escolhido e permite abri-los ou exportar os documentos/processos encontrados.</p>
         </div>
 
