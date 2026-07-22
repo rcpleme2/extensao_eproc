@@ -2,7 +2,7 @@
 
 **Extensão:** Extensão Auxiliar eProc (versão 6.4.0)
 **Última atualização:** 22 de julho de 2026
-**Contato do desenvolvedor:** rafaelcpleme@gmail.com
+**Contato do desenvolvedor:** rcpl@tjpr.jus.br
 
 > Versão web (para colar no Chrome Web Store):
 > https://rcpleme2.github.io/extensao_eproc/privacy.html
@@ -114,4 +114,4 @@ continuado após mudanças implica concordância.
 
 ## 11. Contato
 
-Dúvidas sobre esta política: rafaelcpleme@gmail.com
+Dúvidas sobre esta política: rcpl@tjpr.jus.br
