@@ -798,6 +798,9 @@ essa opção, nada é salvo: o texto só existe para aquela chamada.
   **opcional e de melhor esforço** (mesmas limitações do "MD único") —
   revise o que está sendo enviado antes de confirmar, especialmente em
   processos com dados sensíveis.
+- A política de privacidade completa (também usada na Chrome Web Store)
+  está em [`PRIVACY.md`](PRIVACY.md) e publicada em
+  <https://rcpleme2.github.io/extensao_eproc/privacy.html>.
 
 ### Erro "Envio falhou: verifique se a rede interna está bloqueando..."
 

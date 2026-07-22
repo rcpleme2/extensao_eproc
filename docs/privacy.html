@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Política de Privacidade — Extensão Auxiliar eProc</title>
+<meta name="description" content="Política de privacidade da Extensão Auxiliar eProc: a extensão roda localmente no navegador, não envia dados ao desenvolvedor e só contata as APIs de IA quando o usuário aciona, com as chaves do próprio usuário." />
+<style>
+  /* Mesmos tokens de design de popup.css e da página inicial (index.html):
+     a política usa deliberadamente a mesma paleta/tipografia da extensão. */
+  :root {
+    --cor-primaria: #2c6ea6;
+    --cor-primaria-escura: #1c3d5a;
+    --cor-primaria-hover: #24597f;
+    --cor-texto: #26313a;
+    --cor-texto-suave: #5c6b78;
+    --cor-fundo: #f4f6f8;
+    --cor-cartao: #ffffff;
+    --cor-borda: #dfe4e8;
+    --cor-borda-suave: #ecf0f3;
+    --cor-realce-fundo: #f0f4f8;
+    --cor-aviso: #7a5c00;
+    --cor-aviso-fundo: #fff8e1;
+    --cor-aviso-borda: #f0d98c;
+    --cor-ok: #1a7f37;
+    --cor-ok-fundo: #eaf6ee;
+    --raio: 6px;
+    --raio-cartao: 8px;
+    --espaco-1: 6px;
+    --espaco-2: 10px;
+    --espaco-3: 14px;
+    --fonte-base: 14px;
+    --fonte-pequena: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --cor-primaria: #6fa8d8;
+      --cor-primaria-escura: #cfe0f0;
+      --cor-primaria-hover: #86b6e0;
+      --cor-texto: #dde3e8;
+      --cor-texto-suave: #98a5b0;
+      --cor-fundo: #10161b;
+      --cor-cartao: #1a2229;
+      --cor-borda: #2c363e;
+      --cor-borda-suave: #232b32;
+      --cor-realce-fundo: #202a32;
+      --cor-aviso-fundo: #2a2410;
+      --cor-aviso-borda: #5c4c14;
+      --cor-aviso: #e0c05c;
+      --cor-ok-fundo: #123321;
+      --cor-ok: #4cbf78;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--cor-fundo);
+    color: var(--cor-texto);
+    font-size: var(--fonte-base);
+    line-height: 1.6;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: var(--espaco-3) var(--espaco-2) 40px; }
+
+  .cabecalho-app {
+    display: flex;
+    align-items: center;
+    gap: var(--espaco-2);
+    padding: 4px 2px 12px;
+    border-bottom: 2px solid var(--cor-primaria);
+    margin-bottom: var(--espaco-3);
+  }
+  .cabecalho-app img { width: 30px; height: 30px; flex: 0 0 auto; }
+  .cabecalho-titulos { min-width: 0; }
+  .cabecalho-app h1 {
+    font-size: 17px;
+    font-weight: 700;
+    margin: 0;
+    color: var(--cor-primaria-escura);
+  }
+  .cabecalho-sub { font-size: var(--fonte-pequena); color: var(--cor-texto-suave); }
+
+  .voltar {
+    display: inline-block;
+    margin-bottom: var(--espaco-3);
+    font-size: var(--fonte-pequena);
+    color: var(--cor-primaria);
+    text-decoration: none;
+  }
+  .voltar:hover { text-decoration: underline; }
+
+  .doc {
+    background: var(--cor-cartao);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-cartao);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    padding: 20px 22px;
+  }
+  .doc > *:first-child { margin-top: 0; }
+  .doc > *:last-child { margin-bottom: 0; }
+
+  .doc h1 {
+    font-size: 20px;
+    color: var(--cor-primaria-escura);
+    margin: 0 0 4px;
+  }
+  .doc .meta {
+    font-size: var(--fonte-pequena);
+    color: var(--cor-texto-suave);
+    margin: 0 0 var(--espaco-3);
+    line-height: 1.7;
+  }
+  .doc h2 {
+    font-size: 15px;
+    color: var(--cor-primaria);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin: 26px 0 8px;
+    padding-top: 14px;
+    border-top: 1px solid var(--cor-borda-suave);
+  }
+  .doc p { margin: 0 0 10px; }
+  .doc ul { margin: 0 0 10px; padding-left: 1.3em; }
+  .doc li { margin-bottom: 6px; }
+  .doc li:last-child { margin-bottom: 0; }
+  .doc a { color: var(--cor-primaria); }
+  code {
+    background: var(--cor-realce-fundo);
+    border: 1px solid var(--cor-borda);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.92em;
+  }
+
+  .aviso {
+    padding: 10px 12px;
+    background: var(--cor-aviso-fundo);
+    border: 1px solid var(--cor-aviso-borda);
+    border-radius: var(--raio);
+    color: var(--cor-aviso);
+    font-size: var(--fonte-pequena);
+    line-height: 1.55;
+    margin: 0 0 10px;
+  }
+  .aviso strong { color: inherit; }
+
+  .destaque {
+    padding: 10px 12px;
+    background: var(--cor-realce-fundo);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio);
+    margin: 0 0 10px;
+  }
+
+  table { border-collapse: collapse; width: 100%; font-size: var(--fonte-pequena); margin: 4px 0 10px; }
+  .tabela-rolagem { overflow-x: auto; }
+  th, td { border: 1px solid var(--cor-borda); padding: 7px 9px; text-align: left; vertical-align: top; }
+  th { background: var(--cor-realce-fundo); color: var(--cor-primaria-escura); font-weight: 700; }
+
+  footer {
+    text-align: center;
+    font-size: var(--fonte-pequena);
+    color: var(--cor-texto-suave);
+    padding: 20px 0 0;
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header class="cabecalho-app">
+    <img src="assets/icon48.png" alt="" />
+    <div class="cabecalho-titulos">
+      <h1>Extensão Auxiliar eProc</h1>
+      <div class="cabecalho-sub">TJPR · Sistema eProc</div>
+    </div>
+  </header>
+
+  <a class="voltar" href="index.html">← Voltar à página inicial</a>
+
+  <article class="doc">
+    <h1>Política de Privacidade</h1>
+    <p class="meta">
+      <strong>Extensão:</strong> Extensão Auxiliar eProc (versão 6.4.0)<br />
+      <strong>Última atualização:</strong> 22 de julho de 2026<br />
+      <strong>Contato do desenvolvedor:</strong> <a href="mailto:rcpl@tjpr.jus.br">rcpl@tjpr.jus.br</a>
+    </p>
+
+    <h2>1. Resumo</h2>
+    <p>
+      A <strong>Extensão Auxiliar eProc</strong> funciona <strong>inteiramente no seu
+      navegador</strong>. O desenvolvedor <strong>não opera nenhum servidor</strong> e
+      <strong>não recebe, coleta, armazena ou tem acesso a qualquer dado seu</strong>. A
+      extensão não usa analytics, telemetria, cookies de rastreamento nem publicidade.
+    </p>
+    <div class="destaque">
+      Dados só saem do seu navegador <strong>quando você aciona uma funcionalidade de
+      Inteligência Artificial</strong>. Nesse caso, o conteúdo é enviado <strong>diretamente
+      do seu navegador para o provedor de IA que você escolher</strong> (Anthropic ou Google),
+      usando <strong>as chaves de API que você mesmo cadastrou</strong>. O desenvolvedor não
+      intermedeia nem tem visibilidade sobre esse tráfego.
+    </div>
+
+    <h2>2. Quais dados a extensão trata</h2>
+    <p>A extensão pode ler e processar, <strong>localmente</strong>, dentro da sua sessão
+    autenticada do eProc:</p>
+    <ul>
+      <li><strong>Conteúdo de processos e documentos</strong> exibidos na aba ativa do eProc
+      (texto, metadados de documentos, movimentações) — apenas quando você usa uma função da
+      extensão.</li>
+      <li><strong>Chaves de API</strong> que você cadastra (Anthropic/Claude e Google Gemini).</li>
+      <li><strong>Prompts, filas de processamento em lote e preferências</strong> de
+      configuração criados por você.</li>
+    </ul>
+    <p>A extensão <strong>não</strong> acessa seu histórico de navegação, senhas, e-mails ou
+    qualquer site fora dos domínios do eProc e das APIs de IA declaradas.</p>
+
+    <h2>3. Onde os dados ficam armazenados</h2>
+    <p>Todas as informações (chaves de API, prompts, filas, preferências) são gravadas
+    <strong>exclusivamente</strong> no armazenamento local do seu navegador
+    (<code>chrome.storage.local</code>), no seu próprio dispositivo.
+    <strong>Nada é enviado ao desenvolvedor.</strong></p>
+    <p>Você pode apagar esses dados a qualquer momento removendo a extensão ou limpando os
+    dados de navegação do Chrome/Edge.</p>
+
+    <h2>4. Compartilhamento com terceiros</h2>
+    <p>A extensão <strong>não vende, aluga ou compartilha</strong> seus dados para fins
+    comerciais.</p>
+    <p>O único envio a terceiros ocorre <strong>por sua ação explícita</strong>, ao usar as
+    funções de IA, e vai diretamente ao provedor que você escolher:</p>
+    <ul>
+      <li><strong>Anthropic (Claude)</strong> — <code>api.anthropic.com</code> — para análise
+      de texto de documentos.
+      Política de privacidade: <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener">anthropic.com/legal/privacy</a></li>
+      <li><strong>Google (Gemini)</strong> — <code>generativelanguage.googleapis.com</code> —
+      para análise de texto e <strong>transcrição de áudio/vídeo</strong> de audiências.
+      Política de privacidade: <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">policies.google.com/privacy</a></li>
+    </ul>
+    <p>Esses envios usam <strong>as suas próprias chaves de API</strong> e ficam sujeitos aos
+    termos e políticas de cada provedor. O desenvolvedor não tem acesso a esse conteúdo nem às
+    respostas.</p>
+
+    <h2>5. Anonimização e seus limites</h2>
+    <p>Antes de enviar <strong>texto</strong> para a IA, a extensão aplica uma anonimização
+    automática de melhor esforço (CPF, CNPJ, telefones, e-mails e endereços).
+    <strong>Essa anonimização não é garantida como completa</strong> e pode não remover todos
+    os dados sensíveis.</p>
+    <div class="aviso">
+      <strong>Importante:</strong> a transcrição de <strong>áudio e vídeo</strong> de audiências
+      é enviada ao Google Gemini <strong>sem qualquer anonimização</strong>. Avalie com cautela
+      antes de enviar conteúdo sigiloso ou sob segredo de justiça. O uso da extensão é de
+      responsabilidade do usuário quanto ao dever de sigilo processual.
+    </div>
+
+    <h2>6. O que a extensão NÃO faz</h2>
+    <ul>
+      <li>Não envia dados ao desenvolvedor.</li>
+      <li>Não possui servidores próprios.</li>
+      <li>Não coleta analytics, telemetria ou estatísticas de uso.</li>
+      <li>Não usa dados para publicidade ou para treinamento de modelos por parte do desenvolvedor.</li>
+      <li>Não rastreia sua navegação.</li>
+    </ul>
+
+    <h2>7. Permissões e suas finalidades</h2>
+    <div class="tabela-rolagem">
+      <table>
+        <thead>
+          <tr><th>Permissão</th><th>Finalidade</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>activeTab</code> / <code>scripting</code></td><td>Ler os documentos do processo aberto na aba ativa do eProc quando você aciona a extensão.</td></tr>
+          <tr><td><code>tabs</code></td><td>Identificar se a aba atual é uma página do eProc.</td></tr>
+          <tr><td><code>storage</code></td><td>Salvar localmente chaves, prompts e preferências.</td></tr>
+          <tr><td><code>downloads</code></td><td>Exportar relatórios e documentos para o seu computador.</td></tr>
+          <tr><td><code>sidePanel</code></td><td>Exibir a interface da extensão no painel lateral.</td></tr>
+          <tr><td><code>alarms</code></td><td>Verificar periodicamente o resultado de análises enviadas em lote à Anthropic.</td></tr>
+          <tr><td>Acesso a <code>eproc1g.tjpr.jus.br</code> e <code>eproc1g.tre.tjpr.jus.br</code></td><td>Ler as páginas do eProc na sua sessão autenticada.</td></tr>
+          <tr><td>Acesso a <code>api.anthropic.com</code> e <code>generativelanguage.googleapis.com</code></td><td>Enviar conteúdo às APIs de IA que você escolher, com as suas chaves.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>8. Segurança</h2>
+    <p>As chaves de API e demais dados permanecem no seu dispositivo. Toda comunicação com o
+    eProc e com as APIs de IA ocorre por HTTPS. Mantenha suas chaves em sigilo; quem tiver
+    acesso a elas poderá usar as respectivas contas de API.</p>
+
+    <h2>9. Público</h2>
+    <p>Trata-se de uma ferramenta profissional destinada ao uso funcional no âmbito judiciário.
+    Não se destina a menores de idade nem coleta dados de crianças.</p>
+
+    <h2>10. Alterações desta política</h2>
+    <p>Alterações serão publicadas nesta mesma URL, com atualização da data acima. O uso
+    continuado após mudanças implica concordância.</p>
+
+    <h2>11. Contato</h2>
+    <p>Dúvidas sobre esta política: <a href="mailto:rcpl@tjpr.jus.br">rcpl@tjpr.jus.br</a></p>
+  </article>
+
+  <footer>
+    <a href="https://github.com/rcpleme2/extensao_eproc">rcpleme2/extensao_eproc</a> — código aberto, uso interno.
+  </footer>
+
+</main>
+</body>
+</html>
