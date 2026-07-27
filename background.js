@@ -6,7 +6,35 @@
 // perto de "Construcao do MD unico", sobre o motivo).
 
 importScripts("libs/pdf-lib.min.js");
-const { PDFDocument, StandardFonts, rgb } = self.PDFLib;
+const { PDFDocument, StandardFonts, rgb, PDFName } = self.PDFLib;
+
+// Cria um link interno (clicavel) numa pagina de origem apontando para
+// outra pagina do MESMO documento final ja' montado (pdf-lib nao tem API
+// de alto nivel para isso, entao monta-se a anotacao "/Link" na mao). Usado
+// para ligar cada bloco de resumo na capa a' sua tabela discriminada, la'
+// no final do relatório. "rect" e' [x1, y1, x2, y2] em pontos, no sistema
+// de coordenadas da pagina de origem (origem embaixo-esquerda).
+function adicionarLinkInterno(pdfDoc, paginaOrigem, rect, paginaDestino) {
+  const context = pdfDoc.context;
+  const annot = context.obj({
+    Type: "Annot",
+    Subtype: "Link",
+    Rect: rect,
+    // Sem borda visivel - a "dica" textual (ver desenharSecaoResumo) ja'
+    // sinaliza que a area e' clicavel, entao a moldura padrao so' poluiria.
+    Border: [0, 0, 0],
+    // "/Fit" leva a pagina de destino inteira para a viewport (sem depender
+    // de coordenada exata, que mudaria conforme o zoom do leitor de PDF).
+    Dest: [paginaDestino.ref, PDFName.of("Fit")],
+  });
+  const annotRef = context.register(annot);
+  const annots = paginaOrigem.node.Annots();
+  if (annots) {
+    annots.push(annotRef);
+  } else {
+    paginaOrigem.node.set(PDFName.of("Annots"), context.obj([annotRef]));
+  }
+}
 
 // Identidade visual institucional (TJPR/eProc) reaproveitada em todos os
 // PDFs gerados pela extensao (tabelas de Localizadores/Processos/
@@ -3901,7 +3929,7 @@ async function exportarRelatorioPanoramico(aoProgredir) {
   if (semMov.erro) avisos.push(`Sem movimentação (todas as varas): ${semMov.erro}`);
   if (atuacao.erro) avisos.push(`Atuação Conciliador/Juiz Leigo: ${atuacao.erro}`);
 
-  const bytesCapa = await construirCapaRelatorioGerencial(
+  const { bytes: bytesCapa } = await construirCapaRelatorioGerencial(
     "Todas as unidades",
     dataInformacao,
     secoesResumo,
@@ -4258,6 +4286,299 @@ async function listarUnidadesRelatorioGeral(aoProgredir) {
 
   notificar("Finalizando...");
   return { unidades: result.unidades };
+}
+
+// ===== Relatório de Audiências (Corregedoria) =====
+// Fluxo: menu lateral "Audiência" > "Relatórios de Audiências (Portal)"
+// (acao=audiencia_relatorio_portal); a tela ja' abre com "Consultar por"
+// = "Vara Estadual", entao basta escolher a vara (selVaraFederal) e clicar
+// "Consultar" (btnConsultar) - o resultado vem na tabela "tblAudienciasEproc".
+
+// Clica no link do menu lateral que leva ao Relatório de Audiências
+// (Portal). O <a> existe no DOM mesmo com o submenu "Audiência" recolhido
+// (o collapse e' só visual). Exclui as âncoras de acessibilidade
+// ("pular para..."), que na propria tela do relatorio tambem apontam para
+// essa acao. Autocontida, executada via chrome.scripting.executeScript.
+function clicarLinkRelatorioAudienciasNaPagina() {
+  const link = document.querySelector('a[href*="acao=audiencia_relatorio_portal"]:not([id^="ancora"])');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Lê as opções de vara (selVaraFederal) na tela do Relatório de Audiências,
+// descartando o placeholder ("--- Selecione a Vara/Órgão ---", value vazio).
+// Autocontida, executada via chrome.scripting.executeScript.
+function lerVarasRelatorioAudienciasNaPagina() {
+  const sel = document.getElementById("selVaraFederal");
+  if (!sel) {
+    return { erro: 'Campo de vara (selVaraFederal) não encontrado na tela de Relatório de Audiências.', varas: [] };
+  }
+  const varas = Array.from(sel.options)
+    .map((o) => ({ valor: o.value, nome: (o.textContent || "").trim() }))
+    .filter((o) => o.valor && o.valor.trim() !== "");
+  return { erro: null, varas };
+}
+
+// Seleciona a vara no formulário e dispara o "Consultar" (submit). Como o
+// bootstrap-select apenas espelha o <select> nativo no envio do POST, basta
+// setar o value nativo + disparar "change" (e, por garantia, pedir o
+// refresh do widget quando o jQuery/selectpicker existir) antes de submeter.
+// Autocontida, executada via chrome.scripting.executeScript (world MAIN).
+function selecionarVaraEConsultarAudienciasNaPagina(valorVara) {
+  const sel = document.getElementById("selVaraFederal");
+  if (!sel) return { ok: false, erro: "Formulário de audiências não encontrado (selVaraFederal)." };
+  sel.value = valorVara;
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+  try {
+    if (window.jQuery && window.jQuery.fn && window.jQuery.fn.selectpicker) {
+      window.jQuery(sel).selectpicker("refresh");
+    }
+  } catch (e) {
+    // Sem o widget/jQuery o value nativo ja' basta para o POST - segue.
+  }
+  const btn = document.getElementById("btnConsultar");
+  if (!btn) return { ok: false, erro: "Botão Consultar não encontrado na tela de audiências." };
+  btn.click();
+  return { ok: true };
+}
+
+// Raspa a tabela de resultados "tblAudienciasEproc". Cada linha vira
+// { data, hora, processo, evento, observacao, status }. Autocontida,
+// executada via chrome.scripting.executeScript.
+function extrairAudienciasNaPagina() {
+  const tabela = document.getElementById("tblAudienciasEproc");
+  if (!tabela) {
+    return { ok: false, erro: "Tabela de audiências (tblAudienciasEproc) não encontrada - a consulta pode não ter retornado nada.", linhas: [] };
+  }
+  const limpar = (s) => (s || "").replace(/\s+/g, " ").trim();
+  const linhas = [];
+  for (const tr of tabela.querySelectorAll("tbody tr")) {
+    const tds = tr.querySelectorAll("td");
+    if (tds.length < 6) continue;
+    const spansDataHora = tds[0].querySelectorAll("span");
+    const data = limpar(spansDataHora[0] ? spansDataHora[0].textContent : tds[0].textContent);
+    const hora = limpar(spansDataHora[1] ? spansDataHora[1].textContent : "");
+    const linkProc = tds[1].querySelector("a");
+    const processo = limpar(linkProc ? linkProc.textContent : tds[1].textContent);
+    const textoEvt = limpar(tds[4].textContent);
+    let evento = textoEvt;
+    let observacao = "";
+    const mObs = textoEvt.match(/Observa[çc][ãa]o:\s*(.*)$/i);
+    if (mObs) observacao = limpar(mObs[1]);
+    const mEvt = textoEvt.match(/Evento:\s*(.*?)(?:\s*Observa[çc][ãa]o:.*)?$/i);
+    if (mEvt) evento = limpar(mEvt[1]);
+    const status = limpar(tds[5].textContent);
+    linhas.push({ data, hora, processo, evento, observacao, status });
+  }
+  const caption = tabela.querySelector("caption");
+  const mTotal = caption ? (caption.textContent || "").match(/\((\d+)/) : null;
+  const total = mTotal ? parseInt(mTotal[1], 10) : linhas.length;
+  return { ok: true, total, linhas };
+}
+
+// Normaliza um nome de unidade/vara para comparação tolerante (sem
+// acentos, minúsculo, só letras/números separados por espaço) - usado para
+// casar a unidade escolhida no Relatório para Correição com a vara
+// correspondente na lista do Portal de Audiências (os textos costumam ser
+// os mesmos, mas podem diferir em acento/pontuação/caixa).
+function normalizarNomeUnidade(s) {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// Escolhe, na lista de varas do Portal de Audiências, a que corresponde ao
+// nome da unidade do relatório: match exato (normalizado) primeiro; senão,
+// o primeiro em que um nome contém o outro. Devolve null se não achar.
+function escolherVaraPorNome(varas, nomeUnidade) {
+  const alvo = normalizarNomeUnidade(nomeUnidade);
+  if (!alvo) return null;
+  let m = (varas || []).find((v) => normalizarNomeUnidade(v.nome) === alvo);
+  if (m) return m;
+  m = (varas || []).find((v) => {
+    const n = normalizarNomeUnidade(v.nome);
+    return n && (n.includes(alvo) || alvo.includes(n));
+  });
+  return m || null;
+}
+
+// Consulta as audiências marcadas de UMA unidade (pelo nome) no Portal de
+// Audiências, numa ABA OCULTA (para não navegar a aba do usuário no meio da
+// geração do relatório): abre a tela, casa a vara pelo nome, seleciona,
+// consulta e raspa a tabela. Best-effort: devolve { linhas, erro } - um erro
+// aqui só deixa a seção de audiências de fora do relatório (com aviso), sem
+// derrubar o resto.
+async function consultarAudienciasDaUnidade(urlBase, nomeUnidade) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioAudienciasNaPagina,
+    });
+    if (!linkEncontrado) {
+      return { linhas: [], erro: 'Link "Relatórios de Audiências (Portal)" não encontrado no menu lateral.' };
+    }
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    const [{ result: varasRes } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: lerVarasRelatorioAudienciasNaPagina,
+    });
+    if (!varasRes || varasRes.erro) {
+      return { linhas: [], erro: (varasRes && varasRes.erro) || "Não foi possível ler as varas do Portal de Audiências." };
+    }
+    const alvo = escolherVaraPorNome(varasRes.varas, nomeUnidade);
+    if (!alvo) {
+      return { linhas: [], erro: `Não encontrei "${nomeUnidade}" na lista de varas do Portal de Audiências.` };
+    }
+
+    const [{ result: consulta } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      world: "MAIN",
+      func: selecionarVaraEConsultarAudienciasNaPagina,
+      args: [alvo.valor],
+    });
+    if (!consulta || !consulta.ok) {
+      return { linhas: [], erro: (consulta && consulta.erro) || "Falha ao consultar as audiências." };
+    }
+
+    // O "Consultar" recarrega a pagina (POST) - espera e raspa; se a
+    // primeira leitura pegar a pagina no meio da navegacao, tenta de novo.
+    await aguardarCarregamentoAba(aba.id).catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    let extraido = null;
+    try {
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: extrairAudienciasNaPagina,
+      });
+      extraido = result;
+    } catch (e) {
+      // provavel recarregamento no meio - retenta abaixo.
+    }
+    if (!extraido || !extraido.ok) {
+      await aguardarCarregamentoAba(aba.id).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: extrairAudienciasNaPagina,
+      });
+      extraido = result;
+    }
+    if (!extraido || !extraido.ok) {
+      return { linhas: [], erro: (extraido && extraido.erro) || "Não foi possível ler a tabela de audiências." };
+    }
+    return { linhas: extraido.linhas, erro: null, varaNome: alvo.nome };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) chrome.tabs.remove(aba.id).catch(() => {});
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Resume as audiências: total, quebra por status e a data da última
+// audiência de cada tipo (evento).
+function resumirAudiencias(linhas) {
+  const total = linhas.length;
+
+  const porStatusMap = new Map();
+  for (const l of linhas) {
+    const s = (l.status || "").trim() || "(sem status)";
+    porStatusMap.set(s, (porStatusMap.get(s) || 0) + 1);
+  }
+  const porStatus = Array.from(porStatusMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([rotulo, valor]) => ({ rotulo, valor }));
+
+  const ultimaMap = new Map(); // evento -> { ord, data }
+  for (const l of linhas) {
+    const ev = (l.evento || "").trim() || "(sem evento)";
+    const ord = paraDataOrdenavel(`${l.data} ${l.hora || ""}:00`);
+    const atual = ultimaMap.get(ev);
+    if (!atual || ord > atual.ord) ultimaMap.set(ev, { ord, data: l.data });
+  }
+  const ultimaPorEvento = Array.from(ultimaMap.entries())
+    .sort((a, b) => b[1].ord - a[1].ord)
+    .map(([rotulo, v]) => ({ rotulo, valor: v.data }));
+
+  return { total, porStatus, ultimaPorEvento };
+}
+
+// Seções de resumo (rótulo/valor) das audiências, no formato consumido por
+// "construirCapaRelatorioGerencial"/secoesResumo: "AUDIÊNCIAS MARCADAS"
+// (total + quebra por status) e "ÚLTIMA AUDIÊNCIA POR EVENTO". A primeira
+// recebe "id" para virar link clicável até a tabela discriminada.
+function secoesResumoAudiencias(linhas) {
+  const resumo = resumirAudiencias(linhas);
+  return [
+    {
+      titulo: "AUDIÊNCIAS MARCADAS",
+      id: "audiencias",
+      linhas: [{ rotulo: "Total de audiências", valor: resumo.total }, ...resumo.porStatus],
+    },
+    {
+      titulo: "ÚLTIMA AUDIÊNCIA POR EVENTO",
+      linhas:
+        resumo.ultimaPorEvento.length > 0
+          ? resumo.ultimaPorEvento
+          : [{ rotulo: "(nenhuma audiência)", valor: "-" }],
+    },
+  ];
+}
+
+// Tabela discriminada das audiências (retrato): Data/Hora, Processo,
+// Evento/Observação, Status - ordenada da audiência mais próxima à mais
+// distante. Devolve os bytes do PDF (só a tabela), para ser anexada ao
+// relatório junto das demais tabelas discriminadas.
+async function construirPdfTabelaAudiencias(nomeUnidade, linhas, sufixoTitulo = "") {
+  const util = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+  const itens = linhas
+    .slice()
+    .sort((a, b) => paraDataOrdenavel(`${a.data} ${a.hora || ""}:00`) - paraDataOrdenavel(`${b.data} ${b.hora || ""}:00`))
+    .map((l) => ({
+      dataHora: l.hora ? `${l.data} ${l.hora}` : l.data,
+      processo: l.processo,
+      eventoObs: l.observacao ? `${l.evento} — ${l.observacao}` : l.evento,
+      status: l.status,
+    }));
+  const colunas = [
+    { titulo: "Data/Hora", largura: util * 0.16, campo: "dataHora" },
+    { titulo: "Processo", largura: util * 0.26, campo: "processo" },
+    { titulo: "Evento / Observação", largura: util * 0.4, campo: "eventoObs" },
+    { titulo: "Status", largura: util * 0.18, campo: "status" },
+  ];
+  return construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Audiências da unidade "${nomeUnidade}"${sufixoTitulo} — ${itens.length} audiência(s), da mais próxima à mais distante`
+  );
+}
+
+// Navega a aba ativa de volta para a página inicial do eproc - usado ao
+// FINAL da geração dos relatórios da Corregedoria (a aba pode ter ficado na
+// tela do Relatório Geral por causa do "Carregar unidades"). Best-effort:
+// qualquer falha aqui é silenciosa (não faz sentido derrubar um relatório
+// que já foi gerado só porque a navegação final não deu certo).
+async function retornarAbaParaInicioEproc() {
+  try {
+    const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!aba || !aba.id || !aba.url) return;
+    const origem = new URL(aba.url).origin;
+    await chrome.tabs.update(aba.id, { url: `${origem}/eproc/` });
+  } catch (e) {
+    // silencioso de proposito
+  }
 }
 
 // Dias de atraso usados no Relatório Gerencial da Unidade (diferente do
@@ -5143,14 +5464,14 @@ function mapaCoresPorValor(valores) {
   return mapa;
 }
 
-async function construirPdfProcessosAtivos(
-  tabela,
-  nomeUnidade,
-  processosUrgentes,
-  distribuicaoRitos,
-  sufixoTitulo = "",
-  somenteTabela = false
-) {
+// Extrai e normaliza as linhas da relação de processos ativos num formato
+// pronto para desenho (colunas curadas, "(Urgente)" já aplicado, ordenado
+// pela Data de Autuação do mais antigo para o mais novo). Fatorado para
+// fora de "construirPdfProcessosAtivos" para poder ser reaproveitado pelos
+// gráficos (classes/ranking), que hoje vivem numa seção própria — antes
+// das tabelas discriminadas — e portanto precisam dos mesmos "itens" sem
+// depender da tabela em si.
+function extrairItensAtivos(tabela, processosUrgentes) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
   const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
@@ -5186,7 +5507,7 @@ async function construirPdfProcessosAtivos(
     return situacaoAbreviada;
   };
 
-  const itens = tabela.linhas
+  return tabela.linhas
     .map((linha) => {
       const autuacao = valorDe(linha, idxAutuacao);
       const processo = valorDe(linha, idxProcesso);
@@ -5203,6 +5524,40 @@ async function construirPdfProcessosAtivos(
       };
     })
     .sort((a, b) => a.autuacaoOrdenavel - b.autuacaoOrdenavel);
+}
+
+// Gera as paginas de GRÁFICOS dos processos ativos (distribuição por classe
+// processual, distribuição por Rito Processual e ranking de maiores
+// demandantes/demandados) como uma lista de PDFs (bytes). Ficam numa seção
+// própria, logo após o resumo e ANTES das tabelas discriminadas, conforme a
+// ordem pedida para o relatório (resumos + gráficos primeiro; tabelas ao
+// final). Devolve [] quando não há o que desenhar.
+async function construirPdfsGraficosAtivos(tabela, nomeUnidade, processosUrgentes, distribuicaoRitos) {
+  const itens = extrairItensAtivos(tabela, processosUrgentes);
+  if (itens.length === 0) return [];
+  const bytesGrafico = await construirPdfGraficoClassesAtivos(itens, nomeUnidade);
+  const bytesGraficoRitos =
+    distribuicaoRitos && distribuicaoRitos.length > 0
+      ? await construirPdfGraficoRitosAtivos(distribuicaoRitos, nomeUnidade)
+      : null;
+  const bytesRanking = await construirPdfRankingPartes(itens, nomeUnidade);
+  return [bytesGrafico, bytesGraficoRitos, bytesRanking].filter(Boolean);
+}
+
+// Monta o PDF (A4 RETRATO) SÓ com a tabela discriminada dos processos
+// ativos (os gráficos saíram para "construirPdfsGraficosAtivos", que agora
+// os posiciona numa seção própria antes das tabelas). Os parâmetros
+// "distribuicaoRitos" e "somenteTabela" são mantidos por compatibilidade de
+// assinatura com os pontos de chamada, mas não alteram mais o resultado.
+async function construirPdfProcessosAtivos(
+  tabela,
+  nomeUnidade,
+  processosUrgentes,
+  distribuicaoRitos,
+  sufixoTitulo = "",
+  somenteTabela = false
+) {
+  const itens = extrairItensAtivos(tabela, processosUrgentes);
 
   const coresPorSituacao = mapaCoresPorValor(itens.map((item) => item.situacao));
 
@@ -5220,39 +5575,14 @@ async function construirPdfProcessosAtivos(
     { titulo: "Data/Hora", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "dataHora" },
   ];
 
-  const bytesTabela = await construirPdfTabelaCuradaRetrato(
+  // So' a tabela discriminada - os gráficos (classe/rito/ranking) agora
+  // vivem em "construirPdfsGraficosAtivos", posicionados numa seção própria
+  // ANTES desta tabela, junto do resumo.
+  return construirPdfTabelaCuradaRetrato(
     itens,
     colunas,
     `Processos ativos da unidade "${nomeUnidade}"${sufixoTitulo} — ${itens.length} processo(s), do mais antigo ao mais novo`
   );
-
-  // No modo "separação por rito", cada rito vira sua propria subseção so'
-  // com a tabela (sem repetir os graficos/ranking, que ja' sao mostrados
-  // uma unica vez pela unidade inteira) - "somenteTabela" pula esse
-  // trecho e devolve so' a tabela.
-  if (somenteTabela) return bytesTabela;
-
-  // Grafico de distribuicao por classe processual (reaproveita os mesmos
-  // "itens" ja' extraidos, sem nenhuma consulta a mais), logo em seguida
-  // o de distribuicao por Rito Processual (dados vindos de fora, ja'
-  // agregados - o Rito não é coluna da tabela, só filtro; ver
-  // "abrirAbaEConsultarRitosAtivos") e por fim o ranking de maiores
-  // demandantes/demandados - todos anexados como pagina(s) extra no FINAL
-  // da relacao de processos ativos.
-  const bytesGrafico = await construirPdfGraficoClassesAtivos(itens, nomeUnidade);
-  const bytesGraficoRitos =
-    distribuicaoRitos && distribuicaoRitos.length > 0
-      ? await construirPdfGraficoRitosAtivos(distribuicaoRitos, nomeUnidade)
-      : null;
-  const bytesRanking = await construirPdfRankingPartes(itens, nomeUnidade);
-  const pdfFinal = await PDFDocument.load(bytesTabela);
-  for (const bytesExtra of [bytesGrafico, bytesGraficoRitos, bytesRanking]) {
-    if (!bytesExtra) continue;
-    const pdfExtra = await PDFDocument.load(bytesExtra);
-    const paginasExtra = await pdfFinal.copyPages(pdfExtra, pdfExtra.getPageIndices());
-    paginasExtra.forEach((pagina) => pdfFinal.addPage(pagina));
-  }
-  return pdfFinal.save();
 }
 
 // Grafico de barras horizontais com a distribuicao das classes
@@ -5776,6 +6106,10 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   mandados: false,
   paralisados: true,
   remessasJuizesLeigos: true,
+  // Default "false": só o cartão Corregedoria envia essa opção (audiências
+  // do Portal de Audiências, casadas pela unidade escolhida). Nos demais
+  // fluxos que não a enviam, cai neste padrão e não é consultada.
+  audiencias: false,
   regrasAutomacao: true,
   localizadores: true,
 };
@@ -6261,6 +6595,17 @@ async function exportarRelatorioGerencialUnidade(
     }
   }
 
+  // Audiências marcadas (Portal de Audiências) - consultadas numa aba
+  // oculta, casando a vara pelo NOME da unidade do relatório. Best-effort:
+  // uma falha aqui vira só um aviso, sem derrubar o resto do relatório.
+  const audiencias = { linhas: [], erros: [] };
+  if (opcoesFinais.audiencias) {
+    notificar("Consultando audiências marcadas da unidade...");
+    const r = await consultarAudienciasDaUnidade(abaAtual.url, nomeUnidade);
+    audiencias.linhas = r.linhas || [];
+    if (r.erro) audiencias.erros.push(r.erro);
+  }
+
   notificar("Gerando PDF...");
 
   const dataInformacao = new Date().toLocaleString("pt-BR");
@@ -6308,10 +6653,30 @@ async function exportarRelatorioGerencialUnidade(
       .sort((a, b) => (b.total || 0) - (a.total || 0))
       .map((r) => ({ rotulo: r.competencia, valor: r.total }));
 
+  // Quais seções terão, de fato, uma tabela discriminada anexada ao final -
+  // só essas ganham "id" no resumo (logo, só essas mostram a dica "ver
+  // relação »" e recebem um link clicável). Evita prometer um link para uma
+  // seção que ficou sem linhas (ex.: opção marcada, mas zero processos).
+  const temTabelaDiscriminada = {
+    processosAtivos: separarPorCompetencia
+      ? processosAtivosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
+      : Boolean(processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0),
+    suspensos: separarPorCompetencia
+      ? suspensosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
+      : Boolean(suspensos.tabela && suspensos.tabela.linhas.length > 0),
+    mandados: Boolean(opcoesFinais.mandados && mandados.linhas.length > 0),
+    paralisados: separarPorCompetencia
+      ? paralisadosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
+      : Boolean(processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0),
+    remessasJuizesLeigos: Boolean(opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0),
+    audiencias: Boolean(opcoesFinais.audiencias && audiencias.linhas.length > 0),
+  };
+
   const secoesResumo = [];
   if (opcoesFinais.processosAtivos) {
     secoesResumo.push({
       titulo: "PROCESSOS ATIVOS",
+      id: temTabelaDiscriminada.processosAtivos ? "processosAtivos" : undefined,
       linhas: [
         ...(separarPorCompetencia ? linhasPorCompetencia(processosAtivosPorCompetencia) : []),
         { rotulo: "Total", valor: processosAtivos.total == null ? "?" : processosAtivos.total },
@@ -6321,6 +6686,7 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.suspensos) {
     secoesResumo.push({
       titulo: "SUSPENSOS / SOBRESTADOS",
+      id: temTabelaDiscriminada.suspensos ? "suspensos" : undefined,
       linhas: [
         ...(separarPorCompetencia ? linhasPorCompetencia(suspensosPorCompetencia) : (suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem }))),
         {
@@ -6382,7 +6748,7 @@ async function exportarRelatorioGerencialUnidade(
       .sort((a, b) => b[1] - a[1])
       .map(([situacao, contagem]) => ({ rotulo: situacao || "(sem situação)", valor: contagem }));
     linhasSituacao.push({ rotulo: "Total", valor: mandados.linhas.length });
-    secoesResumo.push({ titulo: "MANDADOS EM ABERTO", linhas: linhasSituacao });
+    secoesResumo.push({ titulo: "MANDADOS EM ABERTO", id: temTabelaDiscriminada.mandados ? "mandados" : undefined, linhas: linhasSituacao });
 
     if (contagemPorOficial.size > 0) {
       const linhasOficial = Array.from(contagemPorOficial.entries())
@@ -6394,6 +6760,7 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.paralisados) {
     secoesResumo.push({
       titulo: "PROCESSOS PARALISADOS",
+      id: temTabelaDiscriminada.paralisados ? "paralisados" : undefined,
       linhas: [
         ...(separarPorCompetencia ? linhasPorCompetencia(paralisadosPorCompetencia) : []),
         {
@@ -6406,8 +6773,16 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.remessasJuizesLeigos) {
     secoesResumo.push({
       titulo: "REMESSAS AOS JUÍZES LEIGOS",
+      id: temTabelaDiscriminada.remessasJuizesLeigos ? "remessasJuizesLeigos" : undefined,
       linhas: [{ rotulo: "Total de processos em remessa", valor: remessasJuizesLeigos.linhas.length }],
     });
+  }
+  if (opcoesFinais.audiencias) {
+    // Duas seções: "AUDIÊNCIAS MARCADAS" (total + quebra por status) e
+    // "ÚLTIMA AUDIÊNCIA POR EVENTO". O link (id) só quando houver tabela.
+    const secoesAud = secoesResumoAudiencias(audiencias.linhas);
+    if (secoesAud[0]) secoesAud[0].id = temTabelaDiscriminada.audiencias ? "audiencias" : undefined;
+    secoesResumo.push(...secoesAud);
   }
   if (opcoesFinais.regrasAutomacao) {
     secoesResumo.push({
@@ -6447,9 +6822,12 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.regrasAutomacao && regrasAutomacao.erros.length > 0) {
     avisos.push(`Regras de automação: ${regrasAutomacao.erros.join(" | ")}`);
   }
+  if (opcoesFinais.audiencias && audiencias.erros.length > 0) {
+    avisos.push(`Audiências: ${audiencias.erros.join(" | ")}`);
+  }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
 
-  const bytesCapa = await construirCapaRelatorioGerencial(
+  const { bytes: bytesCapa, ancoras } = await construirCapaRelatorioGerencial(
     nomeUnidade,
     dataInformacao,
     secoesResumo,
@@ -6462,36 +6840,65 @@ async function exportarRelatorioGerencialUnidade(
   paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
 
   // Anexa uma sequencia de PDFs (ja' carregados como bytes) ao final do
-  // relatório - helper comum aos 3 blocos "POR COMPETÊNCIA" abaixo, cada
-  // subseção vira suas proprias paginas, na ordem em que os grupos
-  // aparecem em "ordenados" (maior numero de processos primeiro).
+  // relatório - helper comum a todas as seções abaixo, cada uma vira suas
+  // proprias paginas.
   async function anexarPaginas(bytes) {
     const pdfExtra = await PDFDocument.load(bytes);
     const paginas = await pdfFinal.copyPages(pdfExtra, pdfExtra.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
   }
 
-  // Tabelas com a "relação de processos" propriamente dita (linhas reais
-  // do resultado, nao so' o total) - anexadas como paginas extras, uma
-  // tabela por secao, so' quando a extracao encontrou alguma linha
-  // (best-effort: ver "extrairLinhasTblProcessoLista"; se falhar, o
-  // aviso correspondente ja' foi acrescentado acima e a secao so' fica
-  // de fora, sem quebrar o resto do relatório). Mesma ordem das seções
-  // acima: ativos, suspensos e, por fim, remessas aos juízes leigos.
+  // Página (índice 0-based em pdfFinal) onde começa a tabela discriminada de
+  // cada seção - preenchido conforme as tabelas são anexadas, depois vira o
+  // destino dos links clicáveis a partir do resumo na capa.
+  const alvosTabela = {};
+
+  // ===== 1) GRÁFICOS (logo após o resumo, antes das tabelas) =====
+  // Distribuição por classe/rito processual + ranking de maiores
+  // demandantes/demandados dos processos ativos, reunidos numa seção
+  // própria imediatamente após o resumo - "todos os resumos e gráficos
+  // primeiro", conforme pedido. No modo "separação por competência" os
+  // gráficos ficam de fora (a quebra por competência já cobre essa leitura).
+  if (
+    opcoesFinais.processosAtivos &&
+    !separarPorCompetencia &&
+    processosAtivos.tabela &&
+    processosAtivos.tabela.linhas.length > 0
+  ) {
+    const graficos = await construirPdfsGraficosAtivos(
+      processosAtivos.tabela,
+      nomeUnidade,
+      processosUrgentes,
+      distribuicaoRitos
+    );
+    for (const bytesGrafico of graficos) await anexarPaginas(bytesGrafico);
+  }
+
+  // ===== 2) TABELAS DISCRIMINADAS (ao final do relatório) =====
+  // "relação de processos" propriamente dita (linhas reais do resultado,
+  // nao so' o total) - anexadas como paginas extras, uma tabela por secao,
+  // so' quando a extracao encontrou alguma linha (best-effort: ver
+  // "extrairLinhasTblProcessoLista"; se falhar, o aviso correspondente ja'
+  // foi acrescentado acima e a secao so' fica de fora). Mesma ordem das
+  // seções do resumo: ativos, suspensos, mandados, paralisados e remessas
+  // aos juízes leigos. Antes de anexar cada uma, guarda em "alvosTabela" a
+  // página onde ela começa, para o link clicável a partir do resumo.
   //
   // No modo "separação por competência", em vez de UMA tabela combinada,
   // cada competência com pelo menos 1 processo vira sua PRÓPRIA subseção
-  // (tabela com título indicando a competência) - da competência com
-  // mais processos para a com menos, mesma ordem usada no resumo.
+  // (tabela com título indicando a competência) - da competência com mais
+  // processos para a com menos; o link do resumo aponta para a primeira.
   if (opcoesFinais.processosAtivos) {
     if (separarPorCompetencia) {
       const ordenados = processosAtivosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
       for (const { competencia, tabela } of ordenados) {
         if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+        if (alvosTabela.processosAtivos == null) alvosTabela.processosAtivos = pdfFinal.getPageCount();
         const bytesTabela = await construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes, [], ` — Competência: ${competencia}`, true);
         await anexarPaginas(bytesTabela);
       }
     } else if (processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
+      alvosTabela.processosAtivos = pdfFinal.getPageCount();
       const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade, processosUrgentes, distribuicaoRitos);
       await anexarPaginas(bytesTabela);
     }
@@ -6501,15 +6908,18 @@ async function exportarRelatorioGerencialUnidade(
       const ordenados = suspensosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
       for (const { competencia, tabela } of ordenados) {
         if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+        if (alvosTabela.suspensos == null) alvosTabela.suspensos = pdfFinal.getPageCount();
         const bytesTabela = await construirPdfSuspensos(tabela, nomeUnidade, ` — Competência: ${competencia}`);
         await anexarPaginas(bytesTabela);
       }
     } else if (suspensos.tabela && suspensos.tabela.linhas.length > 0) {
+      alvosTabela.suspensos = pdfFinal.getPageCount();
       const bytesTabela = await construirPdfSuspensos(suspensos.tabela, nomeUnidade);
       await anexarPaginas(bytesTabela);
     }
   }
   if (opcoesFinais.mandados && mandados.linhas.length > 0) {
+    alvosTabela.mandados = pdfFinal.getPageCount();
     const bytesMandados = await construirPdfMandadosAbertos(mandados.linhas, nomeUnidade);
     await anexarPaginas(bytesMandados);
   }
@@ -6518,44 +6928,54 @@ async function exportarRelatorioGerencialUnidade(
       const ordenados = paralisadosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
       for (const { competencia, tabela } of ordenados) {
         if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+        if (alvosTabela.paralisados == null) alvosTabela.paralisados = pdfFinal.getPageCount();
         const bytesTabela = await construirPdfProcessosParalisados(tabela, nomeUnidade, ` — Competência: ${competencia}`);
         await anexarPaginas(bytesTabela);
       }
     } else if (processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0) {
+      alvosTabela.paralisados = pdfFinal.getPageCount();
       const bytesTabela = await construirPdfProcessosParalisados(processosParalisados.tabela, nomeUnidade);
       await anexarPaginas(bytesTabela);
     }
   }
-
   if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0) {
+    alvosTabela.remessasJuizesLeigos = pdfFinal.getPageCount();
     const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
-    const pdfRemessas = await PDFDocument.load(bytesRemessas);
-    const paginas = await pdfFinal.copyPages(pdfRemessas, pdfRemessas.getPageIndices());
-    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+    await anexarPaginas(bytesRemessas);
+  }
+  if (opcoesFinais.audiencias && audiencias.linhas.length > 0) {
+    alvosTabela.audiencias = pdfFinal.getPageCount();
+    const bytesAudiencias = await construirPdfTabelaAudiencias(nomeUnidade, audiencias.linhas);
+    await anexarPaginas(bytesAudiencias);
   }
 
+  // ===== 3) Regras de Automação e Localizadores (sem link no resumo) =====
   // Regras de Automação: um "cartão" por regra ativa (fluxograma +
   // detalhamento), igual ao PDF avulso gerado pelo cartão "Regras de
-  // Automação" da Gestão da Unidade - entra ANTES de Localizadores (ver
-  // comentário acima sobre essa seção refletir a unidade habilitada, não
-  // necessariamente a escolhida para o restante deste relatório).
+  // Automação" da Gestão da Unidade - entra ANTES de Localizadores (essa
+  // seção reflete a unidade habilitada, não necessariamente a escolhida
+  // para o restante deste relatório).
   if (opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
     const bytesRegras = await construirPdfRegras(regrasAutomacao.regras, nomeUnidade);
-    const pdfRegras = await PDFDocument.load(bytesRegras);
-    const paginas = await pdfFinal.copyPages(pdfRegras, pdfRegras.getPageIndices());
-    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+    await anexarPaginas(bytesRegras);
   }
 
   // Localizadores: lista de nomes (Corregedoria, sem total de processos -
   // ver aviso acima) ou nome + total de processos (Gestão da Unidade
   // (alternativo), ordenados do maior para o menor total), em páginas
-  // próprias no final do PDF, depois de todas as demais seções (inclusive
-  // as tabelas de remessas aos juízes leigos).
+  // próprias no final do PDF, depois de todas as demais seções.
   if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
     const bytesLocalizadores = await construirPaginaListaLocalizadores(nomeUnidade, localizadoresOrdenados);
-    const pdfLocalizadores = await PDFDocument.load(bytesLocalizadores);
-    const paginas = await pdfFinal.copyPages(pdfLocalizadores, pdfLocalizadores.getPageIndices());
-    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+    await anexarPaginas(bytesLocalizadores);
+  }
+
+  // ===== 4) Links clicáveis do resumo (capa) para cada tabela =====
+  // Cada bloco de resumo com "id" (ver secoesResumo/ancoras) ganha um link
+  // que salta direto para a primeira página da sua tabela discriminada.
+  for (const ancora of ancoras) {
+    const idxDestino = alvosTabela[ancora.id];
+    if (idxDestino == null) continue;
+    adicionarLinkInterno(pdfFinal, pdfFinal.getPage(ancora.paginaIndice), ancora.rect, pdfFinal.getPage(idxDestino));
   }
 
   const bytesFinais = await pdfFinal.save();
@@ -7428,7 +7848,7 @@ function construirPdfProcessosLocalizador(itens, tituloDocumento) {
 // a direita), com faixas zebradas - mesma linguagem visual das tabelas
 // de Localizadores/Processos/Remessas, so' que no formato rotulo-valor
 // em vez de colunas. Devolve o "y" seguinte, apos a secao.
-function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, largura, titulo, linhas) {
+function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, largura, titulo, linhas, comLink = false) {
   let y = yInicial;
   const alturaCabecalho = 18;
 
@@ -7440,6 +7860,20 @@ function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, lar
     font: fonteNegrito,
     color: COR_BRANCO,
   });
+  // "Dica" discreta no canto direito da faixa do titulo sinalizando que a
+  // seção e' clicavel (leva a' tabela discriminada, la' no final do PDF) -
+  // so' desenhada quando ha' de fato um link (ver "adicionarLinkInterno").
+  if (comLink) {
+    const dica = "ver relação »";
+    const larguraDica = fonteNormal.widthOfTextAtSize(dica, 8);
+    pagina.drawText(sanitizarTextoPdf(dica), {
+      x: x + largura - 6 - larguraDica,
+      y: y - alturaCabecalho + 5.5,
+      size: 8,
+      font: fonteNormal,
+      color: COR_BRANCO,
+    });
+  }
   y -= alturaCabecalho;
 
   const alturaLinha = 16;
@@ -7531,12 +7965,26 @@ async function construirCapaRelatorioGerencial(
   });
   y -= 22;
 
+  // Ancoras dos blocos de resumo que tem tabela discriminada correspondente
+  // (secao.id preenchido) - guardam a pagina e o retangulo da faixa do
+  // titulo para o chamador criar, depois de montar o PDF inteiro, um link
+  // clicavel dali ate' a tabela respectiva. So' blocos com "id" viram link.
+  const ancoras = [];
   for (const secao of secoes) {
     const alturaEstimada = 18 + secao.linhas.length * 16 + 16;
     if (y - alturaEstimada < PDF_ALTURA_RODAPE + margem) {
       ({ pagina, y } = novaPagina());
     }
-    y = desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, margem, y, larguraUtil, secao.titulo, secao.linhas);
+    if (secao.id) {
+      ancoras.push({
+        id: secao.id,
+        paginaIndice: pdf.getPageCount() - 1,
+        // Faixa do titulo desenhada por desenharSecaoResumo: de (margem, y-18)
+        // ate' (margem+larguraUtil, y).
+        rect: [margem, y - 18, margem + larguraUtil, y],
+      });
+    }
+    y = desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, margem, y, larguraUtil, secao.titulo, secao.linhas, Boolean(secao.id));
   }
 
   if (avisos.length > 0) {
@@ -7556,7 +8004,7 @@ async function construirCapaRelatorioGerencial(
 
   desenharRodapePaginas(pdf, fonteNormal, largura, margem);
 
-  return pdf.save();
+  return { bytes: await pdf.save(), ancoras };
 }
 
 // Paginas proprias (portrait) com a lista de Localizadores - extraida da
@@ -9182,6 +9630,10 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultado })
           .catch(() => {});
+        // Depois de emitir o relatório, devolve a aba para a página inicial
+        // do eproc (a aba tinha ido para o Relatório Geral no "Carregar
+        // unidades").
+        retornarAbaParaInicioEproc();
       })
       .catch((e) => {
         chrome.runtime
@@ -9208,6 +9660,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultados })
           .catch(() => {});
+        retornarAbaParaInicioEproc();
       })
       .catch((e) => {
         chrome.runtime

@@ -900,8 +900,20 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
    1 item está marcado — sem isso, mostra "Marque ao menos um item do
    relatório antes de exportar.".
 4. **"Exportar Relatório para Correição (PDF)"** gera, filtrado pela unidade
-   escolhida e pelos itens marcados, um único PDF com as seções abaixo
-   **nesta ordem** (mesma ordem dos checkboxes "Itens a incluir no PDF"):
+   escolhida e pelos itens marcados, um único PDF. A **estrutura geral** do
+   arquivo é: **(1)** o resumo (capa) com todas as seções em formato
+   rótulo/valor; **(2)** os **gráficos** dos processos ativos (distribuição
+   por classe/rito e ranking de partes), reunidos logo após o resumo; **(3)**
+   as **tabelas discriminadas** dos processos (relação de ativos, suspensos,
+   mandados, paralisados e remessas), todas ao **final** do relatório; e
+   **(4)** Regras de Automação e Localizadores por último. Ou seja: **todos
+   os resumos e gráficos vêm primeiro; as tabelas discriminadas ficam no
+   fim.** Cada bloco do resumo que tem uma tabela correspondente exibe a dica
+   **"ver relação »"** na faixa do título e é **clicável** — leva direto à
+   sua tabela discriminada, lá no final do PDF (link interno do PDF; funciona
+   em qualquer leitor que respeite links). As seções abaixo descrevem cada
+   bloco **na ordem dos checkboxes "Itens a incluir no PDF"** (o resumo segue
+   essa ordem; as tabelas, a mesma ordem, mas agrupadas no final):
    - Nome da unidade e data/hora da extração.
    - **Relação de processos ativos**: o próprio Relatório Geral filtrado
      pela unidade e por **todos os macro grupos do filtro "Situação"
@@ -1217,6 +1229,40 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
    própria unidade e usar a ferramenta **"Localizadores do Órgão"** do
    painel (que já mostra esse total, já que ali a extração é direto da
    tabela da tela, sem precisar de nenhuma consulta a mais).
+
+#### Audiências como item do relatório
+
+As **audiências marcadas** são **um dos itens do próprio Relatório para
+Correição** (checkbox **"Audiências marcadas (Portal de Audiências)"** em
+"Itens a incluir no PDF") — não há seleção separada: elas entram no mesmo
+PDF, para a **mesma unidade** escolhida no relatório.
+
+Quando o item está marcado, ao gerar o relatório a extensão abre — **numa
+aba oculta**, sem tirar o usuário da tela — o **Portal de Audiências**
+(menu **"Audiência" > "Relatórios de Audiências (Portal)"**,
+`acao=audiencia_relatorio_portal`), **casa a vara pelo nome da unidade** do
+relatório (comparação tolerante a acento/caixa/pontuação, no campo
+`selVaraFederal`), dispara o **"Consultar"** (`btnConsultar`, período padrão
+do portal) e raspa a tabela `tblAudienciasEproc`. Cada linha vira
+`{ data, hora, processo, evento, observação, status }`. É best-effort: se a
+vara não for encontrada ou a consulta falhar, entra só um **aviso** e o
+resto do relatório sai normalmente.
+
+No PDF, as audiências seguem o mesmo padrão das demais seções — **resumo na
+capa** e **tabela discriminada ao final**:
+
+- **Resumo (capa):**
+  - **AUDIÊNCIAS MARCADAS** — total de audiências + quebra por **Status**
+    (ex.: DESIGNADA, REALIZADA, REDESIGNADA), da mais frequente para a menos
+    (com o link "ver relação »" para a tabela).
+  - **ÚLTIMA AUDIÊNCIA POR EVENTO** — para cada tipo de audiência (Evento),
+    a **data da audiência mais recente**, da mais nova para a mais antiga.
+- **Tabela discriminada** (retrato, ordenada da audiência mais próxima à
+  mais distante): **Data/Hora, Processo, Evento / Observação, Status**.
+
+Ao **terminar de emitir o relatório**, a aba do usuário **retorna à página
+inicial do eproc** (ela havia ido para o Relatório Geral no "Carregar
+unidades").
 
 ## Gestão da Unidade
 

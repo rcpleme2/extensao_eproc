@@ -1491,6 +1491,7 @@ const chkRelConclusosSentenca = document.getElementById("chk-rel-conclusos-sente
 const chkRelSemMovimentacao = document.getElementById("chk-rel-sem-movimentacao");
 const chkRelParalisados = document.getElementById("chk-rel-paralisados");
 const chkRelRemessasJuizesLeigos = document.getElementById("chk-rel-remessas-juizes-leigos");
+const chkRelAudiencias = document.getElementById("chk-rel-audiencias");
 const chkRelRegrasAutomacao = document.getElementById("chk-rel-regras-automacao");
 const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
 const btnMarcarTudoRelatorio = document.getElementById("btn-marcar-tudo-relatorio");
@@ -1717,6 +1718,7 @@ function lerOpcoesRelatorioUnidade() {
     semMovimentacao: chkRelSemMovimentacao.checked,
     paralisados: chkRelParalisados.checked,
     remessasJuizesLeigos: chkRelRemessasJuizesLeigos.checked,
+    audiencias: chkRelAudiencias.checked,
     regrasAutomacao: chkRelRegrasAutomacao.checked,
     localizadores: chkRelLocalizadores.checked,
   };
@@ -1730,6 +1732,7 @@ const CHECKBOXES_ITENS_RELATORIO_UNIDADE = [
   chkRelSemMovimentacao,
   chkRelParalisados,
   chkRelRemessasJuizesLeigos,
+  chkRelAudiencias,
   chkRelRegrasAutomacao,
   chkRelLocalizadores,
 ];
