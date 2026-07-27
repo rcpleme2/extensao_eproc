@@ -6,7 +6,35 @@
 // perto de "Construcao do MD unico", sobre o motivo).
 
 importScripts("libs/pdf-lib.min.js");
-const { PDFDocument, StandardFonts, rgb } = self.PDFLib;
+const { PDFDocument, StandardFonts, rgb, PDFName } = self.PDFLib;
+
+// Cria um link interno (clicavel) numa pagina de origem apontando para
+// outra pagina do MESMO documento final ja' montado (pdf-lib nao tem API
+// de alto nivel para isso, entao monta-se a anotacao "/Link" na mao). Usado
+// para ligar cada bloco de resumo na capa a' sua tabela discriminada, la'
+// no final do relatório. "rect" e' [x1, y1, x2, y2] em pontos, no sistema
+// de coordenadas da pagina de origem (origem embaixo-esquerda).
+function adicionarLinkInterno(pdfDoc, paginaOrigem, rect, paginaDestino) {
+  const context = pdfDoc.context;
+  const annot = context.obj({
+    Type: "Annot",
+    Subtype: "Link",
+    Rect: rect,
+    // Sem borda visivel - a "dica" textual (ver desenharSecaoResumo) ja'
+    // sinaliza que a area e' clicavel, entao a moldura padrao so' poluiria.
+    Border: [0, 0, 0],
+    // "/Fit" leva a pagina de destino inteira para a viewport (sem depender
+    // de coordenada exata, que mudaria conforme o zoom do leitor de PDF).
+    Dest: [paginaDestino.ref, PDFName.of("Fit")],
+  });
+  const annotRef = context.register(annot);
+  const annots = paginaOrigem.node.Annots();
+  if (annots) {
+    annots.push(annotRef);
+  } else {
+    paginaOrigem.node.set(PDFName.of("Annots"), context.obj([annotRef]));
+  }
+}
 
 // Identidade visual institucional (TJPR/eProc) reaproveitada em todos os
 // PDFs gerados pela extensao (tabelas de Localizadores/Processos/
@@ -3901,7 +3929,7 @@ async function exportarRelatorioPanoramico(aoProgredir) {
   if (semMov.erro) avisos.push(`Sem movimentação (todas as varas): ${semMov.erro}`);
   if (atuacao.erro) avisos.push(`Atuação Conciliador/Juiz Leigo: ${atuacao.erro}`);
 
-  const bytesCapa = await construirCapaRelatorioGerencial(
+  const { bytes: bytesCapa } = await construirCapaRelatorioGerencial(
     "Todas as unidades",
     dataInformacao,
     secoesResumo,
@@ -5143,14 +5171,14 @@ function mapaCoresPorValor(valores) {
   return mapa;
 }
 
-async function construirPdfProcessosAtivos(
-  tabela,
-  nomeUnidade,
-  processosUrgentes,
-  distribuicaoRitos,
-  sufixoTitulo = "",
-  somenteTabela = false
-) {
+// Extrai e normaliza as linhas da relação de processos ativos num formato
+// pronto para desenho (colunas curadas, "(Urgente)" já aplicado, ordenado
+// pela Data de Autuação do mais antigo para o mais novo). Fatorado para
+// fora de "construirPdfProcessosAtivos" para poder ser reaproveitado pelos
+// gráficos (classes/ranking), que hoje vivem numa seção própria — antes
+// das tabelas discriminadas — e portanto precisam dos mesmos "itens" sem
+// depender da tabela em si.
+function extrairItensAtivos(tabela, processosUrgentes) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
   const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
@@ -5186,7 +5214,7 @@ async function construirPdfProcessosAtivos(
     return situacaoAbreviada;
   };
 
-  const itens = tabela.linhas
+  return tabela.linhas
     .map((linha) => {
       const autuacao = valorDe(linha, idxAutuacao);
       const processo = valorDe(linha, idxProcesso);
@@ -5203,6 +5231,40 @@ async function construirPdfProcessosAtivos(
       };
     })
     .sort((a, b) => a.autuacaoOrdenavel - b.autuacaoOrdenavel);
+}
+
+// Gera as paginas de GRÁFICOS dos processos ativos (distribuição por classe
+// processual, distribuição por Rito Processual e ranking de maiores
+// demandantes/demandados) como uma lista de PDFs (bytes). Ficam numa seção
+// própria, logo após o resumo e ANTES das tabelas discriminadas, conforme a
+// ordem pedida para o relatório (resumos + gráficos primeiro; tabelas ao
+// final). Devolve [] quando não há o que desenhar.
+async function construirPdfsGraficosAtivos(tabela, nomeUnidade, processosUrgentes, distribuicaoRitos) {
+  const itens = extrairItensAtivos(tabela, processosUrgentes);
+  if (itens.length === 0) return [];
+  const bytesGrafico = await construirPdfGraficoClassesAtivos(itens, nomeUnidade);
+  const bytesGraficoRitos =
+    distribuicaoRitos && distribuicaoRitos.length > 0
+      ? await construirPdfGraficoRitosAtivos(distribuicaoRitos, nomeUnidade)
+      : null;
+  const bytesRanking = await construirPdfRankingPartes(itens, nomeUnidade);
+  return [bytesGrafico, bytesGraficoRitos, bytesRanking].filter(Boolean);
+}
+
+// Monta o PDF (A4 RETRATO) SÓ com a tabela discriminada dos processos
+// ativos (os gráficos saíram para "construirPdfsGraficosAtivos", que agora
+// os posiciona numa seção própria antes das tabelas). Os parâmetros
+// "distribuicaoRitos" e "somenteTabela" são mantidos por compatibilidade de
+// assinatura com os pontos de chamada, mas não alteram mais o resultado.
+async function construirPdfProcessosAtivos(
+  tabela,
+  nomeUnidade,
+  processosUrgentes,
+  distribuicaoRitos,
+  sufixoTitulo = "",
+  somenteTabela = false
+) {
+  const itens = extrairItensAtivos(tabela, processosUrgentes);
 
   const coresPorSituacao = mapaCoresPorValor(itens.map((item) => item.situacao));
 
@@ -5220,39 +5282,14 @@ async function construirPdfProcessosAtivos(
     { titulo: "Data/Hora", largura: (LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2) * 0.16, campo: "dataHora" },
   ];
 
-  const bytesTabela = await construirPdfTabelaCuradaRetrato(
+  // So' a tabela discriminada - os gráficos (classe/rito/ranking) agora
+  // vivem em "construirPdfsGraficosAtivos", posicionados numa seção própria
+  // ANTES desta tabela, junto do resumo.
+  return construirPdfTabelaCuradaRetrato(
     itens,
     colunas,
     `Processos ativos da unidade "${nomeUnidade}"${sufixoTitulo} — ${itens.length} processo(s), do mais antigo ao mais novo`
   );
-
-  // No modo "separação por rito", cada rito vira sua propria subseção so'
-  // com a tabela (sem repetir os graficos/ranking, que ja' sao mostrados
-  // uma unica vez pela unidade inteira) - "somenteTabela" pula esse
-  // trecho e devolve so' a tabela.
-  if (somenteTabela) return bytesTabela;
-
-  // Grafico de distribuicao por classe processual (reaproveita os mesmos
-  // "itens" ja' extraidos, sem nenhuma consulta a mais), logo em seguida
-  // o de distribuicao por Rito Processual (dados vindos de fora, ja'
-  // agregados - o Rito não é coluna da tabela, só filtro; ver
-  // "abrirAbaEConsultarRitosAtivos") e por fim o ranking de maiores
-  // demandantes/demandados - todos anexados como pagina(s) extra no FINAL
-  // da relacao de processos ativos.
-  const bytesGrafico = await construirPdfGraficoClassesAtivos(itens, nomeUnidade);
-  const bytesGraficoRitos =
-    distribuicaoRitos && distribuicaoRitos.length > 0
-      ? await construirPdfGraficoRitosAtivos(distribuicaoRitos, nomeUnidade)
-      : null;
-  const bytesRanking = await construirPdfRankingPartes(itens, nomeUnidade);
-  const pdfFinal = await PDFDocument.load(bytesTabela);
-  for (const bytesExtra of [bytesGrafico, bytesGraficoRitos, bytesRanking]) {
-    if (!bytesExtra) continue;
-    const pdfExtra = await PDFDocument.load(bytesExtra);
-    const paginasExtra = await pdfFinal.copyPages(pdfExtra, pdfExtra.getPageIndices());
-    paginasExtra.forEach((pagina) => pdfFinal.addPage(pagina));
-  }
-  return pdfFinal.save();
 }
 
 // Grafico de barras horizontais com a distribuicao das classes
@@ -6308,10 +6345,29 @@ async function exportarRelatorioGerencialUnidade(
       .sort((a, b) => (b.total || 0) - (a.total || 0))
       .map((r) => ({ rotulo: r.competencia, valor: r.total }));
 
+  // Quais seções terão, de fato, uma tabela discriminada anexada ao final -
+  // só essas ganham "id" no resumo (logo, só essas mostram a dica "ver
+  // relação »" e recebem um link clicável). Evita prometer um link para uma
+  // seção que ficou sem linhas (ex.: opção marcada, mas zero processos).
+  const temTabelaDiscriminada = {
+    processosAtivos: separarPorCompetencia
+      ? processosAtivosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
+      : Boolean(processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0),
+    suspensos: separarPorCompetencia
+      ? suspensosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
+      : Boolean(suspensos.tabela && suspensos.tabela.linhas.length > 0),
+    mandados: Boolean(opcoesFinais.mandados && mandados.linhas.length > 0),
+    paralisados: separarPorCompetencia
+      ? paralisadosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
+      : Boolean(processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0),
+    remessasJuizesLeigos: Boolean(opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0),
+  };
+
   const secoesResumo = [];
   if (opcoesFinais.processosAtivos) {
     secoesResumo.push({
       titulo: "PROCESSOS ATIVOS",
+      id: temTabelaDiscriminada.processosAtivos ? "processosAtivos" : undefined,
       linhas: [
         ...(separarPorCompetencia ? linhasPorCompetencia(processosAtivosPorCompetencia) : []),
         { rotulo: "Total", valor: processosAtivos.total == null ? "?" : processosAtivos.total },
@@ -6321,6 +6377,7 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.suspensos) {
     secoesResumo.push({
       titulo: "SUSPENSOS / SOBRESTADOS",
+      id: temTabelaDiscriminada.suspensos ? "suspensos" : undefined,
       linhas: [
         ...(separarPorCompetencia ? linhasPorCompetencia(suspensosPorCompetencia) : (suspensos.detalhamento || []).map((item) => ({ rotulo: item.texto, valor: item.contagem }))),
         {
@@ -6382,7 +6439,7 @@ async function exportarRelatorioGerencialUnidade(
       .sort((a, b) => b[1] - a[1])
       .map(([situacao, contagem]) => ({ rotulo: situacao || "(sem situação)", valor: contagem }));
     linhasSituacao.push({ rotulo: "Total", valor: mandados.linhas.length });
-    secoesResumo.push({ titulo: "MANDADOS EM ABERTO", linhas: linhasSituacao });
+    secoesResumo.push({ titulo: "MANDADOS EM ABERTO", id: temTabelaDiscriminada.mandados ? "mandados" : undefined, linhas: linhasSituacao });
 
     if (contagemPorOficial.size > 0) {
       const linhasOficial = Array.from(contagemPorOficial.entries())
@@ -6394,6 +6451,7 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.paralisados) {
     secoesResumo.push({
       titulo: "PROCESSOS PARALISADOS",
+      id: temTabelaDiscriminada.paralisados ? "paralisados" : undefined,
       linhas: [
         ...(separarPorCompetencia ? linhasPorCompetencia(paralisadosPorCompetencia) : []),
         {
@@ -6406,6 +6464,7 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.remessasJuizesLeigos) {
     secoesResumo.push({
       titulo: "REMESSAS AOS JUÍZES LEIGOS",
+      id: temTabelaDiscriminada.remessasJuizesLeigos ? "remessasJuizesLeigos" : undefined,
       linhas: [{ rotulo: "Total de processos em remessa", valor: remessasJuizesLeigos.linhas.length }],
     });
   }
@@ -6449,7 +6508,7 @@ async function exportarRelatorioGerencialUnidade(
   }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
 
-  const bytesCapa = await construirCapaRelatorioGerencial(
+  const { bytes: bytesCapa, ancoras } = await construirCapaRelatorioGerencial(
     nomeUnidade,
     dataInformacao,
     secoesResumo,
@@ -6462,36 +6521,65 @@ async function exportarRelatorioGerencialUnidade(
   paginasCapa.forEach((pagina) => pdfFinal.addPage(pagina));
 
   // Anexa uma sequencia de PDFs (ja' carregados como bytes) ao final do
-  // relatório - helper comum aos 3 blocos "POR COMPETÊNCIA" abaixo, cada
-  // subseção vira suas proprias paginas, na ordem em que os grupos
-  // aparecem em "ordenados" (maior numero de processos primeiro).
+  // relatório - helper comum a todas as seções abaixo, cada uma vira suas
+  // proprias paginas.
   async function anexarPaginas(bytes) {
     const pdfExtra = await PDFDocument.load(bytes);
     const paginas = await pdfFinal.copyPages(pdfExtra, pdfExtra.getPageIndices());
     paginas.forEach((pagina) => pdfFinal.addPage(pagina));
   }
 
-  // Tabelas com a "relação de processos" propriamente dita (linhas reais
-  // do resultado, nao so' o total) - anexadas como paginas extras, uma
-  // tabela por secao, so' quando a extracao encontrou alguma linha
-  // (best-effort: ver "extrairLinhasTblProcessoLista"; se falhar, o
-  // aviso correspondente ja' foi acrescentado acima e a secao so' fica
-  // de fora, sem quebrar o resto do relatório). Mesma ordem das seções
-  // acima: ativos, suspensos e, por fim, remessas aos juízes leigos.
+  // Página (índice 0-based em pdfFinal) onde começa a tabela discriminada de
+  // cada seção - preenchido conforme as tabelas são anexadas, depois vira o
+  // destino dos links clicáveis a partir do resumo na capa.
+  const alvosTabela = {};
+
+  // ===== 1) GRÁFICOS (logo após o resumo, antes das tabelas) =====
+  // Distribuição por classe/rito processual + ranking de maiores
+  // demandantes/demandados dos processos ativos, reunidos numa seção
+  // própria imediatamente após o resumo - "todos os resumos e gráficos
+  // primeiro", conforme pedido. No modo "separação por competência" os
+  // gráficos ficam de fora (a quebra por competência já cobre essa leitura).
+  if (
+    opcoesFinais.processosAtivos &&
+    !separarPorCompetencia &&
+    processosAtivos.tabela &&
+    processosAtivos.tabela.linhas.length > 0
+  ) {
+    const graficos = await construirPdfsGraficosAtivos(
+      processosAtivos.tabela,
+      nomeUnidade,
+      processosUrgentes,
+      distribuicaoRitos
+    );
+    for (const bytesGrafico of graficos) await anexarPaginas(bytesGrafico);
+  }
+
+  // ===== 2) TABELAS DISCRIMINADAS (ao final do relatório) =====
+  // "relação de processos" propriamente dita (linhas reais do resultado,
+  // nao so' o total) - anexadas como paginas extras, uma tabela por secao,
+  // so' quando a extracao encontrou alguma linha (best-effort: ver
+  // "extrairLinhasTblProcessoLista"; se falhar, o aviso correspondente ja'
+  // foi acrescentado acima e a secao so' fica de fora). Mesma ordem das
+  // seções do resumo: ativos, suspensos, mandados, paralisados e remessas
+  // aos juízes leigos. Antes de anexar cada uma, guarda em "alvosTabela" a
+  // página onde ela começa, para o link clicável a partir do resumo.
   //
   // No modo "separação por competência", em vez de UMA tabela combinada,
   // cada competência com pelo menos 1 processo vira sua PRÓPRIA subseção
-  // (tabela com título indicando a competência) - da competência com
-  // mais processos para a com menos, mesma ordem usada no resumo.
+  // (tabela com título indicando a competência) - da competência com mais
+  // processos para a com menos; o link do resumo aponta para a primeira.
   if (opcoesFinais.processosAtivos) {
     if (separarPorCompetencia) {
       const ordenados = processosAtivosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
       for (const { competencia, tabela } of ordenados) {
         if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+        if (alvosTabela.processosAtivos == null) alvosTabela.processosAtivos = pdfFinal.getPageCount();
         const bytesTabela = await construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes, [], ` — Competência: ${competencia}`, true);
         await anexarPaginas(bytesTabela);
       }
     } else if (processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
+      alvosTabela.processosAtivos = pdfFinal.getPageCount();
       const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade, processosUrgentes, distribuicaoRitos);
       await anexarPaginas(bytesTabela);
     }
@@ -6501,15 +6589,18 @@ async function exportarRelatorioGerencialUnidade(
       const ordenados = suspensosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
       for (const { competencia, tabela } of ordenados) {
         if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+        if (alvosTabela.suspensos == null) alvosTabela.suspensos = pdfFinal.getPageCount();
         const bytesTabela = await construirPdfSuspensos(tabela, nomeUnidade, ` — Competência: ${competencia}`);
         await anexarPaginas(bytesTabela);
       }
     } else if (suspensos.tabela && suspensos.tabela.linhas.length > 0) {
+      alvosTabela.suspensos = pdfFinal.getPageCount();
       const bytesTabela = await construirPdfSuspensos(suspensos.tabela, nomeUnidade);
       await anexarPaginas(bytesTabela);
     }
   }
   if (opcoesFinais.mandados && mandados.linhas.length > 0) {
+    alvosTabela.mandados = pdfFinal.getPageCount();
     const bytesMandados = await construirPdfMandadosAbertos(mandados.linhas, nomeUnidade);
     await anexarPaginas(bytesMandados);
   }
@@ -6518,44 +6609,49 @@ async function exportarRelatorioGerencialUnidade(
       const ordenados = paralisadosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
       for (const { competencia, tabela } of ordenados) {
         if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+        if (alvosTabela.paralisados == null) alvosTabela.paralisados = pdfFinal.getPageCount();
         const bytesTabela = await construirPdfProcessosParalisados(tabela, nomeUnidade, ` — Competência: ${competencia}`);
         await anexarPaginas(bytesTabela);
       }
     } else if (processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0) {
+      alvosTabela.paralisados = pdfFinal.getPageCount();
       const bytesTabela = await construirPdfProcessosParalisados(processosParalisados.tabela, nomeUnidade);
       await anexarPaginas(bytesTabela);
     }
   }
-
   if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0) {
+    alvosTabela.remessasJuizesLeigos = pdfFinal.getPageCount();
     const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
-    const pdfRemessas = await PDFDocument.load(bytesRemessas);
-    const paginas = await pdfFinal.copyPages(pdfRemessas, pdfRemessas.getPageIndices());
-    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+    await anexarPaginas(bytesRemessas);
   }
 
+  // ===== 3) Regras de Automação e Localizadores (sem link no resumo) =====
   // Regras de Automação: um "cartão" por regra ativa (fluxograma +
   // detalhamento), igual ao PDF avulso gerado pelo cartão "Regras de
-  // Automação" da Gestão da Unidade - entra ANTES de Localizadores (ver
-  // comentário acima sobre essa seção refletir a unidade habilitada, não
-  // necessariamente a escolhida para o restante deste relatório).
+  // Automação" da Gestão da Unidade - entra ANTES de Localizadores (essa
+  // seção reflete a unidade habilitada, não necessariamente a escolhida
+  // para o restante deste relatório).
   if (opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
     const bytesRegras = await construirPdfRegras(regrasAutomacao.regras, nomeUnidade);
-    const pdfRegras = await PDFDocument.load(bytesRegras);
-    const paginas = await pdfFinal.copyPages(pdfRegras, pdfRegras.getPageIndices());
-    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+    await anexarPaginas(bytesRegras);
   }
 
   // Localizadores: lista de nomes (Corregedoria, sem total de processos -
   // ver aviso acima) ou nome + total de processos (Gestão da Unidade
   // (alternativo), ordenados do maior para o menor total), em páginas
-  // próprias no final do PDF, depois de todas as demais seções (inclusive
-  // as tabelas de remessas aos juízes leigos).
+  // próprias no final do PDF, depois de todas as demais seções.
   if (opcoesFinais.localizadores && localizadoresOrdenados.length > 0) {
     const bytesLocalizadores = await construirPaginaListaLocalizadores(nomeUnidade, localizadoresOrdenados);
-    const pdfLocalizadores = await PDFDocument.load(bytesLocalizadores);
-    const paginas = await pdfFinal.copyPages(pdfLocalizadores, pdfLocalizadores.getPageIndices());
-    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+    await anexarPaginas(bytesLocalizadores);
+  }
+
+  // ===== 4) Links clicáveis do resumo (capa) para cada tabela =====
+  // Cada bloco de resumo com "id" (ver secoesResumo/ancoras) ganha um link
+  // que salta direto para a primeira página da sua tabela discriminada.
+  for (const ancora of ancoras) {
+    const idxDestino = alvosTabela[ancora.id];
+    if (idxDestino == null) continue;
+    adicionarLinkInterno(pdfFinal, pdfFinal.getPage(ancora.paginaIndice), ancora.rect, pdfFinal.getPage(idxDestino));
   }
 
   const bytesFinais = await pdfFinal.save();
@@ -7428,7 +7524,7 @@ function construirPdfProcessosLocalizador(itens, tituloDocumento) {
 // a direita), com faixas zebradas - mesma linguagem visual das tabelas
 // de Localizadores/Processos/Remessas, so' que no formato rotulo-valor
 // em vez de colunas. Devolve o "y" seguinte, apos a secao.
-function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, largura, titulo, linhas) {
+function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, largura, titulo, linhas, comLink = false) {
   let y = yInicial;
   const alturaCabecalho = 18;
 
@@ -7440,6 +7536,20 @@ function desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, x, yInicial, lar
     font: fonteNegrito,
     color: COR_BRANCO,
   });
+  // "Dica" discreta no canto direito da faixa do titulo sinalizando que a
+  // seção e' clicavel (leva a' tabela discriminada, la' no final do PDF) -
+  // so' desenhada quando ha' de fato um link (ver "adicionarLinkInterno").
+  if (comLink) {
+    const dica = "ver relação »";
+    const larguraDica = fonteNormal.widthOfTextAtSize(dica, 8);
+    pagina.drawText(sanitizarTextoPdf(dica), {
+      x: x + largura - 6 - larguraDica,
+      y: y - alturaCabecalho + 5.5,
+      size: 8,
+      font: fonteNormal,
+      color: COR_BRANCO,
+    });
+  }
   y -= alturaCabecalho;
 
   const alturaLinha = 16;
@@ -7531,12 +7641,26 @@ async function construirCapaRelatorioGerencial(
   });
   y -= 22;
 
+  // Ancoras dos blocos de resumo que tem tabela discriminada correspondente
+  // (secao.id preenchido) - guardam a pagina e o retangulo da faixa do
+  // titulo para o chamador criar, depois de montar o PDF inteiro, um link
+  // clicavel dali ate' a tabela respectiva. So' blocos com "id" viram link.
+  const ancoras = [];
   for (const secao of secoes) {
     const alturaEstimada = 18 + secao.linhas.length * 16 + 16;
     if (y - alturaEstimada < PDF_ALTURA_RODAPE + margem) {
       ({ pagina, y } = novaPagina());
     }
-    y = desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, margem, y, larguraUtil, secao.titulo, secao.linhas);
+    if (secao.id) {
+      ancoras.push({
+        id: secao.id,
+        paginaIndice: pdf.getPageCount() - 1,
+        // Faixa do titulo desenhada por desenharSecaoResumo: de (margem, y-18)
+        // ate' (margem+larguraUtil, y).
+        rect: [margem, y - 18, margem + larguraUtil, y],
+      });
+    }
+    y = desenharSecaoResumo(pagina, fonteNegrito, fonteNormal, margem, y, larguraUtil, secao.titulo, secao.linhas, Boolean(secao.id));
   }
 
   if (avisos.length > 0) {
@@ -7556,7 +7680,7 @@ async function construirCapaRelatorioGerencial(
 
   desenharRodapePaginas(pdf, fonteNormal, largura, margem);
 
-  return pdf.save();
+  return { bytes: await pdf.save(), ancoras };
 }
 
 // Paginas proprias (portrait) com a lista de Localizadores - extraida da

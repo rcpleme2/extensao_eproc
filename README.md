@@ -900,8 +900,20 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
    1 item está marcado — sem isso, mostra "Marque ao menos um item do
    relatório antes de exportar.".
 4. **"Exportar Relatório para Correição (PDF)"** gera, filtrado pela unidade
-   escolhida e pelos itens marcados, um único PDF com as seções abaixo
-   **nesta ordem** (mesma ordem dos checkboxes "Itens a incluir no PDF"):
+   escolhida e pelos itens marcados, um único PDF. A **estrutura geral** do
+   arquivo é: **(1)** o resumo (capa) com todas as seções em formato
+   rótulo/valor; **(2)** os **gráficos** dos processos ativos (distribuição
+   por classe/rito e ranking de partes), reunidos logo após o resumo; **(3)**
+   as **tabelas discriminadas** dos processos (relação de ativos, suspensos,
+   mandados, paralisados e remessas), todas ao **final** do relatório; e
+   **(4)** Regras de Automação e Localizadores por último. Ou seja: **todos
+   os resumos e gráficos vêm primeiro; as tabelas discriminadas ficam no
+   fim.** Cada bloco do resumo que tem uma tabela correspondente exibe a dica
+   **"ver relação »"** na faixa do título e é **clicável** — leva direto à
+   sua tabela discriminada, lá no final do PDF (link interno do PDF; funciona
+   em qualquer leitor que respeite links). As seções abaixo descrevem cada
+   bloco **na ordem dos checkboxes "Itens a incluir no PDF"** (o resumo segue
+   essa ordem; as tabelas, a mesma ordem, mas agrupadas no final):
    - Nome da unidade e data/hora da extração.
    - **Relação de processos ativos**: o próprio Relatório Geral filtrado
      pela unidade e por **todos os macro grupos do filtro "Situação"
