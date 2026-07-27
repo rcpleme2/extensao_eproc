@@ -4288,6 +4288,279 @@ async function listarUnidadesRelatorioGeral(aoProgredir) {
   return { unidades: result.unidades };
 }
 
+// ===== Relatório de Audiências (Corregedoria) =====
+// Fluxo: menu lateral "Audiência" > "Relatórios de Audiências (Portal)"
+// (acao=audiencia_relatorio_portal); a tela ja' abre com "Consultar por"
+// = "Vara Estadual", entao basta escolher a vara (selVaraFederal) e clicar
+// "Consultar" (btnConsultar) - o resultado vem na tabela "tblAudienciasEproc".
+
+// Clica no link do menu lateral que leva ao Relatório de Audiências
+// (Portal). O <a> existe no DOM mesmo com o submenu "Audiência" recolhido
+// (o collapse e' só visual). Exclui as âncoras de acessibilidade
+// ("pular para..."), que na propria tela do relatorio tambem apontam para
+// essa acao. Autocontida, executada via chrome.scripting.executeScript.
+function clicarLinkRelatorioAudienciasNaPagina() {
+  const link = document.querySelector('a[href*="acao=audiencia_relatorio_portal"]:not([id^="ancora"])');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Lê as opções de vara (selVaraFederal) na tela do Relatório de Audiências,
+// descartando o placeholder ("--- Selecione a Vara/Órgão ---", value vazio).
+// Autocontida, executada via chrome.scripting.executeScript.
+function lerVarasRelatorioAudienciasNaPagina() {
+  const sel = document.getElementById("selVaraFederal");
+  if (!sel) {
+    return { erro: 'Campo de vara (selVaraFederal) não encontrado na tela de Relatório de Audiências.', varas: [] };
+  }
+  const varas = Array.from(sel.options)
+    .map((o) => ({ valor: o.value, nome: (o.textContent || "").trim() }))
+    .filter((o) => o.valor && o.valor.trim() !== "");
+  return { erro: null, varas };
+}
+
+// Seleciona a vara no formulário e dispara o "Consultar" (submit). Como o
+// bootstrap-select apenas espelha o <select> nativo no envio do POST, basta
+// setar o value nativo + disparar "change" (e, por garantia, pedir o
+// refresh do widget quando o jQuery/selectpicker existir) antes de submeter.
+// Autocontida, executada via chrome.scripting.executeScript (world MAIN).
+function selecionarVaraEConsultarAudienciasNaPagina(valorVara) {
+  const sel = document.getElementById("selVaraFederal");
+  if (!sel) return { ok: false, erro: "Formulário de audiências não encontrado (selVaraFederal)." };
+  sel.value = valorVara;
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+  try {
+    if (window.jQuery && window.jQuery.fn && window.jQuery.fn.selectpicker) {
+      window.jQuery(sel).selectpicker("refresh");
+    }
+  } catch (e) {
+    // Sem o widget/jQuery o value nativo ja' basta para o POST - segue.
+  }
+  const btn = document.getElementById("btnConsultar");
+  if (!btn) return { ok: false, erro: "Botão Consultar não encontrado na tela de audiências." };
+  btn.click();
+  return { ok: true };
+}
+
+// Raspa a tabela de resultados "tblAudienciasEproc". Cada linha vira
+// { data, hora, processo, evento, observacao, status }. Autocontida,
+// executada via chrome.scripting.executeScript.
+function extrairAudienciasNaPagina() {
+  const tabela = document.getElementById("tblAudienciasEproc");
+  if (!tabela) {
+    return { ok: false, erro: "Tabela de audiências (tblAudienciasEproc) não encontrada - a consulta pode não ter retornado nada.", linhas: [] };
+  }
+  const limpar = (s) => (s || "").replace(/\s+/g, " ").trim();
+  const linhas = [];
+  for (const tr of tabela.querySelectorAll("tbody tr")) {
+    const tds = tr.querySelectorAll("td");
+    if (tds.length < 6) continue;
+    const spansDataHora = tds[0].querySelectorAll("span");
+    const data = limpar(spansDataHora[0] ? spansDataHora[0].textContent : tds[0].textContent);
+    const hora = limpar(spansDataHora[1] ? spansDataHora[1].textContent : "");
+    const linkProc = tds[1].querySelector("a");
+    const processo = limpar(linkProc ? linkProc.textContent : tds[1].textContent);
+    const textoEvt = limpar(tds[4].textContent);
+    let evento = textoEvt;
+    let observacao = "";
+    const mObs = textoEvt.match(/Observa[çc][ãa]o:\s*(.*)$/i);
+    if (mObs) observacao = limpar(mObs[1]);
+    const mEvt = textoEvt.match(/Evento:\s*(.*?)(?:\s*Observa[çc][ãa]o:.*)?$/i);
+    if (mEvt) evento = limpar(mEvt[1]);
+    const status = limpar(tds[5].textContent);
+    linhas.push({ data, hora, processo, evento, observacao, status });
+  }
+  const caption = tabela.querySelector("caption");
+  const mTotal = caption ? (caption.textContent || "").match(/\((\d+)/) : null;
+  const total = mTotal ? parseInt(mTotal[1], 10) : linhas.length;
+  return { ok: true, total, linhas };
+}
+
+// Abre o Relatório de Audiências na aba ativa e lê a lista de varas
+// disponíveis (para o usuário escolher uma no painel).
+async function listarVarasRelatorioAudiencias(aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!aba || !aba.id) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  notificar("Abrindo o Relatório de Audiências...");
+  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: clicarLinkRelatorioAudienciasNaPagina,
+  });
+  if (!linkEncontrado) {
+    throw new Error(
+      'Link "Relatórios de Audiências (Portal)" não encontrado. Abra uma página do eproc com o menu lateral e tente novamente.'
+    );
+  }
+
+  await aguardarCarregamentoAba(aba.id);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+
+  notificar("Lendo as varas disponíveis...");
+  const [{ result } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: lerVarasRelatorioAudienciasNaPagina,
+  });
+  if (!result || result.erro) {
+    throw new Error((result && result.erro) || "Não foi possível ler as varas disponíveis.");
+  }
+  notificar("Finalizando...");
+  return { varas: result.varas };
+}
+
+// Resume as audiências: total, quebra por status e a data da última
+// audiência de cada tipo (evento).
+function resumirAudiencias(linhas) {
+  const total = linhas.length;
+
+  const porStatusMap = new Map();
+  for (const l of linhas) {
+    const s = (l.status || "").trim() || "(sem status)";
+    porStatusMap.set(s, (porStatusMap.get(s) || 0) + 1);
+  }
+  const porStatus = Array.from(porStatusMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([rotulo, valor]) => ({ rotulo, valor }));
+
+  const ultimaMap = new Map(); // evento -> { ord, data }
+  for (const l of linhas) {
+    const ev = (l.evento || "").trim() || "(sem evento)";
+    const ord = paraDataOrdenavel(`${l.data} ${l.hora || ""}:00`);
+    const atual = ultimaMap.get(ev);
+    if (!atual || ord > atual.ord) ultimaMap.set(ev, { ord, data: l.data });
+  }
+  const ultimaPorEvento = Array.from(ultimaMap.entries())
+    .sort((a, b) => b[1].ord - a[1].ord)
+    .map(([rotulo, v]) => ({ rotulo, valor: v.data }));
+
+  return { total, porStatus, ultimaPorEvento };
+}
+
+// Monta o PDF do Relatório de Audiências: capa/resumo (total de audiências
+// marcadas + quebra por status + data da última audiência por evento) e,
+// ao final, a tabela discriminada (Data/Hora, Processo, Evento/Observação,
+// Status), ordenada por data.
+async function construirPdfRelatorioAudiencias(nomeVara, linhas) {
+  const resumo = resumirAudiencias(linhas);
+  const dataInformacao = new Date().toLocaleString("pt-BR");
+
+  const secoes = [
+    {
+      titulo: "AUDIÊNCIAS MARCADAS",
+      linhas: [{ rotulo: "Total de audiências", valor: resumo.total }, ...resumo.porStatus],
+    },
+    {
+      titulo: "ÚLTIMA AUDIÊNCIA POR EVENTO",
+      linhas: resumo.ultimaPorEvento.length > 0 ? resumo.ultimaPorEvento : [{ rotulo: "(nenhuma audiência)", valor: "-" }],
+    },
+  ];
+
+  const { bytes: bytesCapa } = await construirCapaRelatorioGerencial(
+    nomeVara,
+    dataInformacao,
+    secoes,
+    [],
+    "Relatório de Audiências"
+  );
+  const pdfFinal = await PDFDocument.create();
+  const pdfCapa = await PDFDocument.load(bytesCapa);
+  (await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices())).forEach((p) => pdfFinal.addPage(p));
+
+  if (linhas.length > 0) {
+    const util = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+    const itens = linhas
+      .slice()
+      .sort((a, b) => paraDataOrdenavel(`${a.data} ${a.hora || ""}:00`) - paraDataOrdenavel(`${b.data} ${b.hora || ""}:00`))
+      .map((l) => ({
+        dataHora: l.hora ? `${l.data} ${l.hora}` : l.data,
+        processo: l.processo,
+        eventoObs: l.observacao ? `${l.evento} — ${l.observacao}` : l.evento,
+        status: l.status,
+      }));
+    const colunas = [
+      { titulo: "Data/Hora", largura: util * 0.16, campo: "dataHora" },
+      { titulo: "Processo", largura: util * 0.26, campo: "processo" },
+      { titulo: "Evento / Observação", largura: util * 0.4, campo: "eventoObs" },
+      { titulo: "Status", largura: util * 0.18, campo: "status" },
+    ];
+    const bytesTabela = await construirPdfTabelaCuradaRetrato(
+      itens,
+      colunas,
+      `Audiências da unidade "${nomeVara}" — ${itens.length} audiência(s), da mais próxima à mais distante`
+    );
+    const pdfTabela = await PDFDocument.load(bytesTabela);
+    (await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices())).forEach((p) => pdfFinal.addPage(p));
+  }
+
+  return pdfFinal.save();
+}
+
+// Orquestra o Relatório de Audiências de UMA vara: abre a tela, seleciona a
+// vara, consulta, raspa a tabela e baixa o PDF.
+async function exportarRelatorioAudiencias(valorVara, nomeVara, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+  if (!valorVara) throw new Error("Selecione uma vara antes de gerar o Relatório de Audiências.");
+
+  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!aba || !aba.id) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  notificar("Abrindo o Relatório de Audiências...");
+  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: clicarLinkRelatorioAudienciasNaPagina,
+  });
+  if (!linkEncontrado) {
+    throw new Error(
+      'Link "Relatórios de Audiências (Portal)" não encontrado. Abra uma página do eproc com o menu lateral e tente novamente.'
+    );
+  }
+  await aguardarCarregamentoAba(aba.id);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+
+  notificar("Consultando as audiências da vara escolhida...");
+  const [{ result: consulta } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    world: "MAIN",
+    func: selecionarVaraEConsultarAudienciasNaPagina,
+    args: [valorVara],
+  });
+  if (!consulta || !consulta.ok) {
+    throw new Error((consulta && consulta.erro) || "Não foi possível consultar as audiências.");
+  }
+
+  // O "Consultar" recarrega a pagina (POST) - espera terminar antes de raspar.
+  await aguardarCarregamentoAba(aba.id).catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+
+  notificar("Lendo os resultados...");
+  const [{ result: extraido } = {}] = await chrome.scripting.executeScript({
+    target: { tabId: aba.id },
+    func: extrairAudienciasNaPagina,
+  });
+  if (!extraido || !extraido.ok) {
+    throw new Error((extraido && extraido.erro) || "Não foi possível ler a tabela de audiências.");
+  }
+
+  notificar("Montando o PDF...");
+  const bytes = await construirPdfRelatorioAudiencias(nomeVara || "Vara", extraido.linhas);
+  const nomeArquivo = `eproc/Relatório_Audiências_${sanitizarNomeArquivo(nomeVara || "Vara")}.pdf`;
+  await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytes));
+
+  notificar("Finalizando...");
+  return { vara: nomeVara, totalAudiencias: extraido.linhas.length };
+}
+
 // Dias de atraso usados no Relatório Gerencial da Unidade (diferente do
 // DIAS_LIMITE_ATRASO de 30 dias usado no relatorio "rapido" do painel -
 // aqui o pedido foi especificamente "aguardando há mais de 90 dias").
@@ -9194,6 +9467,38 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
             ok: false,
             erro: e && e.message ? e.message : String(e),
           })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "AUDIENCIAS_LISTAR_VARAS") {
+    listarVarasRelatorioAudiencias((texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_AUDIENCIAS", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime.sendMessage({ tipo: "AUDIENCIAS_VARAS_FINALIZADO", ok: true, resultado }).catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({ tipo: "AUDIENCIAS_VARAS_FINALIZADO", ok: false, erro: e && e.message ? e.message : String(e) })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "AUDIENCIAS_EXPORTAR") {
+    exportarRelatorioAudiencias(mensagem.valorVara, mensagem.nomeVara, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_AUDIENCIAS", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime.sendMessage({ tipo: "AUDIENCIAS_FINALIZADO", ok: true, resultado }).catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({ tipo: "AUDIENCIAS_FINALIZADO", ok: false, erro: e && e.message ? e.message : String(e) })
           .catch(() => {});
       });
     sendResponse({ ok: true });
