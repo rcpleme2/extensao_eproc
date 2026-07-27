@@ -107,6 +107,10 @@
           Remessas aos juízes leigos
         </label>
         <label class="opcao">
+          <input type="checkbox" id="chk-rel-audiencias" checked />
+          Audiências marcadas (Portal de Audiências)
+        </label>
+        <label class="opcao">
           <input type="checkbox" id="chk-rel-regras-automacao" checked />
           Regras de automação
         </label>
@@ -132,33 +136,6 @@
       <div id="area-progresso-comparacao-unidades" class="progresso-spinner" hidden>
         <span class="spinner" aria-hidden="true"></span>
         <span id="texto-progresso-comparacao-unidades"></span>
-      </div>
-
-      <div class="subsecao" id="subsecao-audiencias">
-        <div class="subsecao-titulo">🗓️ Relatório de Audiências</div>
-        <div class="status">
-          Audiências marcadas de uma vara (Portal de Audiências): total,
-          última audiência por tipo e a relação discriminada em PDF.
-        </div>
-
-        <div class="botoes">
-          <button id="btn-carregar-varas-audiencias" class="btn-secundario">Carregar varas (Relatório de Audiências)</button>
-        </div>
-
-        <div id="area-progresso-audiencias" class="progresso-spinner" hidden>
-          <span class="spinner" aria-hidden="true"></span>
-          <span id="texto-progresso-audiencias"></span>
-        </div>
-
-        <div class="opcoes" id="area-select-vara-audiencias" hidden>
-          <select id="select-vara-audiencias">
-            <option value="" selected disabled>Selecione uma vara...</option>
-          </select>
-        </div>
-
-        <div class="botoes" id="area-btn-exportar-audiencias" hidden>
-          <button id="btn-exportar-audiencias" class="btn">Exportar Relatório de Audiências (PDF)</button>
-        </div>
       </div>
 
       <div id="area-erros-corregedoria" class="erros" hidden></div>

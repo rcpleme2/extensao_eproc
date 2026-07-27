@@ -4377,42 +4377,114 @@ function extrairAudienciasNaPagina() {
   return { ok: true, total, linhas };
 }
 
-// Abre o Relatório de Audiências na aba ativa e lê a lista de varas
-// disponíveis (para o usuário escolher uma no painel).
-async function listarVarasRelatorioAudiencias(aoProgredir) {
-  const notificar = (texto) => {
-    if (aoProgredir) aoProgredir(texto);
-  };
+// Normaliza um nome de unidade/vara para comparação tolerante (sem
+// acentos, minúsculo, só letras/números separados por espaço) - usado para
+// casar a unidade escolhida no Relatório para Correição com a vara
+// correspondente na lista do Portal de Audiências (os textos costumam ser
+// os mesmos, mas podem diferir em acento/pontuação/caixa).
+function normalizarNomeUnidade(s) {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
 
-  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!aba || !aba.id) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
-  }
-
-  notificar("Abrindo o Relatório de Audiências...");
-  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: clicarLinkRelatorioAudienciasNaPagina,
+// Escolhe, na lista de varas do Portal de Audiências, a que corresponde ao
+// nome da unidade do relatório: match exato (normalizado) primeiro; senão,
+// o primeiro em que um nome contém o outro. Devolve null se não achar.
+function escolherVaraPorNome(varas, nomeUnidade) {
+  const alvo = normalizarNomeUnidade(nomeUnidade);
+  if (!alvo) return null;
+  let m = (varas || []).find((v) => normalizarNomeUnidade(v.nome) === alvo);
+  if (m) return m;
+  m = (varas || []).find((v) => {
+    const n = normalizarNomeUnidade(v.nome);
+    return n && (n.includes(alvo) || alvo.includes(n));
   });
-  if (!linkEncontrado) {
-    throw new Error(
-      'Link "Relatórios de Audiências (Portal)" não encontrado. Abra uma página do eproc com o menu lateral e tente novamente.'
-    );
-  }
+  return m || null;
+}
 
-  await aguardarCarregamentoAba(aba.id);
-  await new Promise((resolve) => setTimeout(resolve, 600));
+// Consulta as audiências marcadas de UMA unidade (pelo nome) no Portal de
+// Audiências, numa ABA OCULTA (para não navegar a aba do usuário no meio da
+// geração do relatório): abre a tela, casa a vara pelo nome, seleciona,
+// consulta e raspa a tabela. Best-effort: devolve { linhas, erro } - um erro
+// aqui só deixa a seção de audiências de fora do relatório (com aviso), sem
+// derrubar o resto.
+async function consultarAudienciasDaUnidade(urlBase, nomeUnidade) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 400));
 
-  notificar("Lendo as varas disponíveis...");
-  const [{ result } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: lerVarasRelatorioAudienciasNaPagina,
-  });
-  if (!result || result.erro) {
-    throw new Error((result && result.erro) || "Não foi possível ler as varas disponíveis.");
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioAudienciasNaPagina,
+    });
+    if (!linkEncontrado) {
+      return { linhas: [], erro: 'Link "Relatórios de Audiências (Portal)" não encontrado no menu lateral.' };
+    }
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    const [{ result: varasRes } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: lerVarasRelatorioAudienciasNaPagina,
+    });
+    if (!varasRes || varasRes.erro) {
+      return { linhas: [], erro: (varasRes && varasRes.erro) || "Não foi possível ler as varas do Portal de Audiências." };
+    }
+    const alvo = escolherVaraPorNome(varasRes.varas, nomeUnidade);
+    if (!alvo) {
+      return { linhas: [], erro: `Não encontrei "${nomeUnidade}" na lista de varas do Portal de Audiências.` };
+    }
+
+    const [{ result: consulta } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      world: "MAIN",
+      func: selecionarVaraEConsultarAudienciasNaPagina,
+      args: [alvo.valor],
+    });
+    if (!consulta || !consulta.ok) {
+      return { linhas: [], erro: (consulta && consulta.erro) || "Falha ao consultar as audiências." };
+    }
+
+    // O "Consultar" recarrega a pagina (POST) - espera e raspa; se a
+    // primeira leitura pegar a pagina no meio da navegacao, tenta de novo.
+    await aguardarCarregamentoAba(aba.id).catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    let extraido = null;
+    try {
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: extrairAudienciasNaPagina,
+      });
+      extraido = result;
+    } catch (e) {
+      // provavel recarregamento no meio - retenta abaixo.
+    }
+    if (!extraido || !extraido.ok) {
+      await aguardarCarregamentoAba(aba.id).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: extrairAudienciasNaPagina,
+      });
+      extraido = result;
+    }
+    if (!extraido || !extraido.ok) {
+      return { linhas: [], erro: (extraido && extraido.erro) || "Não foi possível ler a tabela de audiências." };
+    }
+    return { linhas: extraido.linhas, erro: null, varaNome: alvo.nome };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) chrome.tabs.remove(aba.id).catch(() => {});
+    liberarSlotDeAbaOculta();
   }
-  notificar("Finalizando...");
-  return { varas: result.varas };
 }
 
 // Resume as audiências: total, quebra por status e a data da última
@@ -4443,122 +4515,70 @@ function resumirAudiencias(linhas) {
   return { total, porStatus, ultimaPorEvento };
 }
 
-// Monta o PDF do Relatório de Audiências: capa/resumo (total de audiências
-// marcadas + quebra por status + data da última audiência por evento) e,
-// ao final, a tabela discriminada (Data/Hora, Processo, Evento/Observação,
-// Status), ordenada por data.
-async function construirPdfRelatorioAudiencias(nomeVara, linhas) {
+// Seções de resumo (rótulo/valor) das audiências, no formato consumido por
+// "construirCapaRelatorioGerencial"/secoesResumo: "AUDIÊNCIAS MARCADAS"
+// (total + quebra por status) e "ÚLTIMA AUDIÊNCIA POR EVENTO". A primeira
+// recebe "id" para virar link clicável até a tabela discriminada.
+function secoesResumoAudiencias(linhas) {
   const resumo = resumirAudiencias(linhas);
-  const dataInformacao = new Date().toLocaleString("pt-BR");
-
-  const secoes = [
+  return [
     {
       titulo: "AUDIÊNCIAS MARCADAS",
+      id: "audiencias",
       linhas: [{ rotulo: "Total de audiências", valor: resumo.total }, ...resumo.porStatus],
     },
     {
       titulo: "ÚLTIMA AUDIÊNCIA POR EVENTO",
-      linhas: resumo.ultimaPorEvento.length > 0 ? resumo.ultimaPorEvento : [{ rotulo: "(nenhuma audiência)", valor: "-" }],
+      linhas:
+        resumo.ultimaPorEvento.length > 0
+          ? resumo.ultimaPorEvento
+          : [{ rotulo: "(nenhuma audiência)", valor: "-" }],
     },
   ];
-
-  const { bytes: bytesCapa } = await construirCapaRelatorioGerencial(
-    nomeVara,
-    dataInformacao,
-    secoes,
-    [],
-    "Relatório de Audiências"
-  );
-  const pdfFinal = await PDFDocument.create();
-  const pdfCapa = await PDFDocument.load(bytesCapa);
-  (await pdfFinal.copyPages(pdfCapa, pdfCapa.getPageIndices())).forEach((p) => pdfFinal.addPage(p));
-
-  if (linhas.length > 0) {
-    const util = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
-    const itens = linhas
-      .slice()
-      .sort((a, b) => paraDataOrdenavel(`${a.data} ${a.hora || ""}:00`) - paraDataOrdenavel(`${b.data} ${b.hora || ""}:00`))
-      .map((l) => ({
-        dataHora: l.hora ? `${l.data} ${l.hora}` : l.data,
-        processo: l.processo,
-        eventoObs: l.observacao ? `${l.evento} — ${l.observacao}` : l.evento,
-        status: l.status,
-      }));
-    const colunas = [
-      { titulo: "Data/Hora", largura: util * 0.16, campo: "dataHora" },
-      { titulo: "Processo", largura: util * 0.26, campo: "processo" },
-      { titulo: "Evento / Observação", largura: util * 0.4, campo: "eventoObs" },
-      { titulo: "Status", largura: util * 0.18, campo: "status" },
-    ];
-    const bytesTabela = await construirPdfTabelaCuradaRetrato(
-      itens,
-      colunas,
-      `Audiências da unidade "${nomeVara}" — ${itens.length} audiência(s), da mais próxima à mais distante`
-    );
-    const pdfTabela = await PDFDocument.load(bytesTabela);
-    (await pdfFinal.copyPages(pdfTabela, pdfTabela.getPageIndices())).forEach((p) => pdfFinal.addPage(p));
-  }
-
-  return pdfFinal.save();
 }
 
-// Orquestra o Relatório de Audiências de UMA vara: abre a tela, seleciona a
-// vara, consulta, raspa a tabela e baixa o PDF.
-async function exportarRelatorioAudiencias(valorVara, nomeVara, aoProgredir) {
-  const notificar = (texto) => {
-    if (aoProgredir) aoProgredir(texto);
-  };
-  if (!valorVara) throw new Error("Selecione uma vara antes de gerar o Relatório de Audiências.");
+// Tabela discriminada das audiências (retrato): Data/Hora, Processo,
+// Evento/Observação, Status - ordenada da audiência mais próxima à mais
+// distante. Devolve os bytes do PDF (só a tabela), para ser anexada ao
+// relatório junto das demais tabelas discriminadas.
+async function construirPdfTabelaAudiencias(nomeUnidade, linhas, sufixoTitulo = "") {
+  const util = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+  const itens = linhas
+    .slice()
+    .sort((a, b) => paraDataOrdenavel(`${a.data} ${a.hora || ""}:00`) - paraDataOrdenavel(`${b.data} ${b.hora || ""}:00`))
+    .map((l) => ({
+      dataHora: l.hora ? `${l.data} ${l.hora}` : l.data,
+      processo: l.processo,
+      eventoObs: l.observacao ? `${l.evento} — ${l.observacao}` : l.evento,
+      status: l.status,
+    }));
+  const colunas = [
+    { titulo: "Data/Hora", largura: util * 0.16, campo: "dataHora" },
+    { titulo: "Processo", largura: util * 0.26, campo: "processo" },
+    { titulo: "Evento / Observação", largura: util * 0.4, campo: "eventoObs" },
+    { titulo: "Status", largura: util * 0.18, campo: "status" },
+  ];
+  return construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Audiências da unidade "${nomeUnidade}"${sufixoTitulo} — ${itens.length} audiência(s), da mais próxima à mais distante`
+  );
+}
 
-  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!aba || !aba.id) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+// Navega a aba ativa de volta para a página inicial do eproc - usado ao
+// FINAL da geração dos relatórios da Corregedoria (a aba pode ter ficado na
+// tela do Relatório Geral por causa do "Carregar unidades"). Best-effort:
+// qualquer falha aqui é silenciosa (não faz sentido derrubar um relatório
+// que já foi gerado só porque a navegação final não deu certo).
+async function retornarAbaParaInicioEproc() {
+  try {
+    const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!aba || !aba.id || !aba.url) return;
+    const origem = new URL(aba.url).origin;
+    await chrome.tabs.update(aba.id, { url: `${origem}/eproc/` });
+  } catch (e) {
+    // silencioso de proposito
   }
-
-  notificar("Abrindo o Relatório de Audiências...");
-  const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: clicarLinkRelatorioAudienciasNaPagina,
-  });
-  if (!linkEncontrado) {
-    throw new Error(
-      'Link "Relatórios de Audiências (Portal)" não encontrado. Abra uma página do eproc com o menu lateral e tente novamente.'
-    );
-  }
-  await aguardarCarregamentoAba(aba.id);
-  await new Promise((resolve) => setTimeout(resolve, 600));
-
-  notificar("Consultando as audiências da vara escolhida...");
-  const [{ result: consulta } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    world: "MAIN",
-    func: selecionarVaraEConsultarAudienciasNaPagina,
-    args: [valorVara],
-  });
-  if (!consulta || !consulta.ok) {
-    throw new Error((consulta && consulta.erro) || "Não foi possível consultar as audiências.");
-  }
-
-  // O "Consultar" recarrega a pagina (POST) - espera terminar antes de raspar.
-  await aguardarCarregamentoAba(aba.id).catch(() => {});
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-
-  notificar("Lendo os resultados...");
-  const [{ result: extraido } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: aba.id },
-    func: extrairAudienciasNaPagina,
-  });
-  if (!extraido || !extraido.ok) {
-    throw new Error((extraido && extraido.erro) || "Não foi possível ler a tabela de audiências.");
-  }
-
-  notificar("Montando o PDF...");
-  const bytes = await construirPdfRelatorioAudiencias(nomeVara || "Vara", extraido.linhas);
-  const nomeArquivo = `eproc/Relatório_Audiências_${sanitizarNomeArquivo(nomeVara || "Vara")}.pdf`;
-  await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytes));
-
-  notificar("Finalizando...");
-  return { vara: nomeVara, totalAudiencias: extraido.linhas.length };
 }
 
 // Dias de atraso usados no Relatório Gerencial da Unidade (diferente do
@@ -6086,6 +6106,10 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   mandados: false,
   paralisados: true,
   remessasJuizesLeigos: true,
+  // Default "false": só o cartão Corregedoria envia essa opção (audiências
+  // do Portal de Audiências, casadas pela unidade escolhida). Nos demais
+  // fluxos que não a enviam, cai neste padrão e não é consultada.
+  audiencias: false,
   regrasAutomacao: true,
   localizadores: true,
 };
@@ -6571,6 +6595,17 @@ async function exportarRelatorioGerencialUnidade(
     }
   }
 
+  // Audiências marcadas (Portal de Audiências) - consultadas numa aba
+  // oculta, casando a vara pelo NOME da unidade do relatório. Best-effort:
+  // uma falha aqui vira só um aviso, sem derrubar o resto do relatório.
+  const audiencias = { linhas: [], erros: [] };
+  if (opcoesFinais.audiencias) {
+    notificar("Consultando audiências marcadas da unidade...");
+    const r = await consultarAudienciasDaUnidade(abaAtual.url, nomeUnidade);
+    audiencias.linhas = r.linhas || [];
+    if (r.erro) audiencias.erros.push(r.erro);
+  }
+
   notificar("Gerando PDF...");
 
   const dataInformacao = new Date().toLocaleString("pt-BR");
@@ -6634,6 +6669,7 @@ async function exportarRelatorioGerencialUnidade(
       ? paralisadosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
       : Boolean(processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0),
     remessasJuizesLeigos: Boolean(opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0),
+    audiencias: Boolean(opcoesFinais.audiencias && audiencias.linhas.length > 0),
   };
 
   const secoesResumo = [];
@@ -6741,6 +6777,13 @@ async function exportarRelatorioGerencialUnidade(
       linhas: [{ rotulo: "Total de processos em remessa", valor: remessasJuizesLeigos.linhas.length }],
     });
   }
+  if (opcoesFinais.audiencias) {
+    // Duas seções: "AUDIÊNCIAS MARCADAS" (total + quebra por status) e
+    // "ÚLTIMA AUDIÊNCIA POR EVENTO". O link (id) só quando houver tabela.
+    const secoesAud = secoesResumoAudiencias(audiencias.linhas);
+    if (secoesAud[0]) secoesAud[0].id = temTabelaDiscriminada.audiencias ? "audiencias" : undefined;
+    secoesResumo.push(...secoesAud);
+  }
   if (opcoesFinais.regrasAutomacao) {
     secoesResumo.push({
       titulo: "REGRAS DE AUTOMAÇÃO",
@@ -6778,6 +6821,9 @@ async function exportarRelatorioGerencialUnidade(
   }
   if (opcoesFinais.regrasAutomacao && regrasAutomacao.erros.length > 0) {
     avisos.push(`Regras de automação: ${regrasAutomacao.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.audiencias && audiencias.erros.length > 0) {
+    avisos.push(`Audiências: ${audiencias.erros.join(" | ")}`);
   }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
 
@@ -6896,6 +6942,11 @@ async function exportarRelatorioGerencialUnidade(
     alvosTabela.remessasJuizesLeigos = pdfFinal.getPageCount();
     const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
     await anexarPaginas(bytesRemessas);
+  }
+  if (opcoesFinais.audiencias && audiencias.linhas.length > 0) {
+    alvosTabela.audiencias = pdfFinal.getPageCount();
+    const bytesAudiencias = await construirPdfTabelaAudiencias(nomeUnidade, audiencias.linhas);
+    await anexarPaginas(bytesAudiencias);
   }
 
   // ===== 3) Regras de Automação e Localizadores (sem link no resumo) =====
@@ -9473,38 +9524,6 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     return true;
   }
 
-  if (mensagem && mensagem.tipo === "AUDIENCIAS_LISTAR_VARAS") {
-    listarVarasRelatorioAudiencias((texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_AUDIENCIAS", texto }).catch(() => {});
-    })
-      .then((resultado) => {
-        chrome.runtime.sendMessage({ tipo: "AUDIENCIAS_VARAS_FINALIZADO", ok: true, resultado }).catch(() => {});
-      })
-      .catch((e) => {
-        chrome.runtime
-          .sendMessage({ tipo: "AUDIENCIAS_VARAS_FINALIZADO", ok: false, erro: e && e.message ? e.message : String(e) })
-          .catch(() => {});
-      });
-    sendResponse({ ok: true });
-    return true;
-  }
-
-  if (mensagem && mensagem.tipo === "AUDIENCIAS_EXPORTAR") {
-    exportarRelatorioAudiencias(mensagem.valorVara, mensagem.nomeVara, (texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_AUDIENCIAS", texto }).catch(() => {});
-    })
-      .then((resultado) => {
-        chrome.runtime.sendMessage({ tipo: "AUDIENCIAS_FINALIZADO", ok: true, resultado }).catch(() => {});
-      })
-      .catch((e) => {
-        chrome.runtime
-          .sendMessage({ tipo: "AUDIENCIAS_FINALIZADO", ok: false, erro: e && e.message ? e.message : String(e) })
-          .catch(() => {});
-      });
-    sendResponse({ ok: true });
-    return true;
-  }
-
   if (mensagem && mensagem.tipo === "ABRIR_PAINEL_LATERAL") {
     // Enviada pelo botao que o content script injeta ao lado da logo do
     // Portal jus.br. sidePanel.open() so' funciona chamado em resposta
@@ -9611,6 +9630,10 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultado })
           .catch(() => {});
+        // Depois de emitir o relatório, devolve a aba para a página inicial
+        // do eproc (a aba tinha ido para o Relatório Geral no "Carregar
+        // unidades").
+        retornarAbaParaInicioEproc();
       })
       .catch((e) => {
         chrome.runtime
@@ -9637,6 +9660,7 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({ tipo: "RELATORIO_GERENCIAL_FINALIZADO", ok: true, resultados })
           .catch(() => {});
+        retornarAbaParaInicioEproc();
       })
       .catch((e) => {
         chrome.runtime

@@ -1491,6 +1491,7 @@ const chkRelConclusosSentenca = document.getElementById("chk-rel-conclusos-sente
 const chkRelSemMovimentacao = document.getElementById("chk-rel-sem-movimentacao");
 const chkRelParalisados = document.getElementById("chk-rel-paralisados");
 const chkRelRemessasJuizesLeigos = document.getElementById("chk-rel-remessas-juizes-leigos");
+const chkRelAudiencias = document.getElementById("chk-rel-audiencias");
 const chkRelRegrasAutomacao = document.getElementById("chk-rel-regras-automacao");
 const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
 const btnMarcarTudoRelatorio = document.getElementById("btn-marcar-tudo-relatorio");
@@ -1510,15 +1511,6 @@ const textoProgressoComparacaoUnidades = document.getElementById("texto-progress
 // const areaProgressoPanoramico = document.getElementById("area-progresso-panoramico");
 // const textoProgressoPanoramico = document.getElementById("texto-progresso-panoramico");
 const areaErrosCorregedoria = document.getElementById("area-erros-corregedoria");
-
-// Relatório de Audiências (Corregedoria)
-const btnCarregarVarasAudiencias = document.getElementById("btn-carregar-varas-audiencias");
-const areaProgressoAudiencias = document.getElementById("area-progresso-audiencias");
-const textoProgressoAudiencias = document.getElementById("texto-progresso-audiencias");
-const areaSelectVaraAudiencias = document.getElementById("area-select-vara-audiencias");
-const selectVaraAudiencias = document.getElementById("select-vara-audiencias");
-const areaBtnExportarAudiencias = document.getElementById("area-btn-exportar-audiencias");
-const btnExportarAudiencias = document.getElementById("btn-exportar-audiencias");
 
 // As unidades escolhidas no dropdown (nome + valor do filtro Órgão/Juízo,
 // uma ou mais - o select agora e' multiplo) - e' o "campo com a escolha
@@ -1646,57 +1638,6 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
   }
 });
 
-// ---- Relatório de Audiências (Corregedoria) ----
-btnCarregarVarasAudiencias.addEventListener("click", async () => {
-  areaErrosCorregedoria.hidden = true;
-  areaSelectVaraAudiencias.hidden = true;
-  areaBtnExportarAudiencias.hidden = true;
-  selectVaraAudiencias.innerHTML = '<option value="" selected disabled>Selecione uma vara...</option>';
-  areaProgressoAudiencias.hidden = false;
-  textoProgressoAudiencias.textContent = "Iniciando...";
-  setStatusCorregedoria("Abrindo o Relatório de Audiências e lendo as varas (sua aba atual será navegada)...");
-  try {
-    const resposta = await chrome.runtime.sendMessage({ tipo: "AUDIENCIAS_LISTAR_VARAS" });
-    if (!resposta || !resposta.ok) {
-      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar o carregamento das varas.");
-    }
-  } catch (e) {
-    areaProgressoAudiencias.hidden = true;
-    areaErrosCorregedoria.hidden = false;
-    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
-    setStatusCorregedoria("Erro ao carregar as varas.", "erro");
-  }
-});
-
-selectVaraAudiencias.addEventListener("change", () => {
-  areaBtnExportarAudiencias.hidden = !selectVaraAudiencias.value;
-});
-
-btnExportarAudiencias.addEventListener("click", async () => {
-  const valorVara = selectVaraAudiencias.value;
-  const opcaoVara = selectVaraAudiencias.options[selectVaraAudiencias.selectedIndex];
-  const nomeVara = opcaoVara ? opcaoVara.textContent : "";
-  if (!valorVara) {
-    setStatusCorregedoria("Selecione uma vara antes de exportar o Relatório de Audiências.", "erro");
-    return;
-  }
-  areaErrosCorregedoria.hidden = true;
-  areaProgressoAudiencias.hidden = false;
-  textoProgressoAudiencias.textContent = "Iniciando...";
-  setStatusCorregedoria("Gerando o Relatório de Audiências (sua aba atual será navegada)...");
-  try {
-    const resposta = await chrome.runtime.sendMessage({ tipo: "AUDIENCIAS_EXPORTAR", valorVara, nomeVara });
-    if (!resposta || !resposta.ok) {
-      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a geração do relatório.");
-    }
-  } catch (e) {
-    areaProgressoAudiencias.hidden = true;
-    areaErrosCorregedoria.hidden = false;
-    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
-    setStatusCorregedoria("Erro ao gerar o Relatório de Audiências.", "erro");
-  }
-});
-
 // Ao escolher uma Comarca, preenche o select de Juízo/Vara so' com as
 // unidades daquela comarca (mostrando o nome SEM o sufixo "de <Comarca>",
 // ja' que a comarca escolhida acima deixa isso implicito e repetir so'
@@ -1777,6 +1718,7 @@ function lerOpcoesRelatorioUnidade() {
     semMovimentacao: chkRelSemMovimentacao.checked,
     paralisados: chkRelParalisados.checked,
     remessasJuizesLeigos: chkRelRemessasJuizesLeigos.checked,
+    audiencias: chkRelAudiencias.checked,
     regrasAutomacao: chkRelRegrasAutomacao.checked,
     localizadores: chkRelLocalizadores.checked,
   };
@@ -1790,6 +1732,7 @@ const CHECKBOXES_ITENS_RELATORIO_UNIDADE = [
   chkRelSemMovimentacao,
   chkRelParalisados,
   chkRelRemessasJuizesLeigos,
+  chkRelAudiencias,
   chkRelRegrasAutomacao,
   chkRelLocalizadores,
 ];
@@ -2154,52 +2097,6 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao carregar as unidades.";
       btnRelatorioGerencialUnidade.hidden = false;
-    }
-  }
-
-  if (mensagem.tipo === "PROGRESSO_AUDIENCIAS") {
-    textoProgressoAudiencias.textContent = mensagem.texto || "Processando...";
-    setStatusCorregedoria(mensagem.texto || "Processando...");
-  }
-
-  if (mensagem.tipo === "AUDIENCIAS_VARAS_FINALIZADO") {
-    areaProgressoAudiencias.hidden = true;
-    if (mensagem.ok) {
-      const varas = (mensagem.resultado && mensagem.resultado.varas) || [];
-      selectVaraAudiencias.innerHTML = '<option value="" selected disabled>Selecione uma vara...</option>';
-      for (const v of varas) {
-        const opcao = document.createElement("option");
-        opcao.value = v.valor;
-        opcao.textContent = v.nome;
-        selectVaraAudiencias.appendChild(opcao);
-      }
-      areaSelectVaraAudiencias.hidden = varas.length === 0;
-      areaBtnExportarAudiencias.hidden = true;
-      setStatusCorregedoria(
-        varas.length > 0
-          ? `${varas.length} vara(s) - selecione uma e clique em "Exportar Relatório de Audiências".`
-          : "Nenhuma vara encontrada na tela de Relatório de Audiências."
-      );
-    } else {
-      areaErrosCorregedoria.hidden = false;
-      areaErrosCorregedoria.textContent = mensagem.erro || "Falha desconhecida ao carregar as varas.";
-      setStatusCorregedoria("Erro ao carregar as varas.", "erro");
-    }
-  }
-
-  if (mensagem.tipo === "AUDIENCIAS_FINALIZADO") {
-    areaProgressoAudiencias.hidden = true;
-    if (mensagem.ok) {
-      const r = mensagem.resultado || {};
-      const total = r.totalAudiencias != null ? r.totalAudiencias : 0;
-      setStatusCorregedoria(
-        `Relatório de Audiências gerado: ${total} audiência(s) da vara "${r.vara || ""}". PDF baixado.`,
-        "ok"
-      );
-    } else {
-      areaErrosCorregedoria.hidden = false;
-      areaErrosCorregedoria.textContent = mensagem.erro || "Falha ao gerar o Relatório de Audiências.";
-      setStatusCorregedoria("Erro ao gerar o Relatório de Audiências.", "erro");
     }
   }
 

@@ -1230,34 +1230,39 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
    painel (que já mostra esse total, já que ali a extração é direto da
    tabela da tela, sem precisar de nenhuma consulta a mais).
 
-### Relatório de Audiências
+#### Audiências como item do relatório
 
-Ainda no cartão Corregedoria, uma subseção própria gera um **Relatório de
-Audiências** de uma vara, a partir do **Portal de Audiências** do eproc
-(menu lateral **"Audiência" > "Relatórios de Audiências (Portal)"**,
-`acao=audiencia_relatorio_portal`).
+As **audiências marcadas** são **um dos itens do próprio Relatório para
+Correição** (checkbox **"Audiências marcadas (Portal de Audiências)"** em
+"Itens a incluir no PDF") — não há seleção separada: elas entram no mesmo
+PDF, para a **mesma unidade** escolhida no relatório.
 
-1. **"Carregar varas (Relatório de Audiências)"** navega a aba atual até a
-   tela do Relatório de Audiências (via o link do menu lateral, achado no
-   DOM mesmo com o submenu recolhido) e lê as opções do campo de vara
-   (`selVaraFederal`), montando um dropdown no painel. A tela já vem com
-   **"Consultar por" = "Vara Estadual"**, então basta escolher a vara.
-2. Escolhida a vara, **"Exportar Relatório de Audiências (PDF)"** seleciona
-   a vara no formulário, dispara o **"Consultar"** (`btnConsultar`) — que
-   recarrega a página com a lista — e raspa a tabela de resultados
-   (`tblAudienciasEproc`), usando o **período padrão** que o portal já traz.
-   Cada linha vira `{ data, hora, processo, evento, observação, status }`.
+Quando o item está marcado, ao gerar o relatório a extensão abre — **numa
+aba oculta**, sem tirar o usuário da tela — o **Portal de Audiências**
+(menu **"Audiência" > "Relatórios de Audiências (Portal)"**,
+`acao=audiencia_relatorio_portal`), **casa a vara pelo nome da unidade** do
+relatório (comparação tolerante a acento/caixa/pontuação, no campo
+`selVaraFederal`), dispara o **"Consultar"** (`btnConsultar`, período padrão
+do portal) e raspa a tabela `tblAudienciasEproc`. Cada linha vira
+`{ data, hora, processo, evento, observação, status }`. É best-effort: se a
+vara não for encontrada ou a consulta falhar, entra só um **aviso** e o
+resto do relatório sai normalmente.
 
-O PDF tem a mesma capa institucional dos demais relatórios, com **resumo**
-primeiro e a **tabela discriminada** ao final:
+No PDF, as audiências seguem o mesmo padrão das demais seções — **resumo na
+capa** e **tabela discriminada ao final**:
 
-- **Resumo:**
-  - **Audiências marcadas** — total de audiências e a quebra por **Status**
-    (ex.: DESIGNADA, REALIZADA, REDESIGNADA), da mais frequente para a menos.
-  - **Última audiência por evento** — para cada tipo de audiência (Evento),
+- **Resumo (capa):**
+  - **AUDIÊNCIAS MARCADAS** — total de audiências + quebra por **Status**
+    (ex.: DESIGNADA, REALIZADA, REDESIGNADA), da mais frequente para a menos
+    (com o link "ver relação »" para a tabela).
+  - **ÚLTIMA AUDIÊNCIA POR EVENTO** — para cada tipo de audiência (Evento),
     a **data da audiência mais recente**, da mais nova para a mais antiga.
 - **Tabela discriminada** (retrato, ordenada da audiência mais próxima à
   mais distante): **Data/Hora, Processo, Evento / Observação, Status**.
+
+Ao **terminar de emitir o relatório**, a aba do usuário **retorna à página
+inicial do eproc** (ela havia ido para o Relatório Geral no "Carregar
+unidades").
 
 ## Gestão da Unidade
 
