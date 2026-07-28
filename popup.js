@@ -1865,6 +1865,8 @@ const chkRelAltSemMovimentacao = document.getElementById("chk-relalt-sem-movimen
 const chkRelAltMandados = document.getElementById("chk-relalt-mandados");
 const chkRelAltParalisados = document.getElementById("chk-relalt-paralisados");
 const chkRelAltRemessasJuizesLeigos = document.getElementById("chk-relalt-remessas-juizes-leigos");
+const chkRelAltAgendaPadraoAudiencias = document.getElementById("chk-relalt-agenda-padrao-audiencias");
+const chkRelAltAudienciasDetalhado = document.getElementById("chk-relalt-audiencias-detalhado");
 const chkRelAltRegrasAutomacao = document.getElementById("chk-relalt-regras-automacao");
 const chkRelAltLocalizadores = document.getElementById("chk-relalt-localizadores");
 const btnExportarRelatorioUnidadeAlt = document.getElementById("btn-exportar-relatorio-unidade-alt");
@@ -1886,6 +1888,8 @@ function lerOpcoesRelatorioUnidadeAlt() {
     mandados: chkRelAltMandados.checked,
     paralisados: chkRelAltParalisados.checked,
     remessasJuizesLeigos: chkRelAltRemessasJuizesLeigos.checked,
+    agendaPadraoAudiencias: chkRelAltAgendaPadraoAudiencias.checked,
+    audienciasDetalhado: chkRelAltAudienciasDetalhado.checked,
     regrasAutomacao: chkRelAltRegrasAutomacao.checked,
     localizadores: chkRelAltLocalizadores.checked,
   };
