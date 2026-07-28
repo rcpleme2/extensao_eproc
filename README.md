@@ -1382,10 +1382,14 @@ seletor de unidade arbitrária como as demais consultas da Corregedoria).
   Audiência, Dia da Semana, Primeira Audiência, Última Audiência, Duração
   das Audiências, Audiências Previstas e Audiências Agendadas**. No
   resumo (capa): total de tipos cadastrados e a soma de audiências
-  previstas/agendadas entre todos eles; a tabela discriminada (em
-  **página paisagem**, por ter mais colunas) traz também o **Período** de
-  cada registro, para diferenciar quando a unidade tem mais de um período
-  de agenda cadastrado.
+  previstas/agendadas entre todos eles; a tabela discriminada segue o
+  **mesmo padrão retrato** das demais tabelas do relatório (não mais
+  paisagem) e traz também o **Período** de cada registro, para
+  diferenciar quando a unidade tem mais de um período de agenda
+  cadastrado. O título de cada coluna quebra em múltiplas linhas quando
+  necessário — regra aplicada de forma padrão a todas as tabelas
+  discriminadas do app, para nunca truncar/sobrepor um título de coluna
+  mais longo.
 - **"Audiências (Relatório de Audiências Novo)"** — audiências
   individuais (menu lateral **"Audiência" > "Relatório de Audiências
   Novo"**, `acao=RelatorioAudiencias/Listar`, diferente do "Portal de
@@ -1396,18 +1400,46 @@ seletor de unidade arbitrária como as demais consultas da Corregedoria).
   tabela de resultado, guarda **Processo** (só os números, sem
   pontuação/sigla), **Magistrado**, **Conciliador/Juiz Leigo**, **Data e
   hora**, **Tipo** e **Observação** — a coluna "Situação" também é lida,
-  mas só para alimentar o resumo (não aparece na tabela discriminada).
+  mas só para alimentar o resumo (não aparece na tabela discriminada). O
+  **Tipo** é sempre exibido sem o prefixo "de " (ex.: "de Conciliação"
+  vira apenas "Conciliação").
+
+  Cada audiência é classificada por **um único responsável**, a partir do
+  Tipo:
+  - **Tipo "Conciliação"** → responsável é o **Conciliador**.
+  - **Tipo "Instrução" com o campo Conciliador/Juiz Leigo preenchido**
+    (Juizado Especial) → responsável é o **Juiz Leigo**.
+  - **Tipo "Instrução" com esse campo vazio** → responsável é o
+    **Magistrado**.
+  - Demais tipos → Conciliador quando preenchido, senão Magistrado.
+
+  Essa mesma classificação alimenta tanto o resumo quanto a tabela
+  discriminada, então os dois nunca divergem entre si.
+
   No resumo (capa):
   - **"AUDIÊNCIAS (RELATÓRIO NOVO)"** — período considerado, total de
     audiências, e quantas estão **Canceladas**, **Redesignadas**,
     **Prorrogadas** (pela coluna Situação) e **Pautadas futuramente**
     (Data/hora Início posterior ao momento da extração, independente da
     situação atual).
-  - **"AUDIÊNCIAS POR MAGISTRADO / CONCILIADOR"** — contagem de
-    audiências por profissional responsável: quando a linha tem
-    **Conciliador/Juiz Leigo** preenchido, conta para ele; só cai no
-    **Magistrado** quando esse campo vem vazio — nunca conta a mesma
-    audiência para os dois.
+  - **"AUDIÊNCIAS POR MAGISTRADO"**, **"AUDIÊNCIAS POR CONCILIADOR"** e
+    **"AUDIÊNCIAS POR JUIZ LEIGO"** — três tabelas de resumo separadas
+    (em vez de uma única combinada), cada uma contando as audiências do
+    respectivo responsável conforme a classificação acima; uma seção só
+    aparece se houver ao menos uma audiência daquele tipo de responsável.
+
+  A tabela discriminada também é separada por tipo de audiência, em até
+  quatro blocos (cada um só aparece se tiver ao menos uma linha):
+  - **Instrução** — colunas Processo, **Magistrado**, Data e hora e
+    Observação.
+  - **Conciliação** — colunas Processo, **Conciliador**, Data e hora e
+    Observação.
+  - **Instrução do Juizado Especial** — colunas Processo, **Juiz
+    Leigo**, Data e hora e Observação.
+  - **Outras Audiências** — bloco de sobra para tipos que não se
+    encaixam nos três acima; mantém as colunas Processo, Magistrado,
+    Conciliador/Juiz Leigo, Data e hora, **Tipo** e Observação, já que
+    aqui o responsável pode variar linha a linha.
 
 ## Regras de Automação
 

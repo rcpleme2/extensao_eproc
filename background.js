@@ -4772,27 +4772,31 @@ function resumirAgendaPadraoAudiencia(linhas) {
   };
 }
 
-// Tabela discriminada da Agenda Padrão (paisagem - mais colunas que uma
-// tabela de processos): Período, Sala, Tipo de Audiência, Dia da Semana,
-// Primeira/Última Audiência, Duração, Audiências Previstas/Agendadas -
-// exatamente os campos pedidos, mais "Período" para diferenciar quando a
-// unidade tem mais de um período de agenda cadastrado. "Órgão Julgador"
-// fica de fora das colunas (redundante com o nome da unidade, já no
-// título do relatório).
+// Tabela discriminada da Agenda Padrão, em página RETRATO - mesmo padrão
+// de todas as demais tabelas discriminadas do relatório (nunca paisagem;
+// ver "construirPdfTabelaCuradaRetrato", que agora quebra o título de
+// cada coluna em várias linhas quando necessário, então cabeçalhos
+// longos - "Audiências Previstas", "Primeira Audiência" etc. - nunca mais
+// estouram por cima da coluna vizinha). Colunas: Período, Sala, Tipo de
+// Audiência, Dia da Semana, Primeira/Última Audiência, Duração,
+// Audiências Previstas/Agendadas - exatamente os campos pedidos, mais
+// "Período" para diferenciar quando a unidade tem mais de um período de
+// agenda cadastrado. "Órgão Julgador" fica de fora das colunas
+// (redundante com o nome da unidade, já no título do relatório).
 async function construirPdfTabelaAgendaPadraoAudiencia(nomeUnidade, linhas) {
-  const util = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const util = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
   const colunas = [
-    { titulo: "Período", largura: util * 0.12, campo: "periodo" },
-    { titulo: "Sala", largura: util * 0.2, campo: "sala" },
-    { titulo: "Tipo de Audiência", largura: util * 0.14, campo: "tipoAudiencia" },
+    { titulo: "Período", largura: util * 0.13, campo: "periodo" },
+    { titulo: "Sala", largura: util * 0.18, campo: "sala" },
+    { titulo: "Tipo de Audiência", largura: util * 0.15, campo: "tipoAudiencia" },
     { titulo: "Dia da Semana", largura: util * 0.12, campo: "diaSemana" },
     { titulo: "Primeira Audiência", largura: util * 0.09, campo: "primeiraAudiencia" },
     { titulo: "Última Audiência", largura: util * 0.09, campo: "ultimaAudiencia" },
     { titulo: "Duração (min)", largura: util * 0.08, campo: "duracao" },
-    { titulo: "Audiências Previstas", largura: util * 0.08, campo: "audienciasPrevistas" },
-    { titulo: "Audiências Agendadas", largura: util * 0.08, campo: "audienciasAgendadas" },
+    { titulo: "Previstas", largura: util * 0.08, campo: "audienciasPrevistas" },
+    { titulo: "Agendadas", largura: util * 0.08, campo: "audienciasAgendadas" },
   ];
-  return construirPdfTabela(
+  return construirPdfTabelaCuradaRetrato(
     linhas,
     colunas,
     `Agenda Padrão de Audiência da unidade "${nomeUnidade}" — ${linhas.length} tipo(s) cadastrado(s)`
@@ -5004,24 +5008,70 @@ async function consultarRelatorioAudienciasNovoDaUnidade(urlBase, dataInicioStr,
   }
 }
 
+// Remove o prefixo "de " do início do Tipo de audiência (ex.: "de
+// Conciliação" -> "Conciliação", "de Instrução e Julgamento" ->
+// "Instrução e Julgamento") - só o prefixo "de " mesmo (não mexe em "do
+// art. 16..." nem em tipos que já começam com "Audiência ..."), usado
+// sempre que o Tipo aparece para leitura (nunca nas comparações internas
+// de classificação, que continuam batendo com o texto original do eproc).
+function limparPrefixoTipoAudiencia(tipo) {
+  return (tipo || "").replace(/^\s*de\s+/i, "").trim();
+}
+
+// Classifica cada audiência num "papel" (quem a conduziu, para fins de
+// contagem no resumo e de agrupamento na tabela discriminada) a partir
+// do Tipo e, quando aplicável, se a coluna Conciliador/Juiz Leigo veio
+// preenchida:
+// - Tipo "de Conciliação" -> sempre CONCILIADOR (nome da própria coluna
+//   Conciliador/Juiz Leigo; se por algum motivo vier vazia, cai no
+//   Magistrado como reserva, para não perder a linha).
+// - Tipo com "instru" no meio ("de Instrução", "de Instrução e
+//   Julgamento") -> JUIZ LEIGO quando a coluna Conciliador/Juiz Leigo
+//   vem preenchida (instrução conduzida por juiz leigo - típico de
+//   Juizado Especial); MAGISTRADO quando vem vazia (instrução comum).
+// - Qualquer outro Tipo (Custódia, Julgamento, Justificação, Preliminar,
+//   Tribunal do Júri etc.) -> mesma regra de reserva: Conciliador/Juiz
+//   Leigo quando preenchido, senão Magistrado - agrupados à parte
+//   ("Outras Audiências"), sem inventar um 4º papel.
+function classificarResponsavelAudiencia(l) {
+  const tipo = (l.tipo || "").trim();
+  const conciliadorNome = (l.conciliador || "").trim();
+  const magistradoNome = (l.magistrado || "").trim();
+  if (/^de\s+concilia/i.test(tipo)) {
+    return { papel: "conciliador", nome: conciliadorNome || magistradoNome || "(sem responsável)" };
+  }
+  if (/instru/i.test(tipo)) {
+    if (conciliadorNome) return { papel: "juizLeigo", nome: conciliadorNome };
+    return { papel: "magistrado", nome: magistradoNome || "(sem responsável)" };
+  }
+  if (conciliadorNome) return { papel: "conciliador", nome: conciliadorNome };
+  return { papel: "magistrado", nome: magistradoNome || "(sem responsável)" };
+}
+
 // Resume o Relatório de Audiências Novo: total no período + contagem por
-// responsável (Conciliador/Juiz Leigo quando preenchido; senão o
-// Magistrado - por pedido explícito, nunca os dois juntos) + contagem por
 // situação (Canceladas/Redesignadas/Prorrogadas) + quantas audiências
 // estão pautadas para o futuro (Data/hora Início posterior ao momento da
 // extração, independente da situação atual - uma audiência futura ainda
-// "designada" já conta como pautada).
+// "designada" já conta como pautada) + três contagens SEPARADAS por
+// responsável - Magistrado, Conciliador e Juiz Leigo (nunca a mesma
+// audiência em mais de uma delas - ver "classificarResponsavelAudiencia").
 function resumirAudienciasNovo(linhas, agora) {
   const total = linhas.length;
 
-  const porResponsavelMap = new Map();
-  for (const l of linhas) {
-    const responsavel = (l.conciliador || "").trim() || (l.magistrado || "").trim() || "(sem responsável)";
-    porResponsavelMap.set(responsavel, (porResponsavelMap.get(responsavel) || 0) + 1);
-  }
-  const porResponsavel = Array.from(porResponsavelMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([rotulo, valor]) => ({ rotulo, valor }));
+  const contarPorPapel = (papelAlvo) => {
+    const mapa = new Map();
+    for (const l of linhas) {
+      const { papel, nome } = classificarResponsavelAudiencia(l);
+      if (papel !== papelAlvo) continue;
+      mapa.set(nome, (mapa.get(nome) || 0) + 1);
+    }
+    return Array.from(mapa.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([rotulo, valor]) => ({ rotulo, valor }));
+  };
+  const porMagistrado = contarPorPapel("magistrado");
+  const porConciliador = contarPorPapel("conciliador");
+  const porJuizLeigo = contarPorPapel("juizLeigo");
 
   const contarSituacao = (regex) => linhas.filter((l) => regex.test((l.situacao || "").trim())).length;
   const canceladas = contarSituacao(/^CANCELADA$/i);
@@ -5029,40 +5079,92 @@ function resumirAudienciasNovo(linhas, agora) {
   const prorrogadas = contarSituacao(/^PRORROGADA$/i);
   const pautadasFuturamente = linhas.filter((l) => paraDataOrdenavel(l.dataHora) > agora).length;
 
-  return { total, porResponsavel, canceladas, redesignadas, prorrogadas, pautadasFuturamente };
+  return { total, porMagistrado, porConciliador, porJuizLeigo, canceladas, redesignadas, prorrogadas, pautadasFuturamente };
 }
 
-// Tabela discriminada do Relatório de Audiências Novo (retrato): Processo
-// (só números), Magistrado, Conciliador/Juiz Leigo, Data e hora, Tipo,
-// Observação - exatamente os campos pedidos (Situação/Sala/Depoentes
-// ficam de fora, usados só internamente para o resumo) - ordenada da
-// audiência mais próxima à mais distante.
+// Tabela discriminada do Relatório de Audiências Novo: em vez de uma
+// única tabela com Magistrado E Conciliador/Juiz Leigo lado a lado,
+// separa as audiências em sub-tabelas por TIPO (cada uma em página(s)
+// retrato próprias, mesmo padrão de todas as demais tabelas do
+// relatório), cada uma com uma única coluna de responsável (a que faz
+// sentido para aquele tipo - ver "classificarResponsavelAudiencia"):
+// "Instrução" (Magistrado), "Conciliação" (Conciliador), "Instrução do
+// Juizado Especial" (Juiz Leigo) e, por último, "Outras Audiências"
+// (tipos fora desses três, mantendo Magistrado, Conciliador/Juiz Leigo E
+// o próprio Tipo, já que aqui ele varia linha a linha). Cada sub-tabela
+// só entra no PDF quando tem pelo menos 1 audiência.
 async function construirPdfTabelaAudienciasNovo(nomeUnidade, linhas, periodoTexto) {
   const util = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
-  const itens = linhas
-    .slice()
-    .sort((a, b) => paraDataOrdenavel(a.dataHora) - paraDataOrdenavel(b.dataHora))
-    .map((l) => ({
+
+  const buckets = { instrucao: [], conciliacao: [], instrucaoJuizadoEspecial: [], outras: [] };
+  for (const l of linhas) {
+    const { papel } = classificarResponsavelAudiencia(l);
+    if (papel === "conciliador") buckets.conciliacao.push(l);
+    else if (papel === "juizLeigo") buckets.instrucaoJuizadoEspecial.push(l);
+    else if (/instru/i.test((l.tipo || "").trim())) buckets.instrucao.push(l);
+    else buckets.outras.push(l);
+  }
+
+  const ordenarPorData = (lista) => lista.slice().sort((a, b) => paraDataOrdenavel(a.dataHora) - paraDataOrdenavel(b.dataHora));
+
+  const pdfFinal = await PDFDocument.create();
+  async function anexar(bytes) {
+    const pdfExtra = await PDFDocument.load(bytes);
+    (await pdfFinal.copyPages(pdfExtra, pdfExtra.getPageIndices())).forEach((p) => pdfFinal.addPage(p));
+  }
+
+  async function anexarBucketSimples(lista, tituloBucket, campoResponsavel, rotuloResponsavel) {
+    if (lista.length === 0) return;
+    const itens = ordenarPorData(lista).map((l) => ({
+      processo: l.processoNumeros,
+      responsavel: l[campoResponsavel] || "",
+      dataHora: l.dataHora,
+      observacao: l.observacao,
+    }));
+    const colunas = [
+      { titulo: "Processo", largura: util * 0.18, campo: "processo" },
+      { titulo: rotuloResponsavel, largura: util * 0.28, campo: "responsavel" },
+      { titulo: "Data e hora", largura: util * 0.18, campo: "dataHora" },
+      { titulo: "Observação", largura: util * 0.36, campo: "observacao" },
+    ];
+    const bytes = await construirPdfTabelaCuradaRetrato(
+      itens,
+      colunas,
+      `Audiências de ${tituloBucket} da unidade "${nomeUnidade}" — Período: ${periodoTexto} — ${itens.length} audiência(s)`
+    );
+    await anexar(bytes);
+  }
+
+  await anexarBucketSimples(buckets.instrucao, "Instrução", "magistrado", "Magistrado");
+  await anexarBucketSimples(buckets.conciliacao, "Conciliação", "conciliador", "Conciliador");
+  await anexarBucketSimples(buckets.instrucaoJuizadoEspecial, "Instrução do Juizado Especial", "conciliador", "Juiz Leigo");
+
+  if (buckets.outras.length > 0) {
+    const itens = ordenarPorData(buckets.outras).map((l) => ({
       processo: l.processoNumeros,
       magistrado: l.magistrado,
       conciliador: l.conciliador,
       dataHora: l.dataHora,
-      tipo: l.tipo,
+      tipo: limparPrefixoTipoAudiencia(l.tipo),
       observacao: l.observacao,
     }));
-  const colunas = [
-    { titulo: "Processo", largura: util * 0.16, campo: "processo" },
-    { titulo: "Magistrado", largura: util * 0.18, campo: "magistrado" },
-    { titulo: "Conciliador / Juiz Leigo", largura: util * 0.18, campo: "conciliador" },
-    { titulo: "Data e hora", largura: util * 0.14, campo: "dataHora" },
-    { titulo: "Tipo", largura: util * 0.12, campo: "tipo" },
-    { titulo: "Observação", largura: util * 0.22, campo: "observacao" },
-  ];
-  return construirPdfTabelaCuradaRetrato(
-    itens,
-    colunas,
-    `Audiências (Relatório de Audiências Novo) da unidade "${nomeUnidade}" — Período: ${periodoTexto} — ${itens.length} audiência(s)`
-  );
+    const colunas = [
+      { titulo: "Processo", largura: util * 0.14, campo: "processo" },
+      { titulo: "Magistrado", largura: util * 0.17, campo: "magistrado" },
+      { titulo: "Conciliador / Juiz Leigo", largura: util * 0.17, campo: "conciliador" },
+      { titulo: "Data e hora", largura: util * 0.14, campo: "dataHora" },
+      { titulo: "Tipo", largura: util * 0.13, campo: "tipo" },
+      { titulo: "Observação", largura: util * 0.25, campo: "observacao" },
+    ];
+    const bytes = await construirPdfTabelaCuradaRetrato(
+      itens,
+      colunas,
+      `Outras audiências da unidade "${nomeUnidade}" — Período: ${periodoTexto} — ${itens.length} audiência(s)`
+    );
+    await anexar(bytes);
+  }
+
+  return pdfFinal.save();
 }
 
 // Navega a aba ativa de volta para a página inicial do eproc - usado ao
@@ -5834,20 +5936,37 @@ async function construirPdfTabelaCuradaRetrato(itens, colunas, tituloDocumento) 
     }
   }
 
+  // Título de coluna comprido (ex.: "Audiências Previstas") quebra em
+  // várias linhas em vez de estourar por cima da coluna vizinha - a
+  // faixa do cabeçalho cresce na vertical para caber a coluna com mais
+  // linhas (mesma lógica já usada para as LINHAS de dados, abaixo). Sem
+  // isso, títulos mais largos que a própria coluna ficavam sobrepostos/
+  // cortados visualmente (rodapé desta função, no PDF renderizado).
   function desenharCabecalhoColunas() {
-    const alturaFaixa = ALTURA_LINHA * 1.7;
+    const ALTURA_LINHA_TITULO = ALTURA_LINHA * 1.05;
+    const linhasPorColuna = colunas.map((coluna) =>
+      quebrarLinhas(sanitizarTextoPdf(coluna.titulo), fonteNegrito, TAMANHO_FONTE, coluna.largura - 8)
+    );
+    const maxLinhasTitulo = Math.max(1, ...linhasPorColuna.map((l) => l.length));
+    const alturaFaixa = maxLinhasTitulo * ALTURA_LINHA_TITULO + ALTURA_LINHA * 0.9;
     garantirEspaco(alturaFaixa + ALTURA_LINHA * 2);
     pagina.drawRectangle({ x: margem, y: y - alturaFaixa, width: larguraUtil, height: alturaFaixa, color: COR_PRIMARIA_ESCURA });
     let x = margem + 4;
-    for (const coluna of colunas) {
-      pagina.drawText(sanitizarTextoPdf(coluna.titulo), {
-        x,
-        y: y - alturaFaixa + alturaFaixa * 0.32,
-        size: TAMANHO_FONTE,
-        font: fonteNegrito,
-        color: COR_BRANCO,
-      });
-      x += coluna.largura;
+    for (let i = 0; i < colunas.length; i += 1) {
+      const linhasTitulo = linhasPorColuna[i];
+      const alturaBloco = linhasTitulo.length * ALTURA_LINHA_TITULO;
+      let yTitulo = y - (alturaFaixa - alturaBloco) / 2 - ALTURA_LINHA_TITULO * 0.78;
+      for (const linhaTitulo of linhasTitulo) {
+        pagina.drawText(linhaTitulo, {
+          x,
+          y: yTitulo,
+          size: TAMANHO_FONTE,
+          font: fonteNegrito,
+          color: COR_BRANCO,
+        });
+        yTitulo -= ALTURA_LINHA_TITULO;
+      }
+      x += colunas[i].largura;
     }
     y -= alturaFaixa + 10;
     indiceLinhaZebra = 0;
@@ -7353,11 +7472,18 @@ async function exportarRelatorioGerencialUnidade(
         { rotulo: "Pautadas futuramente", valor: resumoNovo.pautadasFuturamente },
       ],
     });
-    if (resumoNovo.porResponsavel.length > 0) {
-      secoesResumo.push({
-        titulo: "AUDIÊNCIAS POR MAGISTRADO / CONCILIADOR",
-        linhas: resumoNovo.porResponsavel,
-      });
+    // Três tabelas separadas (Magistrado/Conciliador/Juiz Leigo), cada
+    // uma só entra quando tem pelo menos 1 audiência classificada nela -
+    // ver "classificarResponsavelAudiencia" (a mesma audiência nunca
+    // conta em mais de uma).
+    if (resumoNovo.porMagistrado.length > 0) {
+      secoesResumo.push({ titulo: "AUDIÊNCIAS POR MAGISTRADO", linhas: resumoNovo.porMagistrado });
+    }
+    if (resumoNovo.porConciliador.length > 0) {
+      secoesResumo.push({ titulo: "AUDIÊNCIAS POR CONCILIADOR", linhas: resumoNovo.porConciliador });
+    }
+    if (resumoNovo.porJuizLeigo.length > 0) {
+      secoesResumo.push({ titulo: "AUDIÊNCIAS POR JUIZ LEIGO", linhas: resumoNovo.porJuizLeigo });
     }
   }
   if (opcoesFinais.regrasAutomacao) {
