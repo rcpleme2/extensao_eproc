@@ -1365,6 +1365,50 @@ cobertas abaixo.
   sigla por qualquer motivo, cai num rótulo genérico ("Unidade atual") em
   vez de travar o relatório inteiro por causa só do nome.
 
+### Agenda Padrão de Audiência e Relatório de Audiências Novo
+
+Dois itens **exclusivos** deste cartão (Corregedoria não os expõe, já que
+as duas telas usam o Juízo/Órgão restrito à própria sessão, sem um
+seletor de unidade arbitrária como as demais consultas da Corregedoria).
+
+- **"Agenda Padrão de Audiência"** — não é uma lista de audiências, e sim
+  a **configuração de capacidade da pauta** da unidade (menu lateral
+  **"Audiência" > "Agenda Padrão de Audiência"**,
+  `acao=RelatorioAgendaPadraoAudiencia/Listar`). A tela lista um ou mais
+  **períodos** cadastrados (cada um com seu próprio botão "Visualizar
+  Configuração do período"); a extensão abre, um de cada vez, o modal de
+  cada período e lê a tabela de dentro dele — um registro por **tipo de
+  audiência** cadastrado naquele período, com os campos **Sala, Tipo de
+  Audiência, Dia da Semana, Primeira Audiência, Última Audiência, Duração
+  das Audiências, Audiências Previstas e Audiências Agendadas**. No
+  resumo (capa): total de tipos cadastrados e a soma de audiências
+  previstas/agendadas entre todos eles; a tabela discriminada (em
+  **página paisagem**, por ter mais colunas) traz também o **Período** de
+  cada registro, para diferenciar quando a unidade tem mais de um período
+  de agenda cadastrado.
+- **"Audiências (Relatório de Audiências Novo)"** — audiências
+  individuais (menu lateral **"Audiência" > "Relatório de Audiências
+  Novo"**, `acao=RelatorioAudiencias/Listar`, diferente do "Portal de
+  Audiências" usado no item "Audiências marcadas" do cartão Corregedoria).
+  A extensão consulta um período fixo de **3 anos antes até 3 anos depois
+  da data de hoje**, passando por **todos os órgãos/juízos disponíveis**
+  no filtro da tela (um de cada vez, sem precisar escolher nenhum). Da
+  tabela de resultado, guarda **Processo** (só os números, sem
+  pontuação/sigla), **Magistrado**, **Conciliador/Juiz Leigo**, **Data e
+  hora**, **Tipo** e **Observação** — a coluna "Situação" também é lida,
+  mas só para alimentar o resumo (não aparece na tabela discriminada).
+  No resumo (capa):
+  - **"AUDIÊNCIAS (RELATÓRIO NOVO)"** — período considerado, total de
+    audiências, e quantas estão **Canceladas**, **Redesignadas**,
+    **Prorrogadas** (pela coluna Situação) e **Pautadas futuramente**
+    (Data/hora Início posterior ao momento da extração, independente da
+    situação atual).
+  - **"AUDIÊNCIAS POR MAGISTRADO / CONCILIADOR"** — contagem de
+    audiências por profissional responsável: quando a linha tem
+    **Conciliador/Juiz Leigo** preenchido, conta para ele; só cai no
+    **Magistrado** quando esse campo vem vazio — nunca conta a mesma
+    audiência para os dois.
+
 ## Regras de Automação
 
 Na tela **"Automatizar Tramitação Processual"** do eproc

@@ -4565,6 +4565,506 @@ async function construirPdfTabelaAudiencias(nomeUnidade, linhas, sufixoTitulo = 
   );
 }
 
+// ===== Agenda Padrão de Audiência + Relatório de Audiências (Novo) =====
+// (Relatório da Unidade - "Gestão da Unidade"). Duas telas distintas do
+// menu lateral "Audiência", diferentes tanto do "Portal de Audiências"
+// acima (fila simples de audiências marcadas) quanto uma da outra:
+//
+// - "Agenda Padrão de Audiência" (acao=RelatorioAgendaPadraoAudiencia/Listar):
+//   NÃO lista audiências individuais - lista a CONFIGURAÇÃO de capacidade
+//   de pauta da unidade (um ou mais "períodos" com Órgão Julgador, e cada
+//   período com um ou mais "tipos" de audiência cadastrados - Sala, Tipo,
+//   Dia da Semana, horários, duração, previstas/agendadas). Cada período
+//   (linha da tabela "tbl_audiencias") tem um botão "Visualizar
+//   Configuração do período" que abre um modal (Bootstrap) com uma
+//   segunda tabela ("tableModal"), um <tr> por tipo cadastrado.
+//
+// - "Relatório de Audiências Novo" (acao=RelatorioAudiencias/Listar):
+//   lista AUDIÊNCIAS INDIVIDUAIS (marcadas/realizadas/canceladas/etc.),
+//   com filtro de período (datas) e Juízo/Órgão, entre outros - aqui
+//   consultado num intervalo bem amplo (3 anos antes/depois de hoje) e
+//   para TODOS os órgãos disponíveis no filtro, para trazer o histórico
+//   completo da unidade.
+
+// Clica no link do menu lateral que leva à Agenda Padrão de Audiência.
+// Mesmo cuidado de excluir âncoras de acessibilidade já usado em
+// "clicarLinkRelatorioAudienciasNaPagina". Autocontida, executada via
+// chrome.scripting.executeScript.
+function clicarLinkAgendaPadraoAudienciaNaPagina() {
+  const link = document.querySelector('a[href*="acao=RelatorioAgendaPadraoAudiencia/Listar"]:not([id^="ancora"])');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Lê a tabela "#tbl_audiencias" (DataTables) da Agenda Padrão de
+// Audiência - um <tr> por período/Órgão Julgador cadastrado - e, para
+// CADA período, abre o modal "Visualizar Configuração do período"
+// (botão "a.btn-btnCopyModal" daquela linha), lê a tabela "#tableModal"
+// (um <tr> por TIPO de audiência cadastrado naquele período: Sala, Tipo
+// de Audiência, Dia da Semana, Primeira/Última Audiência, Duração,
+// Audiências Previstas/Agendadas) e fecha o modal antes de seguir para o
+// próximo período. Sequencial de propósito (o modal é global - abrir o
+// próximo período antes de fechar o anterior misturaria os dados).
+// Autocontida (todas as funções auxiliares declaradas por dentro),
+// executada via chrome.scripting.executeScript (world "MAIN", precisa de
+// jQuery/DataTables/Bootstrap da própria página).
+async function extrairAgendaPadraoAudienciaNaPagina() {
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  function textoLimpo(el) {
+    return (el && el.textContent ? el.textContent : "").replace(/\s+/g, " ").trim();
+  }
+  // Espera um evento jQuery (ex.: "draw.dt" do DataTables, "shown.bs.modal"/
+  // "hidden.bs.modal" do Bootstrap) OU um timeout, o que vier primeiro -
+  // nunca trava para sempre se o evento não disparar por algum motivo.
+  function aguardarEventoOuTimeout(elId, evento, timeoutMs) {
+    return new Promise((resolve) => {
+      let resolvido = false;
+      const finalizar = () => {
+        if (resolvido) return;
+        resolvido = true;
+        resolve();
+      };
+      try {
+        if (window.jQuery) window.jQuery("#" + elId).one(evento, finalizar);
+      } catch (e) {
+        // segue so' com o timeout abaixo
+      }
+      setTimeout(finalizar, timeoutMs);
+    });
+  }
+
+  try {
+    if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
+      return { linhas: [], erro: "jQuery DataTables não disponível nesta página." };
+    }
+    const tabelaEl = jQuery("#tbl_audiencias");
+    if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tbl_audiencias")) {
+      return { linhas: [], erro: 'Tabela "#tbl_audiencias" não encontrada ou ainda não inicializada.' };
+    }
+
+    // Mostra TODOS os períodos de uma vez (sem paginação) antes de
+    // percorrer os modais - mesma técnica de "page.len(-1).draw(false)"
+    // já usada para a tabela de remessas aos juízes leigos.
+    const dt = tabelaEl.DataTable();
+    const promessaMostrarTudo = aguardarEventoOuTimeout("tbl_audiencias", "draw.dt", 8000);
+    dt.page.len(-1).draw(false);
+    await promessaMostrarTudo;
+
+    const tabelaDom = document.getElementById("tbl_audiencias");
+    const cabecalhosPeriodo = Array.from(tabelaDom.querySelectorAll("thead th")).map(textoLimpo);
+    const idxOrgao = cabecalhosPeriodo.findIndex((h) => /[oó]rg[aã]o/i.test(h));
+    const idxPeriodo = cabecalhosPeriodo.findIndex((h) => /per[ií]odo/i.test(h));
+
+    const linhasPeriodo = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
+      (tr) => tr.id && tr.querySelectorAll("td").length >= cabecalhosPeriodo.length && !tr.querySelector("td.dataTables_empty")
+    );
+
+    const resultado = [];
+    for (const tr of linhasPeriodo) {
+      const celulas = Array.from(tr.querySelectorAll("td"));
+      const orgaoJulgador = idxOrgao >= 0 ? textoLimpo(celulas[idxOrgao]) : "";
+      const periodo = idxPeriodo >= 0 ? textoLimpo(celulas[idxPeriodo]) : "";
+
+      const botaoInfo = tr.querySelector("a.btn-btnCopyModal");
+      if (!botaoInfo) continue;
+
+      const promessaAberto = aguardarEventoOuTimeout("agendaModal", "shown.bs.modal", 5000);
+      botaoInfo.click();
+      await promessaAberto;
+      await aguardar(150);
+
+      const modalTabela = document.getElementById("tableModal");
+      if (modalTabela) {
+        const cabecalhosModal = Array.from(modalTabela.querySelectorAll("thead th")).map(textoLimpo);
+        const idx = (regex) => cabecalhosModal.findIndex((h) => regex.test(h));
+        const idxSala = idx(/^sala$/i);
+        const idxTipo = idx(/tipo.*audi[eê]ncia/i);
+        const idxDia = idx(/dia.*semana/i);
+        const idxPrimeira = idx(/primeira/i);
+        const idxUltima = idx(/[uú]ltima/i);
+        const idxDuracao = idx(/dura[çc][ãa]o/i);
+        const idxPrevistas = idx(/previstas/i);
+        const idxAgendadas = idx(/agendadas/i);
+
+        const linhasModal = Array.from(modalTabela.querySelectorAll("tbody tr")).filter(
+          (r) => r.querySelectorAll("td").length >= cabecalhosModal.length
+        );
+        for (const rm of linhasModal) {
+          const cel = Array.from(rm.querySelectorAll("td"));
+          const valor = (i) => (i >= 0 && cel[i] ? textoLimpo(cel[i]) : "");
+          resultado.push({
+            orgaoJulgador,
+            periodo,
+            sala: valor(idxSala),
+            tipoAudiencia: valor(idxTipo),
+            diaSemana: valor(idxDia),
+            primeiraAudiencia: valor(idxPrimeira),
+            ultimaAudiencia: valor(idxUltima),
+            duracao: valor(idxDuracao),
+            audienciasPrevistas: valor(idxPrevistas),
+            audienciasAgendadas: valor(idxAgendadas),
+          });
+        }
+      }
+
+      const promessaFechado = aguardarEventoOuTimeout("agendaModal", "hidden.bs.modal", 5000);
+      const botaoFechar = document.querySelector("#agendaModal .fecharModal, #agendaModal .modal-footer button");
+      if (botaoFechar) botaoFechar.click();
+      await promessaFechado;
+      await aguardar(150);
+    }
+
+    return { linhas: resultado, erro: null };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Orquestra a consulta da Agenda Padrão de Audiência de uma unidade: abre
+// uma aba oculta, clica no link de menu e roda a extração (que por si só
+// já percorre todos os períodos/modais). Best-effort: nunca lança
+// exceção, sempre resolve com { linhas, erro }.
+async function consultarAgendaPadraoAudienciaDaUnidade(urlBase) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkAgendaPadraoAudienciaNaPagina,
+    });
+    if (!linkEncontrado) {
+      return { linhas: [], erro: 'Link "Agenda Padrão de Audiência" não encontrado no menu lateral.' };
+    }
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      world: "MAIN",
+      func: extrairAgendaPadraoAudienciaNaPagina,
+    });
+    return result || { linhas: [], erro: "Sem resultado ao ler a Agenda Padrão de Audiência." };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) chrome.tabs.remove(aba.id).catch(() => {});
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Resume a Agenda Padrão: quantos tipos de audiência estão cadastrados
+// (um por Sala+Tipo+período) e a soma de audiências previstas/agendadas
+// entre todos eles.
+function resumirAgendaPadraoAudiencia(linhas) {
+  const somaCampo = (campo) =>
+    linhas.reduce((soma, l) => soma + (parseInt(String(l[campo]).replace(/\D/g, ""), 10) || 0), 0);
+  return {
+    totalTipos: linhas.length,
+    totalPrevistas: somaCampo("audienciasPrevistas"),
+    totalAgendadas: somaCampo("audienciasAgendadas"),
+  };
+}
+
+// Tabela discriminada da Agenda Padrão (paisagem - mais colunas que uma
+// tabela de processos): Período, Sala, Tipo de Audiência, Dia da Semana,
+// Primeira/Última Audiência, Duração, Audiências Previstas/Agendadas -
+// exatamente os campos pedidos, mais "Período" para diferenciar quando a
+// unidade tem mais de um período de agenda cadastrado. "Órgão Julgador"
+// fica de fora das colunas (redundante com o nome da unidade, já no
+// título do relatório).
+async function construirPdfTabelaAgendaPadraoAudiencia(nomeUnidade, linhas) {
+  const util = PDF_LOCALIZADORES_LARGURA_PAGINA - PDF_LOCALIZADORES_MARGEM * 2;
+  const colunas = [
+    { titulo: "Período", largura: util * 0.12, campo: "periodo" },
+    { titulo: "Sala", largura: util * 0.2, campo: "sala" },
+    { titulo: "Tipo de Audiência", largura: util * 0.14, campo: "tipoAudiencia" },
+    { titulo: "Dia da Semana", largura: util * 0.12, campo: "diaSemana" },
+    { titulo: "Primeira Audiência", largura: util * 0.09, campo: "primeiraAudiencia" },
+    { titulo: "Última Audiência", largura: util * 0.09, campo: "ultimaAudiencia" },
+    { titulo: "Duração (min)", largura: util * 0.08, campo: "duracao" },
+    { titulo: "Audiências Previstas", largura: util * 0.08, campo: "audienciasPrevistas" },
+    { titulo: "Audiências Agendadas", largura: util * 0.08, campo: "audienciasAgendadas" },
+  ];
+  return construirPdfTabela(
+    linhas,
+    colunas,
+    `Agenda Padrão de Audiência da unidade "${nomeUnidade}" — ${linhas.length} tipo(s) cadastrado(s)`
+  );
+}
+
+// Clica no link do menu lateral que leva ao "Relatório de Audiências
+// Novo" (diferente do Portal de Audiências, acima). Autocontida,
+// executada via chrome.scripting.executeScript.
+function clicarLinkRelatorioAudienciasNovoNaPagina() {
+  const link = document.querySelector('a[href*="acao=RelatorioAudiencias/Listar"]:not([id^="ancora"])');
+  if (!link) return false;
+  link.click();
+  return true;
+}
+
+// Lê as opções do campo "Juízo" (select#IdOrgaoJuizo) do Relatório de
+// Audiências Novo, descartando o placeholder ("Selecione", value vazio) -
+// usado para consultar TODOS os órgãos disponíveis, um de cada vez.
+// Autocontida, executada via chrome.scripting.executeScript.
+function lerOrgaosRelatorioAudienciasNovoNaPagina() {
+  const sel = document.getElementById("IdOrgaoJuizo");
+  if (!sel) return { erro: "Campo de Juízo/Órgão (IdOrgaoJuizo) não encontrado.", orgaos: [] };
+  const orgaos = Array.from(sel.options)
+    .map((o) => ({ valor: o.value, nome: (o.textContent || "").trim() }))
+    .filter((o) => o.valor && o.valor.trim() !== "");
+  return { erro: null, orgaos };
+}
+
+// Preenche o filtro do Relatório de Audiências Novo para UM órgão (Juízo)
+// e um período de datas, clica em "Consultar" e lê a tabela de resultado
+// "#tbl_audiencias" (DataTables, servidor - "page.len(-1).draw(false)"
+// busca TODAS as linhas do período de uma vez, não só a página visível).
+// Autocontida (funções auxiliares declaradas por dentro), executada via
+// chrome.scripting.executeScript (world "MAIN").
+async function consultarUmOrgaoRelatorioAudienciasNovoNaPagina(valorOrgao, dataInicioStr, dataFimStr) {
+  function aguardar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  function textoLimpo(el) {
+    return (el && el.textContent ? el.textContent : "").replace(/\s+/g, " ").trim();
+  }
+  function aguardarEventoJQOuTimeout(jqObj, evento, timeoutMs) {
+    return new Promise((resolve) => {
+      let resolvido = false;
+      const finalizar = () => {
+        if (resolvido) return;
+        resolvido = true;
+        resolve();
+      };
+      try {
+        jqObj.one(evento, finalizar);
+      } catch (e) {
+        // segue so' com o timeout abaixo
+      }
+      setTimeout(finalizar, timeoutMs);
+    });
+  }
+
+  try {
+    const selOrgao = document.getElementById("IdOrgaoJuizo");
+    const inputInicio = document.getElementById("PeriodoInicio");
+    const inputFim = document.getElementById("PeriodoFim");
+    const btnConsultar = document.querySelector(".btnConsultarAudiencias");
+    if (!selOrgao || !inputInicio || !inputFim || !btnConsultar) {
+      return {
+        linhas: [],
+        erro:
+          "Formulário do Relatório de Audiências (Novo) não encontrado (IdOrgaoJuizo/PeriodoInicio/PeriodoFim/Consultar).",
+      };
+    }
+    if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
+      return { linhas: [], erro: "jQuery DataTables não disponível nesta página." };
+    }
+
+    selOrgao.value = valorOrgao;
+    selOrgao.dispatchEvent(new Event("change", { bubbles: true }));
+    try {
+      if (window.jQuery && window.jQuery.fn && window.jQuery.fn.selectpicker) {
+        window.jQuery(selOrgao).selectpicker("refresh");
+      }
+    } catch (e) {
+      // sem o widget/jQuery selectpicker o value nativo ja' basta.
+    }
+
+    inputInicio.value = dataInicioStr;
+    inputInicio.dispatchEvent(new Event("input", { bubbles: true }));
+    inputInicio.dispatchEvent(new Event("change", { bubbles: true }));
+    inputFim.value = dataFimStr;
+    inputFim.dispatchEvent(new Event("input", { bubbles: true }));
+    inputFim.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const tabelaEl = jQuery("#tbl_audiencias");
+    const promessaPrimeiroDesenho = aguardarEventoJQOuTimeout(tabelaEl, "draw.dt", 15000);
+    btnConsultar.click();
+    await promessaPrimeiroDesenho;
+    await aguardar(300);
+
+    if (jQuery.fn.DataTable.isDataTable("#tbl_audiencias")) {
+      const dt = tabelaEl.DataTable();
+      const promessaMostrarTudo = aguardarEventoJQOuTimeout(tabelaEl, "draw.dt", 15000);
+      dt.page.len(-1).draw(false);
+      await promessaMostrarTudo;
+    }
+    await aguardar(200);
+
+    const tabelaDom = document.getElementById("tbl_audiencias");
+    if (!tabelaDom) return { linhas: [], erro: 'Tabela "#tbl_audiencias" não encontrada após consultar.' };
+
+    const cabecalhos = Array.from(tabelaDom.querySelectorAll("thead th")).map(textoLimpo);
+    const idx = (regex) => cabecalhos.findIndex((h) => regex.test(h));
+    const idxProcesso = idx(/processo/i);
+    const idxMagistrado = idx(/magistrado/i);
+    const idxConciliador = idx(/conciliador/i);
+    const idxDataHora = idx(/data.*hora/i);
+    const idxTipo = idx(/^tipo$/i);
+    const idxSituacao = idx(/situa[çc][ãa]o/i);
+    const idxObservacao = idx(/observa[çc][ãa]o/i);
+
+    const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
+      (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
+    );
+
+    const linhas = linhasEl.map((tr) => {
+      const cel = Array.from(tr.querySelectorAll("td"));
+      const valor = (i) => (i >= 0 && cel[i] ? textoLimpo(cel[i]) : "");
+      // 1a coluna traz o link do processo + autor/reu na mesma celula -
+      // "so' numeros" pedido explicitamente (descarta "/PR", pontuação
+      // etc., ficando so' com os digitos do numero do processo).
+      const celProcesso = idxProcesso >= 0 ? cel[idxProcesso] : null;
+      const linkProcesso = celProcesso ? celProcesso.querySelector("a") : null;
+      const textoProcesso = textoLimpo(linkProcesso || celProcesso);
+      const processoNumeros = (textoProcesso.match(/\d/g) || []).join("");
+      return {
+        processoNumeros,
+        magistrado: valor(idxMagistrado),
+        conciliador: valor(idxConciliador),
+        dataHora: valor(idxDataHora),
+        tipo: valor(idxTipo),
+        situacao: valor(idxSituacao),
+        observacao: valor(idxObservacao),
+      };
+    });
+
+    return { linhas, erro: null };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Orquestra o Relatório de Audiências Novo de uma unidade: abre uma aba
+// oculta, clica no link de menu, lê os órgãos disponíveis no filtro e
+// consulta CADA UM (reaproveitando a mesma aba/página, só trocando o
+// órgão e o período a cada consulta) - junta tudo num único array de
+// linhas. Uma falha num órgão específico não impede os demais (fica só
+// um aviso). Best-effort: nunca lança exceção.
+async function consultarRelatorioAudienciasNovoDaUnidade(urlBase, dataInicioStr, dataFimStr) {
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: urlBase, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: clicarLinkRelatorioAudienciasNovoNaPagina,
+    });
+    if (!linkEncontrado) {
+      return { linhas: [], erro: 'Link "Relatório de Audiências Novo" não encontrado no menu lateral.' };
+    }
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    const [{ result: orgaosRes } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: lerOrgaosRelatorioAudienciasNovoNaPagina,
+    });
+    if (!orgaosRes || orgaosRes.erro || !orgaosRes.orgaos || orgaosRes.orgaos.length === 0) {
+      return {
+        linhas: [],
+        erro: (orgaosRes && orgaosRes.erro) || "Nenhum órgão/juízo disponível no Relatório de Audiências (Novo).",
+      };
+    }
+
+    const todasLinhas = [];
+    const erros = [];
+    for (const orgao of orgaosRes.orgaos) {
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        world: "MAIN",
+        func: consultarUmOrgaoRelatorioAudienciasNovoNaPagina,
+        args: [orgao.valor, dataInicioStr, dataFimStr],
+      });
+      if (!result || result.erro) {
+        erros.push(`${orgao.nome}: ${(result && result.erro) || "falha desconhecida"}`);
+        continue;
+      }
+      todasLinhas.push(...result.linhas);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    return { linhas: todasLinhas, erro: erros.length > 0 ? erros.join(" | ") : null };
+  } catch (e) {
+    return { linhas: [], erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) chrome.tabs.remove(aba.id).catch(() => {});
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Resume o Relatório de Audiências Novo: total no período + contagem por
+// responsável (Conciliador/Juiz Leigo quando preenchido; senão o
+// Magistrado - por pedido explícito, nunca os dois juntos) + contagem por
+// situação (Canceladas/Redesignadas/Prorrogadas) + quantas audiências
+// estão pautadas para o futuro (Data/hora Início posterior ao momento da
+// extração, independente da situação atual - uma audiência futura ainda
+// "designada" já conta como pautada).
+function resumirAudienciasNovo(linhas, agora) {
+  const total = linhas.length;
+
+  const porResponsavelMap = new Map();
+  for (const l of linhas) {
+    const responsavel = (l.conciliador || "").trim() || (l.magistrado || "").trim() || "(sem responsável)";
+    porResponsavelMap.set(responsavel, (porResponsavelMap.get(responsavel) || 0) + 1);
+  }
+  const porResponsavel = Array.from(porResponsavelMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([rotulo, valor]) => ({ rotulo, valor }));
+
+  const contarSituacao = (regex) => linhas.filter((l) => regex.test((l.situacao || "").trim())).length;
+  const canceladas = contarSituacao(/^CANCELADA$/i);
+  const redesignadas = contarSituacao(/^REDESIGNADA$/i);
+  const prorrogadas = contarSituacao(/^PRORROGADA$/i);
+  const pautadasFuturamente = linhas.filter((l) => paraDataOrdenavel(l.dataHora) > agora).length;
+
+  return { total, porResponsavel, canceladas, redesignadas, prorrogadas, pautadasFuturamente };
+}
+
+// Tabela discriminada do Relatório de Audiências Novo (retrato): Processo
+// (só números), Magistrado, Conciliador/Juiz Leigo, Data e hora, Tipo,
+// Observação - exatamente os campos pedidos (Situação/Sala/Depoentes
+// ficam de fora, usados só internamente para o resumo) - ordenada da
+// audiência mais próxima à mais distante.
+async function construirPdfTabelaAudienciasNovo(nomeUnidade, linhas, periodoTexto) {
+  const util = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+  const itens = linhas
+    .slice()
+    .sort((a, b) => paraDataOrdenavel(a.dataHora) - paraDataOrdenavel(b.dataHora))
+    .map((l) => ({
+      processo: l.processoNumeros,
+      magistrado: l.magistrado,
+      conciliador: l.conciliador,
+      dataHora: l.dataHora,
+      tipo: l.tipo,
+      observacao: l.observacao,
+    }));
+  const colunas = [
+    { titulo: "Processo", largura: util * 0.16, campo: "processo" },
+    { titulo: "Magistrado", largura: util * 0.18, campo: "magistrado" },
+    { titulo: "Conciliador / Juiz Leigo", largura: util * 0.18, campo: "conciliador" },
+    { titulo: "Data e hora", largura: util * 0.14, campo: "dataHora" },
+    { titulo: "Tipo", largura: util * 0.12, campo: "tipo" },
+    { titulo: "Observação", largura: util * 0.22, campo: "observacao" },
+  ];
+  return construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Audiências (Relatório de Audiências Novo) da unidade "${nomeUnidade}" — Período: ${periodoTexto} — ${itens.length} audiência(s)`
+  );
+}
+
 // Navega a aba ativa de volta para a página inicial do eproc - usado ao
 // FINAL da geração dos relatórios da Corregedoria (a aba pode ter ficado na
 // tela do Relatório Geral por causa do "Carregar unidades"). Best-effort:
@@ -6110,6 +6610,15 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   // do Portal de Audiências, casadas pela unidade escolhida). Nos demais
   // fluxos que não a enviam, cai neste padrão e não é consultada.
   audiencias: false,
+  // Default "false": só o cartão "Relatório da Unidade" (Gestão da
+  // Unidade) envia essas duas opções - Agenda Padrão de Audiência
+  // (capacidade/configuração da pauta) e Relatório de Audiências Novo
+  // (audiências individuais, ±3 anos, todos os órgãos disponíveis). O
+  // cartão Corregedoria não as expõe (essas telas usam o Juízo/Órgão já
+  // restrito à sessão atual, sem um seletor de unidade arbitrária como as
+  // demais consultas da Corregedoria).
+  agendaPadraoAudiencias: false,
+  audienciasDetalhado: false,
   regrasAutomacao: true,
   localizadores: true,
 };
@@ -6606,6 +7115,38 @@ async function exportarRelatorioGerencialUnidade(
     if (r.erro) audiencias.erros.push(r.erro);
   }
 
+  // Agenda Padrão de Audiência (capacidade/configuração da pauta) -
+  // consultada numa aba oculta, percorrendo cada período/tipo cadastrado.
+  const agendaPadraoAudiencias = { linhas: [], erros: [] };
+  if (opcoesFinais.agendaPadraoAudiencias) {
+    notificar("Consultando a Agenda Padrão de Audiência...");
+    const r = await consultarAgendaPadraoAudienciaDaUnidade(abaAtual.url);
+    agendaPadraoAudiencias.linhas = r.linhas || [];
+    if (r.erro) agendaPadraoAudiencias.erros.push(r.erro);
+  }
+
+  // Relatório de Audiências Novo (audiências individuais) - período fixo
+  // de 3 anos antes até 3 anos depois de hoje, para todos os órgãos
+  // disponíveis no filtro da tela.
+  const audienciasDetalhado = { linhas: [], erros: [], periodoTexto: "" };
+  if (opcoesFinais.audienciasDetalhado) {
+    notificar("Consultando o Relatório de Audiências Novo (últimos/próximos 3 anos)...");
+    const formatarDataDDMMYYYY = (data) => {
+      const dd = String(data.getDate()).padStart(2, "0");
+      const mm = String(data.getMonth() + 1).padStart(2, "0");
+      return `${dd}/${mm}/${data.getFullYear()}`;
+    };
+    const hoje = new Date();
+    const dataInicio = new Date(hoje.getFullYear() - 3, hoje.getMonth(), hoje.getDate());
+    const dataFim = new Date(hoje.getFullYear() + 3, hoje.getMonth(), hoje.getDate());
+    const dataInicioStr = formatarDataDDMMYYYY(dataInicio);
+    const dataFimStr = formatarDataDDMMYYYY(dataFim);
+    audienciasDetalhado.periodoTexto = `${dataInicioStr} a ${dataFimStr}`;
+    const r = await consultarRelatorioAudienciasNovoDaUnidade(abaAtual.url, dataInicioStr, dataFimStr);
+    audienciasDetalhado.linhas = r.linhas || [];
+    if (r.erro) audienciasDetalhado.erros.push(r.erro);
+  }
+
   notificar("Gerando PDF...");
 
   const dataInformacao = new Date().toLocaleString("pt-BR");
@@ -6670,6 +7211,8 @@ async function exportarRelatorioGerencialUnidade(
       : Boolean(processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0),
     remessasJuizesLeigos: Boolean(opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0),
     audiencias: Boolean(opcoesFinais.audiencias && audiencias.linhas.length > 0),
+    agendaPadraoAudiencias: Boolean(opcoesFinais.agendaPadraoAudiencias && agendaPadraoAudiencias.linhas.length > 0),
+    audienciasDetalhado: Boolean(opcoesFinais.audienciasDetalhado && audienciasDetalhado.linhas.length > 0),
   };
 
   const secoesResumo = [];
@@ -6784,6 +7327,39 @@ async function exportarRelatorioGerencialUnidade(
     if (secoesAud[0]) secoesAud[0].id = temTabelaDiscriminada.audiencias ? "audiencias" : undefined;
     secoesResumo.push(...secoesAud);
   }
+  if (opcoesFinais.agendaPadraoAudiencias) {
+    const resumoAgenda = resumirAgendaPadraoAudiencia(agendaPadraoAudiencias.linhas);
+    secoesResumo.push({
+      titulo: "AGENDA PADRÃO DE AUDIÊNCIA",
+      id: temTabelaDiscriminada.agendaPadraoAudiencias ? "agendaPadraoAudiencias" : undefined,
+      linhas: [
+        { rotulo: "Tipos de audiência cadastrados", valor: resumoAgenda.totalTipos },
+        { rotulo: "Total de audiências previstas", valor: resumoAgenda.totalPrevistas },
+        { rotulo: "Total de audiências agendadas", valor: resumoAgenda.totalAgendadas },
+      ],
+    });
+  }
+  if (opcoesFinais.audienciasDetalhado) {
+    const resumoNovo = resumirAudienciasNovo(audienciasDetalhado.linhas, Date.now());
+    secoesResumo.push({
+      titulo: "AUDIÊNCIAS (RELATÓRIO NOVO)",
+      id: temTabelaDiscriminada.audienciasDetalhado ? "audienciasDetalhado" : undefined,
+      linhas: [
+        { rotulo: "Período considerado", valor: audienciasDetalhado.periodoTexto || "?" },
+        { rotulo: "Total de audiências no período", valor: resumoNovo.total },
+        { rotulo: "Canceladas", valor: resumoNovo.canceladas },
+        { rotulo: "Redesignadas", valor: resumoNovo.redesignadas },
+        { rotulo: "Prorrogadas", valor: resumoNovo.prorrogadas },
+        { rotulo: "Pautadas futuramente", valor: resumoNovo.pautadasFuturamente },
+      ],
+    });
+    if (resumoNovo.porResponsavel.length > 0) {
+      secoesResumo.push({
+        titulo: "AUDIÊNCIAS POR MAGISTRADO / CONCILIADOR",
+        linhas: resumoNovo.porResponsavel,
+      });
+    }
+  }
   if (opcoesFinais.regrasAutomacao) {
     secoesResumo.push({
       titulo: "REGRAS DE AUTOMAÇÃO",
@@ -6824,6 +7400,12 @@ async function exportarRelatorioGerencialUnidade(
   }
   if (opcoesFinais.audiencias && audiencias.erros.length > 0) {
     avisos.push(`Audiências: ${audiencias.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.agendaPadraoAudiencias && agendaPadraoAudiencias.erros.length > 0) {
+    avisos.push(`Agenda Padrão de Audiência: ${agendaPadraoAudiencias.erros.join(" | ")}`);
+  }
+  if (opcoesFinais.audienciasDetalhado && audienciasDetalhado.erros.length > 0) {
+    avisos.push(`Relatório de Audiências Novo: ${audienciasDetalhado.erros.join(" | ")}`);
   }
   if (opcoesFinais.localizadores && erroLocalizadores) avisos.push(`Localizadores: ${erroLocalizadores}`);
 
@@ -6947,6 +7529,20 @@ async function exportarRelatorioGerencialUnidade(
     alvosTabela.audiencias = pdfFinal.getPageCount();
     const bytesAudiencias = await construirPdfTabelaAudiencias(nomeUnidade, audiencias.linhas);
     await anexarPaginas(bytesAudiencias);
+  }
+  if (opcoesFinais.agendaPadraoAudiencias && agendaPadraoAudiencias.linhas.length > 0) {
+    alvosTabela.agendaPadraoAudiencias = pdfFinal.getPageCount();
+    const bytesAgenda = await construirPdfTabelaAgendaPadraoAudiencia(nomeUnidade, agendaPadraoAudiencias.linhas);
+    await anexarPaginas(bytesAgenda);
+  }
+  if (opcoesFinais.audienciasDetalhado && audienciasDetalhado.linhas.length > 0) {
+    alvosTabela.audienciasDetalhado = pdfFinal.getPageCount();
+    const bytesAudienciasNovo = await construirPdfTabelaAudienciasNovo(
+      nomeUnidade,
+      audienciasDetalhado.linhas,
+      audienciasDetalhado.periodoTexto
+    );
+    await anexarPaginas(bytesAudienciasNovo);
   }
 
   // ===== 3) Regras de Automação e Localizadores (sem link no resumo) =====
