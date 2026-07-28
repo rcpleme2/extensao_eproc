@@ -5022,23 +5022,28 @@ function limparPrefixoTipoAudiencia(tipo) {
 // contagem no resumo e de agrupamento na tabela discriminada) a partir
 // do Tipo e, quando aplicável, se a coluna Conciliador/Juiz Leigo veio
 // preenchida:
-// - Tipo "de Conciliação" -> sempre CONCILIADOR (nome da própria coluna
-//   Conciliador/Juiz Leigo; se por algum motivo vier vazia, cai no
-//   Magistrado como reserva, para não perder a linha).
+// - Tipo "de Conciliação" -> sempre CONCILIADOR. Quando a coluna
+//   Conciliador/Juiz Leigo vem vazia, a linha NÃO é atribuída ao
+//   Magistrado (uma audiência de conciliação sem conciliador designado
+//   não vira uma audiência "do magistrado") - fica em Conciliador mesmo,
+//   sob o rótulo "Sem conciliador designado".
 // - Tipo com "instru" no meio ("de Instrução", "de Instrução e
 //   Julgamento") -> JUIZ LEIGO quando a coluna Conciliador/Juiz Leigo
 //   vem preenchida (instrução conduzida por juiz leigo - típico de
-//   Juizado Especial); MAGISTRADO quando vem vazia (instrução comum).
+//   Juizado Especial), sob o mesmo princípio ("Sem juiz leigo designado"
+//   se o nome vier vazio, nunca atribuída ao Magistrado); MAGISTRADO
+//   quando a coluna vem vazia (instrução comum - aqui sim é o magistrado
+//   que conduz, então a atribuição a ele é a correta, não um "fallback").
 // - Qualquer outro Tipo (Custódia, Julgamento, Justificação, Preliminar,
-//   Tribunal do Júri etc.) -> mesma regra de reserva: Conciliador/Juiz
-//   Leigo quando preenchido, senão Magistrado - agrupados à parte
+//   Tribunal do Júri etc.) -> mesma regra: Conciliador/Juiz Leigo quando
+//   a coluna vem preenchida, senão Magistrado - agrupados à parte
 //   ("Outras Audiências"), sem inventar um 4º papel.
 function classificarResponsavelAudiencia(l) {
   const tipo = (l.tipo || "").trim();
   const conciliadorNome = (l.conciliador || "").trim();
   const magistradoNome = (l.magistrado || "").trim();
   if (/^de\s+concilia/i.test(tipo)) {
-    return { papel: "conciliador", nome: conciliadorNome || magistradoNome || "(sem responsável)" };
+    return { papel: "conciliador", nome: conciliadorNome || "Sem conciliador designado" };
   }
   if (/instru/i.test(tipo)) {
     if (conciliadorNome) return { papel: "juizLeigo", nome: conciliadorNome };
@@ -5113,11 +5118,11 @@ async function construirPdfTabelaAudienciasNovo(nomeUnidade, linhas, periodoText
     (await pdfFinal.copyPages(pdfExtra, pdfExtra.getPageIndices())).forEach((p) => pdfFinal.addPage(p));
   }
 
-  async function anexarBucketSimples(lista, tituloBucket, campoResponsavel, rotuloResponsavel) {
+  async function anexarBucketSimples(lista, tituloBucket, campoResponsavel, rotuloResponsavel, semDesignadoTexto) {
     if (lista.length === 0) return;
     const itens = ordenarPorData(lista).map((l) => ({
       processo: l.processoNumeros,
-      responsavel: l[campoResponsavel] || "",
+      responsavel: (l[campoResponsavel] || "").trim() || semDesignadoTexto || "",
       dataHora: l.dataHora,
       observacao: l.observacao,
     }));
@@ -5136,8 +5141,20 @@ async function construirPdfTabelaAudienciasNovo(nomeUnidade, linhas, periodoText
   }
 
   await anexarBucketSimples(buckets.instrucao, "Instrução", "magistrado", "Magistrado");
-  await anexarBucketSimples(buckets.conciliacao, "Conciliação", "conciliador", "Conciliador");
-  await anexarBucketSimples(buckets.instrucaoJuizadoEspecial, "Instrução do Juizado Especial", "conciliador", "Juiz Leigo");
+  await anexarBucketSimples(
+    buckets.conciliacao,
+    "Conciliação",
+    "conciliador",
+    "Conciliador",
+    "Sem conciliador designado"
+  );
+  await anexarBucketSimples(
+    buckets.instrucaoJuizadoEspecial,
+    "Instrução do Juizado Especial",
+    "conciliador",
+    "Juiz Leigo",
+    "Sem juiz leigo designado"
+  );
 
   if (buckets.outras.length > 0) {
     const itens = ordenarPorData(buckets.outras).map((l) => ({
@@ -7480,10 +7497,10 @@ async function exportarRelatorioGerencialUnidade(
       secoesResumo.push({ titulo: "AUDIÊNCIAS POR MAGISTRADO", linhas: resumoNovo.porMagistrado });
     }
     if (resumoNovo.porConciliador.length > 0) {
-      secoesResumo.push({ titulo: "AUDIÊNCIAS POR CONCILIADOR", linhas: resumoNovo.porConciliador });
+      secoesResumo.push({ titulo: "AUDIÊNCIAS DESIGNADAS POR CONCILIADOR", linhas: resumoNovo.porConciliador });
     }
     if (resumoNovo.porJuizLeigo.length > 0) {
-      secoesResumo.push({ titulo: "AUDIÊNCIAS POR JUIZ LEIGO", linhas: resumoNovo.porJuizLeigo });
+      secoesResumo.push({ titulo: "AUDIÊNCIAS DESIGNADAS POR JUIZ LEIGO", linhas: resumoNovo.porJuizLeigo });
     }
   }
   if (opcoesFinais.regrasAutomacao) {

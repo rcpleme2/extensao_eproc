@@ -1276,7 +1276,9 @@ cobertas abaixo.
 
 - **Não exige nenhuma unidade selecionada** — não há dropdown de
   Comarca/Juízo neste cartão. Basta marcar os itens desejados em "Itens a
-  incluir no PDF" e clicar em **"Exportar Relatório da Unidade (PDF)"**.
+  incluir no PDF" (com os mesmos atalhos **"Marcar tudo"**/**"Desmarcar
+  tudo"** do cartão Corregedoria) e clicar em **"Exportar Relatório da
+  Unidade (PDF)"**.
 - **"Como consolidar os dados"** (dois botões de opção, mutuamente
   exclusivos, acima de "Itens a incluir no PDF"):
   - **Unidade integral** (padrão): cada seção do relatório mostra so' o
@@ -1406,11 +1408,16 @@ seletor de unidade arbitrária como as demais consultas da Corregedoria).
 
   Cada audiência é classificada por **um único responsável**, a partir do
   Tipo:
-  - **Tipo "Conciliação"** → responsável é o **Conciliador**.
+  - **Tipo "Conciliação"** → responsável é sempre o **Conciliador** —
+    mesmo quando o campo Conciliador/Juiz Leigo vem vazio. Nesse caso o
+    nome exibido é **"Sem conciliador designado"**, e a audiência
+    **não** é atribuída ao Magistrado.
   - **Tipo "Instrução" com o campo Conciliador/Juiz Leigo preenchido**
-    (Juizado Especial) → responsável é o **Juiz Leigo**.
+    (Juizado Especial) → responsável é o **Juiz Leigo** (ou "Sem juiz
+    leigo designado", pelo mesmo princípio, se o nome vier vazio).
   - **Tipo "Instrução" com esse campo vazio** → responsável é o
-    **Magistrado**.
+    **Magistrado** — aqui a instrução é mesmo conduzida por ele, então a
+    atribuição não é um "chute" na ausência de outro nome.
   - Demais tipos → Conciliador quando preenchido, senão Magistrado.
 
   Essa mesma classificação alimenta tanto o resumo quanto a tabela
@@ -1422,11 +1429,12 @@ seletor de unidade arbitrária como as demais consultas da Corregedoria).
     **Prorrogadas** (pela coluna Situação) e **Pautadas futuramente**
     (Data/hora Início posterior ao momento da extração, independente da
     situação atual).
-  - **"AUDIÊNCIAS POR MAGISTRADO"**, **"AUDIÊNCIAS POR CONCILIADOR"** e
-    **"AUDIÊNCIAS POR JUIZ LEIGO"** — três tabelas de resumo separadas
-    (em vez de uma única combinada), cada uma contando as audiências do
-    respectivo responsável conforme a classificação acima; uma seção só
-    aparece se houver ao menos uma audiência daquele tipo de responsável.
+  - **"AUDIÊNCIAS POR MAGISTRADO"**, **"AUDIÊNCIAS DESIGNADAS POR
+    CONCILIADOR"** e **"AUDIÊNCIAS DESIGNADAS POR JUIZ LEIGO"** — três
+    tabelas de resumo separadas (em vez de uma única combinada), cada
+    uma contando as audiências do respectivo responsável conforme a
+    classificação acima; uma seção só aparece se houver ao menos uma
+    audiência daquele tipo de responsável.
 
   A tabela discriminada também é separada por tipo de audiência, em até
   quatro blocos (cada um só aparece se tiver ao menos uma linha):
