@@ -1869,6 +1869,8 @@ const chkRelAltAgendaPadraoAudiencias = document.getElementById("chk-relalt-agen
 const chkRelAltAudienciasDetalhado = document.getElementById("chk-relalt-audiencias-detalhado");
 const chkRelAltRegrasAutomacao = document.getElementById("chk-relalt-regras-automacao");
 const chkRelAltLocalizadores = document.getElementById("chk-relalt-localizadores");
+const btnMarcarTudoRelatorioAlt = document.getElementById("btn-marcar-tudo-relatorio-alt");
+const btnDesmarcarTudoRelatorioAlt = document.getElementById("btn-desmarcar-tudo-relatorio-alt");
 const btnExportarRelatorioUnidadeAlt = document.getElementById("btn-exportar-relatorio-unidade-alt");
 const areaProgressoRelatorioUnidadeAlt = document.getElementById("area-progresso-relatorio-unidade-alt");
 const textoProgressoRelatorioUnidadeAlt = document.getElementById("texto-progresso-relatorio-unidade-alt");
@@ -1894,6 +1896,33 @@ function lerOpcoesRelatorioUnidadeAlt() {
     localizadores: chkRelAltLocalizadores.checked,
   };
 }
+
+const CHECKBOXES_ITENS_RELATORIO_UNIDADE_ALT = [
+  chkRelAltProcessosAtivos,
+  chkRelAltSuspensos,
+  chkRelAltConclusosDecisao,
+  chkRelAltConclusosSentenca,
+  chkRelAltSemMovimentacao,
+  chkRelAltMandados,
+  chkRelAltParalisados,
+  chkRelAltRemessasJuizesLeigos,
+  chkRelAltAgendaPadraoAudiencias,
+  chkRelAltAudienciasDetalhado,
+  chkRelAltRegrasAutomacao,
+  chkRelAltLocalizadores,
+];
+
+btnMarcarTudoRelatorioAlt.addEventListener("click", () => {
+  CHECKBOXES_ITENS_RELATORIO_UNIDADE_ALT.forEach((chk) => {
+    chk.checked = true;
+  });
+});
+
+btnDesmarcarTudoRelatorioAlt.addEventListener("click", () => {
+  CHECKBOXES_ITENS_RELATORIO_UNIDADE_ALT.forEach((chk) => {
+    chk.checked = false;
+  });
+});
 
 btnExportarRelatorioUnidadeAlt.addEventListener("click", async () => {
   areaErrosUnidadeAlt.hidden = true;
