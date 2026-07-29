@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Política de Privacidade — Cofre 2FA</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #26313a; }
+  h1 { color: #1c3d5a; }
+  h2 { color: #1c3d5a; margin-top: 2em; }
+  code { background: #f0f4f8; padding: 2px 6px; border-radius: 4px; }
+  .atualizado { color: #5c6b78; font-size: 0.9em; }
+</style>
+</head>
+<body>
+  <h1>Política de Privacidade — Cofre 2FA</h1>
+  <p class="atualizado">Última atualização: 29 de julho de 2026</p>
+
+  <p>
+    O Cofre 2FA é uma extensão para Google Chrome que gera códigos de
+    verificação em duas etapas (TOTP, RFC 6238) a partir de chaves secretas
+    cadastradas pelo próprio usuário. Esta política explica, de forma direta,
+    o que a extensão faz e não faz com os dados do usuário.
+  </p>
+
+  <h2>Não temos servidor, não coletamos nada</h2>
+  <p>
+    O Cofre 2FA não tem backend próprio. Não enviamos, coletamos, vendemos
+    nem compartilhamos nenhum dado do usuário com o desenvolvedor ou com
+    terceiros. Toda a lógica roda localmente, dentro do navegador do usuário.
+  </p>
+
+  <h2>Onde os dados ficam armazenados</h2>
+  <ul>
+    <li>
+      <strong>Contas 2FA (emissor, nome da conta e segredo TOTP):</strong>
+      ficam cifradas com AES-256-GCM e sincronizadas via
+      <code>chrome.storage.sync</code> — o mecanismo de sincronização de
+      extensões do próprio Chrome, associado à conta Google do usuário.
+      O Google nunca vê o conteúdo em texto claro: só o Google, como operador
+      dessa sincronização, tem acesso ao blob cifrado, e nem ele consegue
+      decifrá-lo sem a senha mestra do usuário.
+    </li>
+    <li>
+      <strong>Senha mestra:</strong> nunca é armazenada, enviada ou
+      transmitida. Ela só existe na memória do navegador enquanto o painel
+      está aberto e o cofre está destravado, e é usada para derivar a chave
+      de decriptografia (PBKDF2-SHA256, 600.000 iterações).
+    </li>
+    <li>
+      <strong>PIN de desbloqueio (opcional):</strong> se configurado, fica
+      apenas em <code>chrome.storage.local</code>, no próprio dispositivo.
+      Nunca sincroniza entre computadores e nunca sai do navegador.
+    </li>
+    <li>
+      <strong>Preferências</strong> (tempo de bloqueio automático, opção de
+      manter destravado, etc.): ficam em <code>chrome.storage.local</code>,
+      só neste dispositivo.
+    </li>
+  </ul>
+
+  <h2>O que a extensão nunca faz</h2>
+  <ul>
+    <li>Não envia dados para nenhum servidor além da sincronização nativa do
+      Chrome (controlada pelo Google, não por nós).</li>
+    <li>Não usa rastreadores, analytics ou publicidade.</li>
+    <li>Não acessa o conteúdo de páginas visitadas, histórico de navegação,
+      localização, nem qualquer dado fora do que o próprio usuário cadastra
+      manualmente no cofre.</li>
+    <li>Não usa código remoto: todo o código roda a partir do pacote da
+      própria extensão.</li>
+  </ul>
+
+  <h2>Permissões usadas</h2>
+  <ul>
+    <li><code>storage</code> — guardar e sincronizar o cofre cifrado.</li>
+    <li><code>alarms</code> — bloqueio automático por inatividade.</li>
+    <li><code>sidePanel</code> — exibir a interface da extensão no painel
+      lateral do Chrome.</li>
+  </ul>
+
+  <h2>Backup e exclusão de dados</h2>
+  <p>
+    O usuário pode exportar um backup cifrado a qualquer momento (opção
+    "Exportar backup cifrado", em "Opções do cofre") e apagar todos os dados
+    do cofre — deste navegador e da sincronização — na mesma tela ("Apagar
+    cofre deste navegador e da sincronização"). Não há como o desenvolvedor
+    recuperar dados apagados ou senhas esquecidas: não temos acesso a eles.
+  </p>
+
+  <h2>Alterações nesta política</h2>
+  <p>
+    Se esta política mudar, a data de "última atualização" no topo desta
+    página será atualizada.
+  </p>
+
+  <h2>Contato</h2>
+  <p>
+    Dúvidas sobre esta política: <a href="mailto:rafaelcpleme@gmail.com">rafaelcpleme@gmail.com</a>.
+  </p>
+</body>
+</html>
