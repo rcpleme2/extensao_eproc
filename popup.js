@@ -128,9 +128,26 @@ async function atualizarPromptsIA() {
 const FORMATADOR_USD = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", minimumFractionDigits: 4 });
 
 function nomeAmigavelModelo(modeloId) {
-  const todos = [...MODELOS_IA_PAINEL.claude, ...MODELOS_IA_PAINEL.gemini];
+  const todos = [...MODELOS_IA_PAINEL.claude, ...MODELOS_IA_PAINEL.gemini, ...MODELOS_IA_PAINEL.openai];
   const encontrado = todos.find((m) => m.id === modeloId);
   return encontrado ? encontrado.nome : modeloId;
+}
+
+// Nome de exibição, chave e modelo configurados para um provedor de IA -
+// centraliza o que antes eram vários ternários "gemini ? x : y" (ficava
+// incorreto assim que um terceiro provedor entrou em cena).
+const NOMES_PROVEDOR_IA = { claude: "Anthropic (Claude)", gemini: "Gemini", openai: "OpenAI (ChatGPT)" };
+
+function chaveConfiguradaDoProvedor(config, provedor) {
+  if (provedor === "gemini") return config.chaveGemini;
+  if (provedor === "openai") return config.chaveOpenAI;
+  return config.chaveClaude;
+}
+
+function modeloConfiguradoDoProvedor(config, provedor) {
+  if (provedor === "gemini") return config.modeloGemini;
+  if (provedor === "openai") return config.modeloOpenAI;
+  return config.modeloClaude;
 }
 
 // Guarda qual prompt foi de fato usado na extração (fase 1), pra fase 2
@@ -229,7 +246,7 @@ async function iniciarExtracaoIA(modo) {
 
   const config = await obterConfiguracoes();
   const provedor = modo === "fila" ? "claude" : config.provedorIA;
-  const modelo = provedor === "gemini" ? config.modeloGemini : config.modeloClaude;
+  const modelo = modeloConfiguradoDoProvedor(config, provedor);
 
   resetarAnaliseIA();
   modoConfirmacaoIA = modo;
@@ -351,7 +368,7 @@ btnConfirmarAnaliseIA.addEventListener("click", async () => {
   }
 
   const config = await obterConfiguracoes();
-  const apiKey = configEmUsoNaAnalise.provedor === "gemini" ? config.chaveGemini : config.chaveClaude;
+  const apiKey = chaveConfiguradaDoProvedor(config, configEmUsoNaAnalise.provedor);
 
   areaEstimativaIA.hidden = true;
   areaProgressoIA.hidden = false;
@@ -623,6 +640,10 @@ const MODELOS_IA_PAINEL = {
     { id: "gemini-3.1-flash-lite", nome: "Gemini 3.1 Flash-Lite (mais barato)" },
     { id: "gemini-3.1-pro", nome: "Gemini 3.1 Pro" },
   ],
+  openai: [
+    { id: "gpt-5-mini", nome: "GPT-5 Mini (mais barato)" },
+    { id: "gpt-5", nome: "GPT-5" },
+  ],
 };
 
 const CONFIG_PADRAO = {
@@ -632,8 +653,10 @@ const CONFIG_PADRAO = {
   provedorIA: "claude",
   chaveClaude: "",
   chaveGemini: "",
+  chaveOpenAI: "",
   modeloClaude: MODELOS_IA_PAINEL.claude[0].id,
   modeloGemini: MODELOS_IA_PAINEL.gemini[0].id,
+  modeloOpenAI: MODELOS_IA_PAINEL.openai[0].id,
 };
 
 function obterConfiguracoes() {
@@ -651,10 +674,9 @@ function salvarConfiguracao(chave, valor) {
 // Usada em "Analisar com IA" (provedor conforme config) e "Transcrever"
 // (sempre Gemini).
 function aplicarStatusSetupIA(config, provedor, areaTexto, areaBotao) {
-  const ehGemini = provedor === "gemini";
-  const chave = ehGemini ? config.chaveGemini : config.chaveClaude;
-  const nomeProvedor = ehGemini ? "Gemini" : "Anthropic (Claude)";
-  const nomeModelo = nomeAmigavelModelo(ehGemini ? config.modeloGemini : config.modeloClaude);
+  const chave = chaveConfiguradaDoProvedor(config, provedor);
+  const nomeProvedor = NOMES_PROVEDOR_IA[provedor] || NOMES_PROVEDOR_IA.claude;
+  const nomeModelo = nomeAmigavelModelo(modeloConfiguradoDoProvedor(config, provedor));
   if (chave) {
     areaTexto.textContent = `Provedor: ${nomeProvedor} · Modelo: ${nomeModelo} · Chave ✓`;
     areaTexto.classList.add("status--ok");
@@ -684,10 +706,13 @@ const chkConfigAnexarMagistradoConclusos = document.getElementById("chk-config-a
 const modalConfigFechar = document.getElementById("modal-config-fechar");
 const radioConfigProvedorClaude = document.getElementById("radio-config-provedor-claude");
 const radioConfigProvedorGemini = document.getElementById("radio-config-provedor-gemini");
+const radioConfigProvedorOpenAI = document.getElementById("radio-config-provedor-openai");
 const inputConfigChaveClaude = document.getElementById("config-chave-claude");
 const inputConfigChaveGemini = document.getElementById("config-chave-gemini");
+const inputConfigChaveOpenAI = document.getElementById("config-chave-openai");
 const selectConfigModeloClaude = document.getElementById("select-config-modelo-claude");
 const selectConfigModeloGemini = document.getElementById("select-config-modelo-gemini");
+const selectConfigModeloOpenAI = document.getElementById("select-config-modelo-openai");
 
 for (const modelo of MODELOS_IA_PAINEL.claude) {
   const option = document.createElement("option");
@@ -701,18 +726,27 @@ for (const modelo of MODELOS_IA_PAINEL.gemini) {
   option.textContent = modelo.nome;
   selectConfigModeloGemini.appendChild(option);
 }
+for (const modelo of MODELOS_IA_PAINEL.openai) {
+  const option = document.createElement("option");
+  option.value = modelo.id;
+  option.textContent = modelo.nome;
+  selectConfigModeloOpenAI.appendChild(option);
+}
 
 btnAbrirConfiguracoes.addEventListener("click", async () => {
   const config = await obterConfiguracoes();
   chkConfigSubstituirSigla.checked = config.substituirSigla;
   chkConfigSepararOrgaoJuizo.checked = config.separarOrgaoJuizoPorComarca;
   chkConfigAnexarMagistradoConclusos.checked = config.anexarMagistradoConclusos;
-  radioConfigProvedorClaude.checked = config.provedorIA !== "gemini";
+  radioConfigProvedorClaude.checked = config.provedorIA === "claude" || !config.provedorIA;
   radioConfigProvedorGemini.checked = config.provedorIA === "gemini";
+  radioConfigProvedorOpenAI.checked = config.provedorIA === "openai";
   inputConfigChaveClaude.value = config.chaveClaude || "";
   inputConfigChaveGemini.value = config.chaveGemini || "";
+  inputConfigChaveOpenAI.value = config.chaveOpenAI || "";
   selectConfigModeloClaude.value = config.modeloClaude || CONFIG_PADRAO.modeloClaude;
   selectConfigModeloGemini.value = config.modeloGemini || CONFIG_PADRAO.modeloGemini;
+  selectConfigModeloOpenAI.value = config.modeloOpenAI || CONFIG_PADRAO.modeloOpenAI;
   modalConfiguracoes.hidden = false;
 });
 
@@ -724,6 +758,10 @@ selectConfigModeloGemini.addEventListener("change", () => {
   salvarConfiguracao("modeloGemini", selectConfigModeloGemini.value);
 });
 
+selectConfigModeloOpenAI.addEventListener("change", () => {
+  salvarConfiguracao("modeloOpenAI", selectConfigModeloOpenAI.value);
+});
+
 radioConfigProvedorClaude.addEventListener("change", () => {
   if (radioConfigProvedorClaude.checked) salvarConfiguracao("provedorIA", "claude");
 });
@@ -732,12 +770,20 @@ radioConfigProvedorGemini.addEventListener("change", () => {
   if (radioConfigProvedorGemini.checked) salvarConfiguracao("provedorIA", "gemini");
 });
 
+radioConfigProvedorOpenAI.addEventListener("change", () => {
+  if (radioConfigProvedorOpenAI.checked) salvarConfiguracao("provedorIA", "openai");
+});
+
 inputConfigChaveClaude.addEventListener("change", () => {
   salvarConfiguracao("chaveClaude", inputConfigChaveClaude.value.trim());
 });
 
 inputConfigChaveGemini.addEventListener("change", () => {
   salvarConfiguracao("chaveGemini", inputConfigChaveGemini.value.trim());
+});
+
+inputConfigChaveOpenAI.addEventListener("change", () => {
+  salvarConfiguracao("chaveOpenAI", inputConfigChaveOpenAI.value.trim());
 });
 
 chkConfigSubstituirSigla.addEventListener("change", () => {

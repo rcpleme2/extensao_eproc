@@ -1565,6 +1565,10 @@ const MODELOS_IA_DISPONIVEIS = {
     { id: "gemini-3.1-flash-lite", nome: "Gemini 3.1 Flash-Lite (mais barato)", precoEntradaPorMTok: 0.25, precoSaidaPorMTok: 1.5 },
     { id: "gemini-3.1-pro", nome: "Gemini 3.1 Pro", precoEntradaPorMTok: 2, precoSaidaPorMTok: 12 },
   ],
+  openai: [
+    { id: "gpt-5-mini", nome: "GPT-5 Mini (mais barato)", precoEntradaPorMTok: 0.25, precoSaidaPorMTok: 2 },
+    { id: "gpt-5", nome: "GPT-5", precoEntradaPorMTok: 1.25, precoSaidaPorMTok: 10 },
+  ],
 };
 
 function modeloPadrao(provedor) {
@@ -1736,6 +1740,31 @@ async function chamarGeminiAPI(apiKey, promptCompleto, modelo) {
     : "";
   const tokensEntrada = dados.usageMetadata ? dados.usageMetadata.promptTokenCount : null;
   const tokensSaida = dados.usageMetadata ? dados.usageMetadata.candidatesTokenCount : null;
+  return { texto, tokensEntrada, tokensSaida };
+}
+
+async function chamarOpenAIAPI(apiKey, promptCompleto, modelo) {
+  const resposta = await fetchComDiagnostico("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: modelo || modeloPadrao("openai"),
+      messages: [{ role: "user", content: promptCompleto }],
+    }),
+  }, "API da OpenAI (ChatGPT)");
+
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error((dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API da OpenAI (ChatGPT).`);
+  }
+
+  const escolha = dados.choices && dados.choices[0];
+  const texto = (escolha && escolha.message && escolha.message.content) || "";
+  const tokensEntrada = dados.usage ? dados.usage.prompt_tokens : null;
+  const tokensSaida = dados.usage ? dados.usage.completion_tokens : null;
   return { texto, tokensEntrada, tokensSaida };
 }
 
@@ -2038,9 +2067,10 @@ async function executarAnaliseIA(texto, promptId, promptTextoAvulso, provedor, m
   const promptCompleto = await montarPromptCompleto(texto, promptId, promptTextoAvulso);
   const modeloEscolhido = modelo || modeloPadrao(provedor);
 
-  const resultado = provedor === "gemini"
-    ? await chamarGeminiAPI(apiKey, promptCompleto, modeloEscolhido)
-    : await chamarClaudeAPI(apiKey, promptCompleto, modeloEscolhido);
+  let resultado;
+  if (provedor === "gemini") resultado = await chamarGeminiAPI(apiKey, promptCompleto, modeloEscolhido);
+  else if (provedor === "openai") resultado = await chamarOpenAIAPI(apiKey, promptCompleto, modeloEscolhido);
+  else resultado = await chamarClaudeAPI(apiKey, promptCompleto, modeloEscolhido);
 
   const precos = obterInfoModelo(provedor, modeloEscolhido);
   const custoRealUsd = resultado.tokensEntrada != null && resultado.tokensSaida != null

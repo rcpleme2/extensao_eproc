@@ -679,6 +679,10 @@
           <input type="radio" name="config-provedor-ia" id="radio-config-provedor-gemini" value="gemini" />
           Usar Gemini (Google)
         </label>
+        <label class="opcao">
+          <input type="radio" name="config-provedor-ia" id="radio-config-provedor-openai" value="openai" />
+          Usar ChatGPT (OpenAI)
+        </label>
         <label class="campo-config-ia">
           Chave de API da Anthropic (Claude)
           <input type="password" id="config-chave-claude" placeholder="sk-ant-..." autocomplete="off" />
@@ -694,6 +698,14 @@
         <label class="campo-config-ia">
           Modelo do Gemini
           <select id="select-config-modelo-gemini"></select>
+        </label>
+        <label class="campo-config-ia">
+          Chave de API da OpenAI (ChatGPT)
+          <input type="password" id="config-chave-openai" placeholder="sk-..." autocomplete="off" />
+        </label>
+        <label class="campo-config-ia">
+          Modelo da OpenAI (ChatGPT)
+          <select id="select-config-modelo-openai"></select>
         </label>
         <button type="button" id="btn-abrir-gerenciar-prompts" class="btn-secundario">Gerenciar prompts de análise</button>
       </div>

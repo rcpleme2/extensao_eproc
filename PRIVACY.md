@@ -57,6 +57,8 @@ de IA, e vai diretamente ao provedor que você escolher:
 - **Google (Gemini)** — `generativelanguage.googleapis.com` — para análise de
   texto e **transcrição de áudio/vídeo** de audiências. Política de privacidade:
   https://policies.google.com/privacy
+- **OpenAI (ChatGPT)** — `api.openai.com` — para análise de texto de
+  documentos. Política de privacidade: https://openai.com/policies/privacy-policy
 
 Esses envios usam **as suas próprias chaves de API** e ficam sujeitos aos termos
 e políticas de cada provedor. O desenvolvedor não tem acesso a esse conteúdo nem
@@ -94,7 +96,7 @@ responsabilidade do usuário quanto ao dever de sigilo processual.
 | `sidePanel` | Exibir a interface da extensão no painel lateral. |
 | `alarms` | Verificar periodicamente o resultado de análises enviadas em lote à Anthropic. |
 | Acesso a `eproc1g.tjpr.jus.br` e `eproc1g.tre.tjpr.jus.br` | Ler as páginas do eProc na sua sessão autenticada. |
-| Acesso a `api.anthropic.com` e `generativelanguage.googleapis.com` | Enviar conteúdo às APIs de IA que você escolher, com as suas chaves. |
+| Acesso a `api.anthropic.com`, `generativelanguage.googleapis.com` e `api.openai.com` | Enviar conteúdo às APIs de IA que você escolher, com as suas chaves. |
 
 ## 8. Segurança
 

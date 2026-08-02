@@ -505,9 +505,10 @@ quando você adiciona um item à fila).
    de gastar qualquer coisa de verdade. Veja "Pré-visualização e edição
    antes de enviar" abaixo.
 4. Clique em **"Confirmar e enviar"** para de fato chamar a API do
-   provedor escolhido (Claude ou Gemini, configurado nas configurações da
-   extensão — ver abaixo) com o texto que estiver na pré-visualização
-   (editado ou não). Ou **"Cancelar"** para descartar sem gastar nada.
+   provedor escolhido (Claude, Gemini ou ChatGPT, configurado nas
+   configurações da extensão — ver abaixo) com o texto que estiver na
+   pré-visualização (editado ou não). Ou **"Cancelar"** para descartar
+   sem gastar nada.
 5. A resposta da IA aparece num campo de texto somente leitura, com um
    botão **"Copiar"** para colar em outro lugar da página do processo. O
    custo **real** da chamada (calculado a partir do uso de tokens
@@ -717,8 +718,9 @@ Fluxo:
 Nas configurações da extensão (botão "Configurações"), na seção "Análise com
 IA":
 
-- Escolha o provedor: **Claude (Anthropic)** ou **Gemini (Google)**.
-- Informe a chave de API do provedor escolhido (os dois campos ficam
+- Escolha o provedor: **Claude (Anthropic)**, **Gemini (Google)** ou
+  **ChatGPT (OpenAI)**.
+- Informe a chave de API do provedor escolhido (os três campos ficam
   salvos, então dá para trocar de provedor sem digitar a chave de novo).
   As chaves ficam guardadas localmente (`chrome.storage.local`, neste
   navegador) e só são enviadas para a API do próprio provedor ao chamar
@@ -728,6 +730,7 @@ IA":
   respectiva chave:
   - Claude: Haiku 4.5 (padrão, mais barato), Sonnet 5 ou Sonnet 4.6.
   - Gemini: Flash-Lite 3.1 (padrão, mais barato) ou Pro 3.1.
+  - ChatGPT: GPT-5 Mini (padrão, mais barato) ou GPT-5.
 
   O modelo escolhido é o mesmo usado tanto na análise imediata quanto ao
   adicionar itens à fila em lote (que sempre usa o modelo Claude
