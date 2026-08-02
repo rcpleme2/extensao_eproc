@@ -1768,13 +1768,19 @@ async function chamarOpenAIAPI(apiKey, promptCompleto, modelo) {
   return { texto, tokensEntrada, tokensSaida };
 }
 
-// ---- Transcrever Depoimentos (arquivos "VIDEO*" via Gemini) ----
+// ---- Transcrever Depoimentos (arquivos "VIDEO*" via Gemini ou OpenAI) ----
 //
-// Exclusiva do Gemini: a Anthropic (Claude) nao tem capacidade de processar audio/
-// video (so' texto/imagem/PDF), entao essa ferramenta sempre usa a chave e
-// o modelo Gemini configurados nas Configuracoes, independente do
-// provedor escolhido em "Analisar com IA" - mesmo padrao ja usado na fila
-// em lote (exclusiva da Anthropic (Claude), so' que ao contrario).
+// A Anthropic (Claude) nao tem capacidade de processar audio/video (so'
+// texto/imagem/PDF), entao essa ferramenta nunca usa Claude - so' Gemini ou
+// OpenAI, escolhido no rádio proprio "Transcrever Depoimentos" das
+// Configuracoes (independente do provedor escolhido em "Analisar com IA").
+// Mesmo padrao ja usado na fila em lote (exclusiva da Anthropic (Claude),
+// so' que ao contrario).
+//
+// Os dois provedores funcionam de formas BEM diferentes - ver o comentario
+// em cima de "transcreverDepoimentosOpenAI" mais abaixo pelas limitacoes
+// especificas dela (25MB por arquivo, sem identificacao de interlocutor
+// pelo audio).
 //
 // v1: envia o VIDEO ORIGINAL para o Gemini (sem extrair/recodificar a
 // trilha de audio localmente antes). O Gemini processa video nativamente
@@ -1993,6 +1999,107 @@ async function transcreverDepoimentosIA(documentos, apiKey, modelo, aoProgredir)
     : "";
 
   return { texto };
+}
+
+// ---- Transcrever Depoimentos via OpenAI (Whisper + reformatação por chat) ----
+//
+// A OpenAI não tem um modelo multimodal de vídeo/áudio com "generate
+// content" como o Gemini (que recebe o vídeo inteiro e já devolve a
+// transcrição formatada, numa única chamada). Aqui o caminho é em duas
+// etapas:
+//   1. POST /v1/audio/transcriptions (Whisper) devolve o texto cru com
+//      timestamps POR SEGMENTO, mas SEM identificação de interlocutor -
+//      Whisper só faz reconhecimento de fala, não entende "quem é quem".
+//   2. chamarOpenAIAPI (a mesma função usada em "Analisar com IA") reformata
+//      esse texto cru seguindo o mesmo prompt de transcrição usado no
+//      Gemini, tentando inferir os interlocutores PELO CONTEXTO da
+//      conversa (não pelo áudio) - tende a ser bem menos preciso que o
+//      Gemini nisso, e essa limitação é avisada na própria UI, não
+//      escondida.
+//
+// Limite duro da API de transcrição da OpenAI: 25 MB por arquivo, sem
+// upload incremental (ao contrário do Gemini File API, que aceita uploads
+// bem maiores via protocolo resumable). Na prática isso invalida a maioria
+// das gravações de audiência reais - detectado e avisado ANTES de gastar
+// uma chamada, com mensagem clara sugerindo o Gemini para esses casos.
+const LIMITE_BYTES_TRANSCRICAO_OPENAI = 25 * 1024 * 1024;
+
+async function transcreverAudioOpenAI(apiKey, bytes, mimetype, nomeExibicao) {
+  if (bytes.byteLength > LIMITE_BYTES_TRANSCRICAO_OPENAI) {
+    const tamanhoMB = (bytes.byteLength / 1024 / 1024).toFixed(1);
+    throw new Error(
+      `"${nomeExibicao}" tem ${tamanhoMB} MB - a API de transcrição da OpenAI só aceita arquivos de até 25 MB. ` +
+        `Use o Gemini para gravações deste tamanho (opção "Transcrever Depoimentos" nas Configurações).`
+    );
+  }
+
+  const formData = new FormData();
+  formData.append("file", new Blob([bytes], { type: mimetype }), nomeExibicao);
+  formData.append("model", "whisper-1");
+  formData.append("response_format", "verbose_json");
+
+  const resposta = await fetchComDiagnostico(
+    "https://api.openai.com/v1/audio/transcriptions",
+    { method: "POST", headers: { authorization: `Bearer ${apiKey}` }, body: formData },
+    "API da OpenAI (transcrição)"
+  );
+
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) {
+    throw new Error(
+      (dados && dados.error && dados.error.message) || `Erro HTTP ${resposta.status} na API de transcrição da OpenAI.`
+    );
+  }
+  return dados;
+}
+
+// Whisper devolve "segments" com start/end em segundos (float) - formata
+// como "[MM:SS] texto" para dar ao passo de reformatação (e ao usuário,
+// caso a reformatação falhe) uma referência de tempo legível.
+function formatarSegmentosOpenAI(dadosTranscricao) {
+  const segmentos = dadosTranscricao.segments || [];
+  if (segmentos.length === 0) return dadosTranscricao.text || "";
+  const formatarTempo = (segundos) => {
+    const m = String(Math.floor(segundos / 60)).padStart(2, "0");
+    const s = String(Math.floor(segundos % 60)).padStart(2, "0");
+    return `${m}:${s}`;
+  };
+  return segmentos.map((seg) => `[${formatarTempo(seg.start)}] ${(seg.text || "").trim()}`).join("\n");
+}
+
+async function transcreverDepoimentosOpenAI(documentos, apiKey, aoProgredir) {
+  if (!apiKey) {
+    throw new Error("Nenhuma chave de API da OpenAI configurada. Configure-a nas configurações da extensão.");
+  }
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const blocos = [];
+  for (const doc of documentos) {
+    notificar(`Baixando "${doc.nome}"...`);
+    const bytes = await baixarBytesVideo(doc);
+    const mimetypeCompleto = mimetypeVideoCompleto(doc.mimetype);
+    notificar(`Transcrevendo "${doc.nome}" com a OpenAI (Whisper)...`);
+    const dadosTranscricao = await transcreverAudioOpenAI(apiKey, bytes, mimetypeCompleto, doc.nome);
+    blocos.push({ nome: doc.nome, textoCru: formatarSegmentosOpenAI(dadosTranscricao) });
+  }
+
+  const textoCruCompleto =
+    blocos.length > 1
+      ? blocos.map((bloco) => `--- ${bloco.nome} ---\n${bloco.textoCru}`).join("\n\n")
+      : blocos[0].textoCru;
+
+  notificar("Formatando a transcrição com a IA...");
+  const promptFormatacao =
+    `${PROMPT_TRANSCRICAO_AUDIENCIA}\n\nAbaixo está a transcrição bruta (com timestamps aproximados em ` +
+    `minutos:segundos), gerada por reconhecimento de fala automático, SEM identificação de interlocutores. ` +
+    `Reorganize seguindo as instruções acima, tentando identificar quem fala a partir do contexto da conversa ` +
+    `(ex.: "Juiz(a)", "Testemunha", "Advogado(a) do autor"); quando não for possível determinar quem fala, ` +
+    `mantenha um rótulo genérico em vez de inventar um nome ou cargo:\n\n${textoCruCompleto}`;
+
+  const resultado = await chamarOpenAIAPI(apiKey, promptFormatacao, modeloPadrao("openai"));
+  return { texto: resultado.texto };
 }
 
 // Estimativa de custo a partir de um texto JA' PRONTO (documentos +
@@ -3917,6 +4024,7 @@ async function exportarRelatorioPanoramico(aoProgredir) {
   if (!abaAtual || !abaAtual.url) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
+  definirTribunalPelaUrl(abaAtual.url);
 
   notificar(`Extraindo processos sem movimentação há mais de ${DIAS_PANORAMA_SEM_MOVIMENTACAO} dias (todas as varas)...`);
   const semMov = await abrirAbaEExtrairTabelaRelatorio(
@@ -6820,6 +6928,7 @@ async function exportarRelatorioGerencialUnidade(
   if (!abaAtual || !abaAtual.url) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
+  definirTribunalPelaUrl(abaAtual.url);
 
   const blocoVazio = () => ({ total: null, urgentes: null, naoUrgentes: null, mais90Dias: null, erros: [] });
 
@@ -7944,6 +8053,7 @@ async function exportarComparacaoUnidades(unidades, aoProgredir) {
   if (!abaAtual || !abaAtual.url) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
+  definirTribunalPelaUrl(abaAtual.url);
 
   const resumos = [];
   for (let i = 0; i < unidades.length; i++) {
@@ -7990,6 +8100,7 @@ async function exportarRelatorioUnidadeAtual(opcoes, aoProgredir, separarPorComp
   if (!abaAtual || !abaAtual.id || !abaAtual.url) {
     throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
   }
+  definirTribunalPelaUrl(abaAtual.url);
 
   // So' para dar um nome ao PDF/capa - nunca usado para filtrar nenhuma
   // consulta (essas seguem o que a própria tela do eproc já aplica
@@ -8416,14 +8527,40 @@ const PDF_LOCALIZADORES_TAMANHO_FONTE = 9;
 const PDF_LOCALIZADORES_ALTURA_LINHA = PDF_LOCALIZADORES_TAMANHO_FONTE * 1.35;
 
 // Altura reservada no topo de cada pagina para o cabecalho institucional
-// (barra colorida + "TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ" + "Sistema
-// eProc" + linha separadora) e no rodape para o numero da pagina - o
-// conteudo de cada pagina (titulo, tabela) comeca/termina respeitando
-// essas faixas, em vez de usar a altura da folha inteira.
+// (barra colorida + nome do tribunal + "Sistema eProc" + linha
+// separadora) e no rodape para o numero da pagina - o conteudo de cada
+// pagina (titulo, tabela) comeca/termina respeitando essas faixas, em vez
+// de usar a altura da folha inteira.
 const PDF_ALTURA_CABECALHO_INSTITUCIONAL = 40;
 const PDF_ALTURA_RODAPE = 22;
 
-// Desenha o cabecalho institucional (barra + TJPR + eProc + linha) no
+// A extensao roda em mais de um tribunal (TJPR e, a partir daqui, TRF4 -
+// ver host_permissions/content_scripts no manifest.json), e o cabecalho
+// institucional dos PDFs precisa nomear o tribunal CERTO em vez de
+// cravar "TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ" pra todo mundo (seria
+// simplesmente errado nos relatórios gerados a partir do eproc do TRF4).
+// "tribunalAtualPdf" e' preenchido uma vez por operacao de exportacao,
+// logo apos descobrir a aba/URL do eproc em uso (ver
+// "definirTribunalPelaUrl" mais abaixo, chamada em cada
+// "exportarXxx"/"listarXxx" que gera PDF) - nao da' pra descobrir isso
+// direto de dentro de "desenharCabecalhoInstitucional" porque a essa
+// altura so' se tem os dados ja' extraidos, nao a URL de origem.
+const TRIBUNAIS_CONHECIDOS = {
+  tjpr: { nomeCompleto: "TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ" },
+  trf4: { nomeCompleto: "TRIBUNAL REGIONAL FEDERAL DA 4ª REGIÃO" },
+};
+let tribunalAtualPdf = TRIBUNAIS_CONHECIDOS.tjpr;
+
+function definirTribunalPelaUrl(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    tribunalAtualPdf = host.endsWith("trf4.jus.br") ? TRIBUNAIS_CONHECIDOS.trf4 : TRIBUNAIS_CONHECIDOS.tjpr;
+  } catch (e) {
+    tribunalAtualPdf = TRIBUNAIS_CONHECIDOS.tjpr;
+  }
+}
+
+// Desenha o cabecalho institucional (barra + tribunal + eProc + linha) no
 // topo de uma pagina - reaproveitado em toda pagina de todo PDF gerado
 // pela extensao (tabelas de Localizadores/Processos/Remessas e o resumo
 // do Relatório Gerencial da Unidade), para dar uma identidade visual
@@ -8439,7 +8576,7 @@ function desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largu
     color: COR_PRIMARIA,
   });
 
-  pagina.drawText("TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ", {
+  pagina.drawText(tribunalAtualPdf.nomeCompleto, {
     x: margem,
     y: alturaPagina - 20,
     size: 10,
@@ -9022,6 +9159,7 @@ async function exportarProcessosDoLocalizador(nomeLocalizador, urlProcessos, for
   if (!urlProcessos) {
     throw new Error("URL do localizador não informada.");
   }
+  definirTribunalPelaUrl(urlProcessos);
 
   notificar(`Abrindo a lista de processos de "${nomeLocalizador}"...`);
   const { itens, erro } = await abrirAbaEColetarProcessosDoLocalizador(urlProcessos);
@@ -9258,6 +9396,7 @@ async function exportarDocumentosProcessosLocalizador(nomeLocalizador, urlProces
   if (!urlProcessos) {
     throw new Error("URL do localizador não informada.");
   }
+  definirTribunalPelaUrl(urlProcessos);
 
   notificar(`Abrindo a lista de processos de "${nomeLocalizador}"...`);
   const { itens, erro: erroColeta } = await abrirAbaEColetarProcessosDoLocalizador(urlProcessos);
@@ -10196,12 +10335,17 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
 
   if (mensagem && mensagem.tipo === "TRANSCREVER_IA") {
     // Mesmo padrao das demais operacoes em segundo plano que podem
-    // demorar (download + upload de video + espera do Gemini processar):
-    // confirma o recebimento na hora e avisa o resultado final por uma
-    // mensagem separada.
-    transcreverDepoimentosIA(mensagem.documentos, mensagem.apiKey, mensagem.modelo, (texto) => {
+    // demorar (download + upload de video + espera do Gemini/OpenAI
+    // processar): confirma o recebimento na hora e avisa o resultado
+    // final por uma mensagem separada.
+    const notificarProgresso = (texto) => {
       chrome.runtime.sendMessage({ tipo: "PROGRESSO_TRANSCRICAO_IA", texto }).catch(() => {});
-    })
+    };
+    const promessaTranscricao =
+      mensagem.provedor === "openai"
+        ? transcreverDepoimentosOpenAI(mensagem.documentos, mensagem.apiKey, notificarProgresso)
+        : transcreverDepoimentosIA(mensagem.documentos, mensagem.apiKey, mensagem.modelo, notificarProgresso);
+    promessaTranscricao
       .then((resultado) => {
         chrome.runtime.sendMessage({ tipo: "TRANSCRICAO_IA_PRONTA", ok: true, ...resultado }).catch(() => {});
       })

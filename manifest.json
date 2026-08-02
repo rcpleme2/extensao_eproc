@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Extensão Auxiliar eProc",
-  "version": "8.2.0",
+  "version": "8.3.0",
   "description": "Extensão para auxiliar no uso e extração de relatórios do eProc",
   "permissions": ["downloads", "activeTab", "scripting", "tabs", "sidePanel", "storage", "alarms"],
   "host_permissions": [
     "https://eproc1g.tjpr.jus.br/eproc/*",
     "https://eproc1g.tre.tjpr.jus.br/eproc/*",
+    "https://*.trf4.jus.br/eproc/*",
     "https://api.anthropic.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://api.openai.com/*"
@@ -34,7 +35,8 @@
     {
       "matches": [
         "https://eproc1g.tjpr.jus.br/eproc/controlador.php*",
-        "https://eproc1g.tre.tjpr.jus.br/eproc/controlador.php*"
+        "https://eproc1g.tre.tjpr.jus.br/eproc/controlador.php*",
+        "https://*.trf4.jus.br/eproc/controlador.php*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"
@@ -43,7 +45,7 @@
   "web_accessible_resources": [
     {
       "resources": ["libs/pdf.worker.min.js"],
-      "matches": ["https://eproc1g.tjpr.jus.br/*", "https://eproc1g.tre.tjpr.jus.br/*"]
+      "matches": ["https://eproc1g.tjpr.jus.br/*", "https://eproc1g.tre.tjpr.jus.br/*", "https://*.trf4.jus.br/*"]
     }
   ]
 }

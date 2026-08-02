@@ -9,7 +9,7 @@
   <header class="cabecalho-app">
     <div class="cabecalho-titulos">
       <h1>Extensão Auxiliar eProc</h1>
-      <span class="cabecalho-sub">TJPR · Sistema eProc</span>
+      <span class="cabecalho-sub">TJPR · TRF4 · Sistema eProc</span>
     </div>
     <button
       id="btn-abrir-configuracoes"
@@ -708,6 +708,24 @@
           <select id="select-config-modelo-openai"></select>
         </label>
         <button type="button" id="btn-abrir-gerenciar-prompts" class="btn-secundario">Gerenciar prompts de análise</button>
+      </div>
+      <div class="opcoes">
+        <p class="legenda-opcoes">Transcrever Depoimentos</p>
+        <label class="opcao">
+          <input type="radio" name="config-provedor-transcricao-ia" id="radio-config-transcricao-gemini" value="gemini" />
+          Usar Gemini (vídeo completo, sem limite prático de tamanho)
+        </label>
+        <label class="opcao">
+          <input type="radio" name="config-provedor-transcricao-ia" id="radio-config-transcricao-openai" value="openai" />
+          Usar ChatGPT/Whisper (só áudio, até 25 MB por arquivo)
+        </label>
+        <span class="legenda-opcoes">
+          O Gemini processa o vídeo inteiro numa única chamada e identifica quem fala pelo próprio áudio.
+          A OpenAI transcreve em duas etapas (Whisper + reformatação por chat) e tem um limite rígido de
+          25 MB por arquivo — inviável para a maioria das gravações de audiência — além de identificar
+          os interlocutores com menos precisão, por depender só do contexto do texto, não do áudio.
+          Usa as chaves de API já configuradas acima.
+        </span>
       </div>
       <div class="modal-botoes">
         <button id="modal-config-fechar" type="button" class="btn-secundario">Fechar</button>

@@ -1,7 +1,7 @@
 # Política de Privacidade — Extensão Auxiliar eProc
 
-**Extensão:** Extensão Auxiliar eProc (versão 6.4.0)
-**Última atualização:** 22 de julho de 2026
+**Extensão:** Extensão Auxiliar eProc (versão 8.3.0)
+**Última atualização:** 2 de agosto de 2026
 **Contato do desenvolvedor:** rcpl@tjpr.jus.br
 
 > Versão web (para colar no Chrome Web Store):
@@ -58,7 +58,9 @@ de IA, e vai diretamente ao provedor que você escolher:
   texto e **transcrição de áudio/vídeo** de audiências. Política de privacidade:
   https://policies.google.com/privacy
 - **OpenAI (ChatGPT)** — `api.openai.com` — para análise de texto de
-  documentos. Política de privacidade: https://openai.com/policies/privacy-policy
+  documentos e, se você escolher esse provedor em "Transcrever Depoimentos",
+  **transcrição de áudio** de audiências. Política de privacidade:
+  https://openai.com/policies/privacy-policy
 
 Esses envios usam **as suas próprias chaves de API** e ficam sujeitos aos termos
 e políticas de cada provedor. O desenvolvedor não tem acesso a esse conteúdo nem
@@ -72,9 +74,10 @@ anonimização não é garantida como completa** e pode não remover todos os da
 sensíveis.
 
 **Importante:** a transcrição de **áudio e vídeo** de audiências é enviada ao
-Google Gemini **sem qualquer anonimização**. Avalie com cautela antes de enviar
-conteúdo sigiloso ou sob segredo de justiça. O uso da extensão é de
-responsabilidade do usuário quanto ao dever de sigilo processual.
+provedor escolhido (Google Gemini ou OpenAI/Whisper) **sem qualquer
+anonimização**. Avalie com cautela antes de enviar conteúdo sigiloso ou sob
+segredo de justiça. O uso da extensão é de responsabilidade do usuário quanto
+ao dever de sigilo processual.
 
 ## 6. O que a extensão NÃO faz
 
@@ -95,7 +98,7 @@ responsabilidade do usuário quanto ao dever de sigilo processual.
 | `downloads` | Exportar relatórios e documentos para o seu computador. |
 | `sidePanel` | Exibir a interface da extensão no painel lateral. |
 | `alarms` | Verificar periodicamente o resultado de análises enviadas em lote à Anthropic. |
-| Acesso a `eproc1g.tjpr.jus.br` e `eproc1g.tre.tjpr.jus.br` | Ler as páginas do eProc na sua sessão autenticada. |
+| Acesso a `eproc1g.tjpr.jus.br`, `eproc1g.tre.tjpr.jus.br` e `*.trf4.jus.br` | Ler as páginas do eProc na sua sessão autenticada. |
 | Acesso a `api.anthropic.com`, `generativelanguage.googleapis.com` e `api.openai.com` | Enviar conteúdo às APIs de IA que você escolher, com as suas chaves. |
 
 ## 8. Segurança

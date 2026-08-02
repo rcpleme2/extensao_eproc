@@ -6,9 +6,10 @@
 > pasta `/docs`).
 
 Extensão para Chrome/Edge com funcionalidades para o sistema **eproc** do
-TJPR, restrita aos endereços `https://eproc1g.tjpr.jus.br/eproc/` e
-`https://eproc1g.tre.tjpr.jus.br/eproc/` (únicos hosts com permissão no
-`manifest.json` — a extensão não roda em nenhum outro domínio),
+TJPR e do TRF4, restrita aos endereços `https://eproc1g.tjpr.jus.br/eproc/`,
+`https://eproc1g.tre.tjpr.jus.br/eproc/` e `https://*.trf4.jus.br/eproc/`
+(únicos hosts com permissão no `manifest.json` — a extensão não roda em
+nenhum outro domínio),
 organizadas em cartões colapsáveis no painel lateral, **um cartão por
 função** (sem "menu dentro de menu"): **Corregedoria** (exclusivo desse
 perfil, com o Relatório para Correição de uma unidade escolhida),
@@ -476,7 +477,8 @@ Anthropic (Claude) · Modelo: … · Chave ✓"). Se faltar a chave, aparece um
 aviso com o botão **"Configurar chave de API"**, que abre direto as
 Configurações — assim não é preciso descobrir só depois, no erro, que a
 chave não estava configurada. O mesmo indicador existe no cartão
-"Transcrever Depoimentos" (para a chave do Gemini).
+"Transcrever Depoimentos" (para a chave do provedor escolhido ali — Gemini
+ou ChatGPT/Whisper).
 
 O fluxo é organizado em **três passos numerados** (1. Detectar
 documentos → 2. Escolher o prompt → 3. Analisar), e o maquinário de lote
@@ -670,11 +672,30 @@ IA, usando o seguinte prompt fixo:
 > trecho inaudível colocar [inaudível]. Use timestamps e se possível
 > identifique os interlocutores."
 
-**Exclusiva do Gemini** — a Anthropic (Claude) não tem capacidade de processar áudio/
-vídeo (só texto, imagem e PDF), então essa ferramenta sempre usa a chave e
-o modelo Gemini configurados nas configurações, independente do provedor
-escolhido em "Analisar com IA" (mesmo padrão já usado na fila em lote,
-exclusiva da Anthropic (Claude), só que ao contrário).
+**Gemini ou ChatGPT (OpenAI) — nunca Claude** — a Anthropic (Claude) não tem
+capacidade de processar áudio/vídeo (só texto, imagem e PDF), então essa
+ferramenta usa um provedor próprio (`config.provedorTranscricaoIA`),
+independente do provedor escolhido em "Analisar com IA" (mesmo padrão já
+usado na fila em lote, exclusiva da Anthropic (Claude), só que ao
+contrário). Escolha entre Gemini e ChatGPT/Whisper na seção
+"Transcrever Depoimentos" das configurações — usa as mesmas chaves de API já
+cadastradas em "Análise com IA".
+
+- **Gemini**: recebe o vídeo inteiro numa única chamada multimodal
+  (`generateContent`) e identifica quem fala a partir do próprio áudio —
+  sem limite prático de tamanho de arquivo.
+- **ChatGPT/Whisper**: processo em duas etapas. Primeiro o áudio é enviado
+  para `POST /v1/audio/transcriptions` (Whisper), que devolve o texto cru
+  com timestamps por segmento, mas **sem identificar quem fala** (Whisper só
+  reconhece fala, não distingue interlocutores). Em seguida, uma segunda
+  chamada de chat (reaproveitando a mesma função usada em "Analisar com
+  IA") reformata esse texto seguindo o mesmo prompt de transcrição,
+  tentando inferir os interlocutores **pelo contexto da conversa** — tende
+  a ser bem menos preciso que o Gemini nisso. A API de transcrição da
+  OpenAI tem um limite rígido de **25 MB por arquivo**, sem upload
+  incremental (diferente do File API do Gemini) — inviável para a maioria
+  das gravações de audiência reais; a extensão detecta isso antes de gastar
+  uma chamada e sugere usar o Gemini nesses casos.
 
 Fluxo:
 
@@ -685,10 +706,8 @@ Fluxo:
    todos são enviados juntos numa única transcrição** (útil para vários
    atos/vídeos do mesmo processo), com um pedido extra automático para a
    IA separar claramente onde a transcrição de cada arquivo começa.
-3. Clique em **"Transcrever selecionado(s)"**. A extensão baixa cada vídeo,
-   envia ao Gemini (upload de arquivo, não vai embutido na chamada — vídeos
-   de audiência normalmente passam do limite de request inline) e aguarda o
-   Gemini processá-lo antes de pedir a transcrição de fato. Pode demorar
+3. Clique em **"Transcrever selecionado(s)"**. A extensão baixa cada vídeo e
+   envia ao provedor escolhido (Gemini ou ChatGPT/Whisper). Pode demorar
    bastante para gravações longas.
 4. A transcrição aparece numa caixa de texto no próprio painel, com um
    botão **"Copiar"** — não é baixada como arquivo automaticamente.
@@ -708,7 +727,7 @@ Fluxo:
   validado.
 - **Sem anonimização**: diferente do texto de documentos (que pode ser
   anonimizado antes do envio), não há como redigir automaticamente falas de
-  um áudio — a gravação vai ao Google exatamente como está.
+  um áudio — a gravação vai ao Google ou à OpenAI exatamente como está.
 - Nenhum arquivo é salvo em Downloads automaticamente; a transcrição fica
   só na caixa de texto do painel (copie antes de fechar/trocar de
   processo).
@@ -1701,9 +1720,9 @@ esquema de versão `MAIOR.MENOR.PATCH`:
   aba, salvando um `.html` autocontido só com o conteúdo real da
   certidão/ato. Isso pode fazer o download desses documentos específicos
   demorar um pouco mais (a aba precisa carregar de verdade).
-- A extensão é restrita aos hosts `eproc1g.tjpr.jus.br` e
-  `eproc1g.tre.tjpr.jus.br` (ver `manifest.json`) — não roda em nenhum
-  outro domínio.
+- A extensão é restrita aos hosts `eproc1g.tjpr.jus.br`,
+  `eproc1g.tre.tjpr.jus.br` e `*.trf4.jus.br` (ver `manifest.json`) — não
+  roda em nenhum outro domínio.
 - Se um download falhar (ex.: link expirado), o erro aparece no painel ao
   final do processo; os demais downloads continuam normalmente.
 - Textos extraídos de páginas do eproc às vezes trazem um caractere de

@@ -657,6 +657,10 @@ const CONFIG_PADRAO = {
   modeloClaude: MODELOS_IA_PAINEL.claude[0].id,
   modeloGemini: MODELOS_IA_PAINEL.gemini[0].id,
   modeloOpenAI: MODELOS_IA_PAINEL.openai[0].id,
+  // Independente do provedorIA de "Analisar com IA" (que inclui Claude,
+  // incapaz de processar áudio/vídeo) - "Transcrever Depoimentos" só
+  // aceita gemini ou openai.
+  provedorTranscricaoIA: "gemini",
 };
 
 function obterConfiguracoes() {
@@ -691,7 +695,7 @@ function aplicarStatusSetupIA(config, provedor, areaTexto, areaBotao) {
 function atualizarStatusSetupIA() {
   obterConfiguracoes().then((config) => {
     aplicarStatusSetupIA(config, config.provedorIA, areaSetupIA, areaSetupIABotao);
-    aplicarStatusSetupIA(config, "gemini", areaSetupTranscricaoIA, areaSetupTranscricaoIABotao);
+    aplicarStatusSetupIA(config, config.provedorTranscricaoIA, areaSetupTranscricaoIA, areaSetupTranscricaoIABotao);
   });
 }
 
@@ -713,6 +717,8 @@ const inputConfigChaveOpenAI = document.getElementById("config-chave-openai");
 const selectConfigModeloClaude = document.getElementById("select-config-modelo-claude");
 const selectConfigModeloGemini = document.getElementById("select-config-modelo-gemini");
 const selectConfigModeloOpenAI = document.getElementById("select-config-modelo-openai");
+const radioConfigTranscricaoGemini = document.getElementById("radio-config-transcricao-gemini");
+const radioConfigTranscricaoOpenAI = document.getElementById("radio-config-transcricao-openai");
 
 for (const modelo of MODELOS_IA_PAINEL.claude) {
   const option = document.createElement("option");
@@ -747,7 +753,17 @@ btnAbrirConfiguracoes.addEventListener("click", async () => {
   selectConfigModeloClaude.value = config.modeloClaude || CONFIG_PADRAO.modeloClaude;
   selectConfigModeloGemini.value = config.modeloGemini || CONFIG_PADRAO.modeloGemini;
   selectConfigModeloOpenAI.value = config.modeloOpenAI || CONFIG_PADRAO.modeloOpenAI;
+  radioConfigTranscricaoGemini.checked = config.provedorTranscricaoIA !== "openai";
+  radioConfigTranscricaoOpenAI.checked = config.provedorTranscricaoIA === "openai";
   modalConfiguracoes.hidden = false;
+});
+
+radioConfigTranscricaoGemini.addEventListener("change", () => {
+  if (radioConfigTranscricaoGemini.checked) salvarConfiguracao("provedorTranscricaoIA", "gemini");
+});
+
+radioConfigTranscricaoOpenAI.addEventListener("change", () => {
+  if (radioConfigTranscricaoOpenAI.checked) salvarConfiguracao("provedorTranscricaoIA", "openai");
 });
 
 selectConfigModeloClaude.addEventListener("change", () => {
@@ -2910,7 +2926,7 @@ chrome.runtime.onMessage.addListener((mensagem) => {
   }
 });
 
-// ---- Transcrever Depoimentos (arquivos "VIDEO*" via Gemini) ----
+// ---- Transcrever Depoimentos (arquivos "VIDEO*" via Gemini ou OpenAI) ----
 
 btnTranscreverIA.addEventListener("click", async () => {
   const selecionados = checkboxesVideosTranscricaoIA()
@@ -2925,10 +2941,11 @@ btnTranscreverIA.addEventListener("click", async () => {
   }
 
   const config = await obterConfiguracoes();
-  if (!config.chaveGemini) {
+  const provedorTranscricao = config.provedorTranscricaoIA === "openai" ? "openai" : "gemini";
+  const chaveTranscricao = chaveConfiguradaDoProvedor(config, provedorTranscricao);
+  if (!chaveTranscricao) {
     areaErrosTranscricaoIA.hidden = false;
-    areaErrosTranscricaoIA.textContent =
-      'A transcrição usa a API do Gemini - configure a "Chave de API do Gemini" nas configurações.';
+    areaErrosTranscricaoIA.textContent = `A transcrição está configurada para usar ${NOMES_PROVEDOR_IA[provedorTranscricao]} - configure a chave de API correspondente nas configurações.`;
     return;
   }
 
@@ -2949,8 +2966,9 @@ btnTranscreverIA.addEventListener("click", async () => {
         href: doc.href,
         mimetype: doc.mimetype,
       })),
-      modelo: config.modeloGemini,
-      apiKey: config.chaveGemini,
+      provedor: provedorTranscricao,
+      modelo: modeloConfiguradoDoProvedor(config, provedorTranscricao),
+      apiKey: chaveTranscricao,
     });
     if (!resposta || !resposta.ok) {
       throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a transcrição.");
