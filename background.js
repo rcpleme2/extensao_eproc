@@ -7373,7 +7373,7 @@ async function exportarRelatorioGerencialUnidade(
       const resultado = await abrirAbaEColetarLocalizadores(abaAtual.url);
       localizadoresOrdenados = resultado.itens
         .filter((l) => (l.nome || "").trim() !== "?")
-        .map((l) => ({ nome: l.nome, totalProcessos: l.totalProcessos }))
+        .map((l) => ({ nome: l.nome, descricao: l.descricao, sistema: l.sistema, totalProcessos: l.totalProcessos }))
         .sort((a, b) => b.totalProcessos - a.totalProcessos || a.nome.localeCompare(b.nome, "pt-BR"));
       erroLocalizadores = resultado.erro;
     }
@@ -8175,6 +8175,9 @@ function raspaerLocalizadoresNaPagina() {
     if (celulas.length < 8) continue;
     const nome = (celulas[1].textContent || "").replace(/\s+/g, " ").trim();
     const descricao = (celulas[3].textContent || "").replace(/\s+/g, " ").trim();
+    // "Localizador Sistema": "Sim" para os localizadores padrão do eproc,
+    // "Não" para os criados/personalizados pela própria unidade.
+    const sistema = (celulas[4].textContent || "").replace(/\s+/g, " ").trim().toLowerCase() === "sim";
     const totalTexto = (celulas[6].textContent || "").replace(/\s+/g, " ").trim();
     const totalMatch = totalTexto.match(/\d+/);
     // Quando ha' pelo menos 1 processo, o numero na coluna "Total de
@@ -8186,6 +8189,7 @@ function raspaerLocalizadoresNaPagina() {
     itens.push({
       nome,
       descricao,
+      sistema,
       totalProcessos: totalMatch ? Number(totalMatch[0]) : 0,
       urlProcessos: linkProcessos ? linkProcessos.href : null,
     });
@@ -8918,12 +8922,18 @@ async function construirCapaRelatorioGerencial(
 // JUÍZES LEIGOS") para poder ficar sempre por ultimo no PDF, depois de
 // todas as demais seções e tabelas, conforme a ordem pedida para o
 // Relatório da Unidade. Cada item de "localizadores" e' um objeto
-// "{ nome, totalProcessos? }" - quando "totalProcessos" existe (Gestão da
-// Unidade (alternativo), via "Localizadores do Órgão"), a linha mostra
-// "Nome — N processo(s))" e o subtítulo de limitação não é desenhado (a
-// limitação não existe mais); quando não existe (Corregedoria, via
-// Relatório Geral), mostra só o nome e mantém o subtítulo explicando que
-// o total não está disponível nesse fluxo.
+// "{ nome, totalProcessos?, descricao?, sistema? }" - quando
+// "totalProcessos" existe (Gestão da Unidade (alternativo), via
+// "Localizadores do Órgão"), a linha mostra "Nome — N processo(s))" e o
+// subtítulo de limitação não é desenhado (a limitação não existe mais);
+// quando não existe (Corregedoria, via Relatório Geral), mostra só o nome
+// e mantém o subtítulo explicando que o total não está disponível nesse
+// fluxo. Quando "sistema" também existe (mesmo fluxo de
+// "Localizadores do Órgão", que traz a coluna "Localizador Sistema"), a
+// lista é dividida em duas seções - "Localizadores de sistema" (padrão do
+// eproc, "Sim" na coluna) e "Localizadores da unidade" (criados/
+// personalizados, "Não" na coluna) - em vez de uma lista única misturando
+// os dois tipos.
 async function construirPaginaListaLocalizadores(nomeUnidade, localizadores) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
@@ -9002,12 +9012,14 @@ async function construirPaginaListaLocalizadores(nomeUnidade, localizadores) {
   // um paragrafo unico dificil de escanear; um nome por linha e' bem
   // mais facil de ler, mesmo custando mais altura de pagina. Ordem
   // recebida do chamador (maior para menor total de processos, quando
-  // disponível, ou alfabética, quando não) - não reordena aqui.
+  // disponível, ou alfabética, quando não) - não reordena aqui, só separa
+  // por "sistema" (quando esse campo existe) preservando a ordem relativa
+  // dentro de cada grupo.
   const marcador = "-  ";
   const larguraMarcador = fonteNormal.widthOfTextAtSize(marcador, 8.5);
   const larguraTextoLocalizador = larguraUtil - larguraMarcador;
 
-  for (const item of localizadores) {
+  function desenharItemLocalizador(item) {
     const texto = temContagem ? `${item.nome} — ${item.totalProcessos} processo(s)` : item.nome;
     const linhasNome = quebrarLinhas(sanitizarTextoPdf(texto), fonteNormal, 8.5, larguraTextoLocalizador);
     linhasNome.forEach((linhaTexto, indice) => {
@@ -9026,6 +9038,61 @@ async function construirPaginaListaLocalizadores(nomeUnidade, localizadores) {
       });
       y -= alturaLinha;
     });
+
+    // Descrição do localizador, quando existe: linha própria, recuada
+    // junto do texto (sem marcador), fonte um pouco menor e em itálico
+    // para distingui-la visualmente do nome.
+    const descricao = (item.descricao || "").trim();
+    if (descricao) {
+      const linhasDescricao = quebrarLinhas(sanitizarTextoPdf(descricao), fonteNormal, 7.5, larguraTextoLocalizador);
+      for (const linhaDescricao of linhasDescricao) {
+        if (y - 10 < PDF_ALTURA_RODAPE + margem) {
+          ({ pagina, y } = novaPagina());
+        }
+        pagina.drawText(linhaDescricao, {
+          x: margem + larguraMarcador,
+          y,
+          size: 7.5,
+          font: fonteNormal,
+          color: COR_CINZA_TEXTO,
+        });
+        y -= 10;
+      }
+    }
+  }
+
+  function desenharSubtituloGrupo(texto) {
+    if (y - 18 < PDF_ALTURA_RODAPE + margem) {
+      ({ pagina, y } = novaPagina());
+    }
+    y -= 6;
+    if (y - 14 < PDF_ALTURA_RODAPE + margem) {
+      ({ pagina, y } = novaPagina());
+    }
+    pagina.drawText(texto, { x: margem, y, size: 10, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+    y -= 14;
+  }
+
+  // A separação "de sistema" x "da unidade" só é possível quando o campo
+  // "sistema" está presente (fluxo "Localizadores do Órgão") - o
+  // Relatório Geral (Corregedoria) não tem essa coluna, então nesse caso
+  // segue como lista única, igual antes.
+  const temSeparacaoPorSistema = localizadores.length > 0 && localizadores[0].sistema != null;
+
+  if (temSeparacaoPorSistema) {
+    const doSistema = localizadores.filter((item) => item.sistema);
+    const daUnidade = localizadores.filter((item) => !item.sistema);
+
+    if (doSistema.length > 0) {
+      desenharSubtituloGrupo(`Localizadores de sistema (${doSistema.length})`);
+      doSistema.forEach(desenharItemLocalizador);
+    }
+    if (daUnidade.length > 0) {
+      desenharSubtituloGrupo(`Localizadores da unidade (${daUnidade.length})`);
+      daUnidade.forEach(desenharItemLocalizador);
+    }
+  } else {
+    localizadores.forEach(desenharItemLocalizador);
   }
 
   desenharRodapePaginas(pdf, fonteNormal, largura, margem);
