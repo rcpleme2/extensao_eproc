@@ -1573,6 +1573,64 @@ oculta (ex.: o rótulo do menu mudou), a extensão avisa exatamente qual
 link procurou — nesse caso, pode ser preciso regravar o script de acesso
 para confirmar o caminho atual do menu.
 
+## Análise de Automações (ATP)
+
+Cartão próprio no painel (ícone 🧩): compara as **Regras de Automação**
+da unidade atualmente habilitada (mesma tela "Automatizar Tramitação
+Processual" da seção anterior) **entre si**, para encontrar conflitos que
+passam despercebidos ao ler a tabela original regra por regra. A lógica de
+extração/comparação é uma adaptação do motor de análise do projeto de
+código aberto ["Análise de ATP eProc"](https://github.com/oadrianocardoso/analise-atp-eproc)
+(de Adriano Cardoso), portado para rodar como parte desta extensão em vez
+de um userscript separado (Tampermonkey).
+
+Clique em **"Analisar conflitos entre regras"**: a extensão abre a tela de
+regras numa aba oculta, extrai de cada regra ativa uma expressão lógica
+estruturada (E/OU) do **Localizador REMOVER**, do **Tipo de Controle /
+Critério**, do **Localizador INCLUIR / Ação** (incluindo as ações
+programadas, ex. "Lançar Evento Automatizado") e dos **Outros Critérios**,
+e então compara toda regra contra toda outra regra ativa, procurando por:
+
+- **Colisão Total**: duas regras idênticas em tudo (Prioridade, REMOVER,
+  Tipo de Controle/Critério, INCLUIR/Ação e Outros Critérios) — uma delas é
+  pura duplicata.
+- **Colisão Parcial**: idênticas em tudo, exceto a Prioridade — redundante,
+  já que só a que executa primeiro chega a valer.
+- **Sobreposição / Possível Sobreposição**: mesmo REMOVER e mesmo Tipo de
+  Controle/Critério, com uma regra mais abrangente (ou idêntica) em
+  "Outros Critérios" capturando os processos de outra antes dela rodar.
+- **Perda de Objeto / Perda de Objeto Condicional**: uma regra anterior
+  remove o processo do(s) localizador(es) informado(s) antes que a regra
+  seguinte consiga capturá-lo (a variante "condicional" cobre o caso em
+  que a regra seguinte só dispara com uma combinação AND de localizadores,
+  e a regra anterior remove só parte dessa combinação).
+- **Contradição**: a própria regra tem critérios mutuamente exclusivos no
+  mesmo "Outros Critérios" (ex.: mesmo Dado Complementar marcado como dois
+  estados incompatíveis ao mesmo tempo), tornando-a logicamente impossível
+  de disparar.
+- **Quebra de Fluxo**: a regra executa uma Ação Programada, mas o
+  Localizador INCLUIR é igual ao REMOVER — o processo pode voltar a cair
+  na mesma regra no ciclo seguinte.
+
+("Looping Potencial" — duas regras se retroalimentando — existe no motor
+de análise, mas fica desligado por padrão, igual na ferramenta de
+referência: é o tipo mais sujeito a falso positivo, já que alternar entre
+dois localizadores pode ser parte legítima do fluxo normal do processo.)
+
+Cada conflito encontrado aparece na lista do painel com a regra (ou par de
+regras) envolvida, o tipo, o motivo técnico e uma sugestão de correção.
+Com pelo menos um conflito, o botão **"Baixar relatório de colisões
+(TXT)"** gera um arquivo com o resumo por tipo, o detalhamento de cada
+caso e um mini-guia de referência dos tipos de conflito no final — pronto
+para anexar em chamado ou revisar com a equipe responsável pelas regras.
+
+**Limitações**: assim como a ferramenta de referência, a análise avalia
+só as regras **ativas** da unidade atualmente habilitada (perfil
+MAGISTRADO/GESTÃO DA UNIDADE) — não é possível analisar regras de outra
+unidade sem trocar de perfil primeiro, porque a prioridade de execução só
+é informada pelo eproc para a unidade logada. A extensão **não altera
+nenhuma regra**: é só leitura e análise.
+
 ## Localizadores do Órgão (coleta reaproveitada)
 
 A tela **"Localizadores do Órgão"** do eproc (`acao=localizador_orgao_listar`)

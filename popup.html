@@ -594,6 +594,40 @@
     </div>
   </details>
 
+  <details class="card" id="card-analise-atp">
+    <summary class="card-titulo">
+      <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
+      <span class="card-icone" aria-hidden="true">🧩</span>
+      <span class="card-rotulo">Análise de Automações (ATP)</span>
+    </summary>
+    <div class="card-corpo">
+        <div id="area-status-atp" class="status">
+          Analisa as Regras de Automação (Automatizar Tramitação Processual) da unidade
+          atualmente habilitada e destaca possíveis conflitos entre elas: colisões,
+          sobreposições, perda de objeto, contradições e quebras de fluxo.
+        </div>
+
+        <div class="botoes">
+          <button id="btn-analisar-atp" class="btn">Analisar conflitos entre regras</button>
+        </div>
+
+        <div id="area-progresso-atp" class="progresso-spinner" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="texto-progresso-atp"></span>
+        </div>
+
+        <div id="area-resumo-atp" class="status" hidden></div>
+
+        <ul id="lista-conflitos-atp" class="lista-ia-simples" hidden></ul>
+
+        <div class="botoes" id="area-acoes-resultado-atp" hidden>
+          <button id="btn-baixar-relatorio-atp" class="btn-secundario">Baixar relatório de colisões (TXT)</button>
+        </div>
+
+        <div id="area-erros-atp" class="erros" hidden></div>
+    </div>
+  </details>
+
   <details class="card" id="card-localizadores">
     <summary class="card-titulo">
       <span class="card-alca" draggable="true" title="Arraste para reordenar" aria-hidden="true">⠿</span>
