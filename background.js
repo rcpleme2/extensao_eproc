@@ -6895,6 +6895,13 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   audienciasDetalhado: false,
   regrasAutomacao: true,
   localizadores: true,
+  // Não é um "item a incluir" como os demais (não soma na checagem de "ao
+  // menos um item selecionado" logo abaixo) - é um modo de exibição: com
+  // "true", as seções de lista de processos (Processos Ativos, Suspensos,
+  // Mandados, Parados, Remessas, Audiências) entram só com os totais já
+  // presentes no resumo/capa, sem as tabelas linha a linha (que costumam
+  // ser a maior parte das páginas em unidades com muitos processos).
+  apenasResumo: false,
 };
 
 // "valorUnidade" pode ser nulo de proposito: quando vem do cartão
@@ -7329,6 +7336,14 @@ async function exportarRelatorioGerencialUnidade(
   // (perfil MAGISTRADO/GESTÃO DA UNIDADE, valorUnidade nulo), esse filtro
   // não aparece na tela - a extensão nem tenta selecioná-lo.
   const regrasAutomacao = { regras: [], erros: [] };
+  // Análise de Automações (ATP): subitem vinculado a "Regras de
+  // automação" - com o mesmo item marcado, o relatório também compara as
+  // regras entre si e lista os conflitos encontrados (ver
+  // "atpAnalisarConflitos"), reaproveitando a MESMA extração acima (cada
+  // regra já vem com um campo "atp" estruturado, ver "atp:" em
+  // "listarRegrasAutomacaoAtivas" em content.js) - sem precisar de uma
+  // segunda navegação até a tela de regras.
+  const analiseAtp = { registros: [], erro: null };
   if (opcoesFinais.regrasAutomacao) {
     notificar("Consultando regras de automação ativas...");
     const r = await abrirAbaEListarRegrasAutomacao(abaAtual.url, valorUnidade ? nomeUnidade : null);
@@ -7338,6 +7353,15 @@ async function exportarRelatorioGerencialUnidade(
       regrasAutomacao.erros.push(
         `${r.totalRegrasNaPagina} regra(s) encontrada(s) na tela, mas nenhuma está com o switch "Ativa" ligado.`
       );
+    }
+
+    if (regrasAutomacao.regras.length > 0) {
+      notificar("Analisando conflitos entre as regras de automação...");
+      const regrasDetalhadas = regrasAutomacao.regras.map((regra) => regra.atp).filter(Boolean);
+      if (regrasDetalhadas.length > 0) {
+        const conflictsByRule = atpAnalisarConflitos(regrasDetalhadas);
+        analiseAtp.registros = atpGerarRegistrosColisoes(conflictsByRule);
+      }
     }
   }
 
@@ -7752,79 +7776,88 @@ async function exportarRelatorioGerencialUnidade(
   // cada competência com pelo menos 1 processo vira sua PRÓPRIA subseção
   // (tabela com título indicando a competência) - da competência com mais
   // processos para a com menos; o link do resumo aponta para a primeira.
-  if (opcoesFinais.processosAtivos) {
-    if (separarPorCompetencia) {
-      const ordenados = processosAtivosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
-      for (const { competencia, tabela } of ordenados) {
-        if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
-        if (alvosTabela.processosAtivos == null) alvosTabela.processosAtivos = pdfFinal.getPageCount();
-        const bytesTabela = await construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes, [], ` — Competência: ${competencia}`, true);
+  //
+  // "opcoesFinais.apenasResumo" (opção "Apenas resumos" no painel) pula a
+  // seção inteira: o relatório fica só com a capa/resumo (e os gráficos,
+  // que já são um resumo visual) e as seções que não são "lista de
+  // processos" (Regras de Automação, Localizadores) - sem as tabelas linha
+  // a linha, que costumam ser a maior parte das páginas do PDF em
+  // unidades com muitos processos.
+  if (!opcoesFinais.apenasResumo) {
+    if (opcoesFinais.processosAtivos) {
+      if (separarPorCompetencia) {
+        const ordenados = processosAtivosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+        for (const { competencia, tabela } of ordenados) {
+          if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+          if (alvosTabela.processosAtivos == null) alvosTabela.processosAtivos = pdfFinal.getPageCount();
+          const bytesTabela = await construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes, [], ` — Competência: ${competencia}`, true);
+          await anexarPaginas(bytesTabela);
+        }
+      } else if (processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
+        alvosTabela.processosAtivos = pdfFinal.getPageCount();
+        const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade, processosUrgentes, distribuicaoRitos);
         await anexarPaginas(bytesTabela);
       }
-    } else if (processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
-      alvosTabela.processosAtivos = pdfFinal.getPageCount();
-      const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade, processosUrgentes, distribuicaoRitos);
-      await anexarPaginas(bytesTabela);
     }
-  }
-  if (opcoesFinais.suspensos) {
-    if (separarPorCompetencia) {
-      const ordenados = suspensosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
-      for (const { competencia, tabela } of ordenados) {
-        if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
-        if (alvosTabela.suspensos == null) alvosTabela.suspensos = pdfFinal.getPageCount();
-        const bytesTabela = await construirPdfSuspensos(tabela, nomeUnidade, ` — Competência: ${competencia}`);
+    if (opcoesFinais.suspensos) {
+      if (separarPorCompetencia) {
+        const ordenados = suspensosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+        for (const { competencia, tabela } of ordenados) {
+          if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+          if (alvosTabela.suspensos == null) alvosTabela.suspensos = pdfFinal.getPageCount();
+          const bytesTabela = await construirPdfSuspensos(tabela, nomeUnidade, ` — Competência: ${competencia}`);
+          await anexarPaginas(bytesTabela);
+        }
+      } else if (suspensos.tabela && suspensos.tabela.linhas.length > 0) {
+        alvosTabela.suspensos = pdfFinal.getPageCount();
+        const bytesTabela = await construirPdfSuspensos(suspensos.tabela, nomeUnidade);
         await anexarPaginas(bytesTabela);
       }
-    } else if (suspensos.tabela && suspensos.tabela.linhas.length > 0) {
-      alvosTabela.suspensos = pdfFinal.getPageCount();
-      const bytesTabela = await construirPdfSuspensos(suspensos.tabela, nomeUnidade);
-      await anexarPaginas(bytesTabela);
     }
-  }
-  if (opcoesFinais.mandados && mandados.linhas.length > 0) {
-    alvosTabela.mandados = pdfFinal.getPageCount();
-    const bytesMandados = await construirPdfMandadosAbertos(mandados.linhas, nomeUnidade);
-    await anexarPaginas(bytesMandados);
-  }
-  if (opcoesFinais.paralisados) {
-    if (separarPorCompetencia) {
-      const ordenados = paralisadosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
-      for (const { competencia, tabela } of ordenados) {
-        if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
-        if (alvosTabela.paralisados == null) alvosTabela.paralisados = pdfFinal.getPageCount();
-        const bytesTabela = await construirPdfProcessosParalisados(tabela, nomeUnidade, ` — Competência: ${competencia}`);
+    if (opcoesFinais.mandados && mandados.linhas.length > 0) {
+      alvosTabela.mandados = pdfFinal.getPageCount();
+      const bytesMandados = await construirPdfMandadosAbertos(mandados.linhas, nomeUnidade);
+      await anexarPaginas(bytesMandados);
+    }
+    if (opcoesFinais.paralisados) {
+      if (separarPorCompetencia) {
+        const ordenados = paralisadosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+        for (const { competencia, tabela } of ordenados) {
+          if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+          if (alvosTabela.paralisados == null) alvosTabela.paralisados = pdfFinal.getPageCount();
+          const bytesTabela = await construirPdfProcessosParalisados(tabela, nomeUnidade, ` — Competência: ${competencia}`);
+          await anexarPaginas(bytesTabela);
+        }
+      } else if (processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0) {
+        alvosTabela.paralisados = pdfFinal.getPageCount();
+        const bytesTabela = await construirPdfProcessosParalisados(processosParalisados.tabela, nomeUnidade);
         await anexarPaginas(bytesTabela);
       }
-    } else if (processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0) {
-      alvosTabela.paralisados = pdfFinal.getPageCount();
-      const bytesTabela = await construirPdfProcessosParalisados(processosParalisados.tabela, nomeUnidade);
-      await anexarPaginas(bytesTabela);
     }
-  }
-  if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0) {
-    alvosTabela.remessasJuizesLeigos = pdfFinal.getPageCount();
-    const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
-    await anexarPaginas(bytesRemessas);
-  }
-  if (opcoesFinais.audiencias && audiencias.linhas.length > 0) {
-    alvosTabela.audiencias = pdfFinal.getPageCount();
-    const bytesAudiencias = await construirPdfTabelaAudiencias(nomeUnidade, audiencias.linhas);
-    await anexarPaginas(bytesAudiencias);
-  }
-  if (opcoesFinais.agendaPadraoAudiencias && agendaPadraoAudiencias.linhas.length > 0) {
-    alvosTabela.agendaPadraoAudiencias = pdfFinal.getPageCount();
-    const bytesAgenda = await construirPdfTabelaAgendaPadraoAudiencia(nomeUnidade, agendaPadraoAudiencias.linhas);
-    await anexarPaginas(bytesAgenda);
-  }
-  if (opcoesFinais.audienciasDetalhado && audienciasDetalhado.linhas.length > 0) {
-    alvosTabela.audienciasDetalhado = pdfFinal.getPageCount();
-    const bytesAudienciasNovo = await construirPdfTabelaAudienciasNovo(
-      nomeUnidade,
-      audienciasDetalhado.linhas,
-      audienciasDetalhado.periodoTexto
-    );
-    await anexarPaginas(bytesAudienciasNovo);
+    if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0) {
+      alvosTabela.remessasJuizesLeigos = pdfFinal.getPageCount();
+      const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
+      await anexarPaginas(bytesRemessas);
+    }
+    if (opcoesFinais.audiencias && audiencias.linhas.length > 0) {
+      alvosTabela.audiencias = pdfFinal.getPageCount();
+      const bytesAudiencias = await construirPdfTabelaAudiencias(nomeUnidade, audiencias.linhas);
+      await anexarPaginas(bytesAudiencias);
+    }
+    if (opcoesFinais.agendaPadraoAudiencias && agendaPadraoAudiencias.linhas.length > 0) {
+      alvosTabela.agendaPadraoAudiencias = pdfFinal.getPageCount();
+      const bytesAgenda = await construirPdfTabelaAgendaPadraoAudiencia(nomeUnidade, agendaPadraoAudiencias.linhas);
+      await anexarPaginas(bytesAgenda);
+    }
+    if (opcoesFinais.audienciasDetalhado && audienciasDetalhado.linhas.length > 0) {
+      alvosTabela.audienciasDetalhado = pdfFinal.getPageCount();
+      const bytesAudienciasNovo = await construirPdfTabelaAudienciasNovo(
+        nomeUnidade,
+        audienciasDetalhado.linhas,
+        audienciasDetalhado.periodoTexto
+      );
+      await anexarPaginas(bytesAudienciasNovo);
+    }
   }
 
   // ===== 3) Regras de Automação e Localizadores (sem link no resumo) =====
@@ -7836,6 +7869,12 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
     const bytesRegras = await construirPdfRegras(regrasAutomacao.regras, nomeUnidade);
     await anexarPaginas(bytesRegras);
+
+    // Análise de Automações (ATP): subitem de "Regras de automação" -
+    // entra logo depois dos cartões de cada regra, com a lista de
+    // conflitos encontrados entre elas (ver "analiseAtp" acima).
+    const bytesConflitosAtp = await construirPaginaConflitosAtp(nomeUnidade, analiseAtp.registros);
+    await anexarPaginas(bytesConflitosAtp);
   }
 
   // Localizadores: lista de nomes (Corregedoria, sem total de processos -
@@ -9608,7 +9647,7 @@ function selecionarOrgaoRegrasAutomacaoNaPagina(nomeUnidade) {
 // logica de raspagem ja' usada quando o usuario estava manualmente
 // nessa tela, so' que agora rodando numa aba que a propria extensao
 // controla, sem exigir navegacao manual.
-async function abrirAbaEListarRegrasAutomacao(urlBase, nomeUnidade) {
+async function abrirAbaEListarRegrasAutomacao(urlBase, nomeUnidade, tipoMensagem = "LISTAR_REGRAS_AUTOMACAO") {
   let aba;
   try {
     await adquirirSlotDeAbaOculta();
@@ -9681,7 +9720,7 @@ async function abrirAbaEListarRegrasAutomacao(urlBase, nomeUnidade) {
     let erroConexao = null;
     for (let tentativa = 0; tentativa < 6; tentativa += 1) {
       try {
-        resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_REGRAS_AUTOMACAO" });
+        resposta = await chrome.tabs.sendMessage(aba.id, { tipo: tipoMensagem });
         erroConexao = null;
       } catch (e) {
         resposta = null;
@@ -9713,6 +9752,988 @@ async function abrirAbaEListarRegrasAutomacao(urlBase, nomeUnidade) {
     }
     liberarSlotDeAbaOculta();
   }
+}
+
+// ===========================================================================
+// ATP - Análise detalhada de conflitos entre Regras de Automação
+// ===========================================================================
+// Motor de comparação PURO (sem DOM) entre as regras já extraídas de forma
+// estruturada pelo content script (ver "atpExtrairRegraDetalhada" e
+// companhia, em content.js). Adaptado do motor de análise do projeto de
+// código aberto "Análise de ATP eProc"
+// (https://github.com/oadrianocardoso/analise-atp-eproc, de Adriano
+// Cardoso) - a diferença principal para o original é que aqui as
+// "cláusulas" de cada expressão lógica chegam como arrays de strings (não
+// Set), porque precisaram atravessar chrome.runtime.sendMessage antes de
+// chegar aqui.
+
+const ATP_TIPO_RANK = {
+  "Colisão Total": 5,
+  "Colisão Parcial": 4,
+  Looping: 5,
+  "Looping Potencial": 5,
+  Contradição: 5,
+  "Quebra de Fluxo": 4,
+  "Perda de Objeto": 3,
+  "Perda de Objeto Condicional": 3,
+  Sobreposição: 2,
+  "Possível Sobreposição": 2,
+};
+
+const ATP_IMPACTO_RANK = { Alto: 3, Médio: 2, Baixo: 1 };
+
+// "analisarLooping" fica desligado por padrão (mesmo padrão da ferramenta
+// de referência): é o tipo de conflito mais sujeito a falso positivo,
+// já que dois localizadores podem legitimamente se alternar como parte do
+// fluxo normal do processo (não é sempre um erro de configuração).
+const ATP_CONFIG = {
+  analisarLooping: false,
+  analisarPerdaObjetoCondicional: true,
+  analisarQuebraFluxo: true,
+};
+
+const ATP_TIPOS_TOOLTIPS = {
+  "COLISÃO TOTAL":
+    'COLISÃO TOTAL = Quando "Prioridade", "Localizador REMOVER", "Tipo de Controle / Critério", "Localizador INCLUIR / Ação" e "Outros Critérios" são iguais.',
+  "COLISÃO PARCIAL":
+    'COLISÃO PARCIAL = Quando "Localizador REMOVER", "Tipo de Controle / Critério", "Localizador INCLUIR / Ação" e "Outros Critérios" são iguais, mas a "Prioridade" é diferente.',
+  SOBREPOSIÇÃO:
+    'SOBREPOSIÇÃO = Quando "Localizador REMOVER" e "Tipo de Controle / Critério" são iguais, uma regra é mais ampla em "Outros Critérios" (ou idêntica) e executa antes da outra.',
+  "POSSÍVEL SOBREPOSIÇÃO":
+    'POSSÍVEL SOBREPOSIÇÃO = Quando "Localizador REMOVER" e "Tipo de Controle / Critério" são iguais, há diferença de abrangência em "Outros Critérios" e as prioridades de execução são equivalentes.',
+  "PERDA DE OBJETO":
+    "PERDA DE OBJETO = Quando uma regra anterior remove o processo do(s) localizador(es) informado(s), impedindo que a regra seguinte capture o objeto necessário.",
+  "PERDA DE OBJETO CONDICIONAL":
+    "PERDA DE OBJETO CONDICIONAL = Quando uma regra pode remover parte do conjunto que outra regra exige em combinação (AND), bloqueando disparos em parte dos casos.",
+  CONTRADIÇÃO:
+    "CONTRADIÇÃO = Quando a própria regra contém critérios mutuamente exclusivos no mesmo ramo (AND), tornando-a logicamente impossível.",
+  "QUEBRA DE FLUXO":
+    'QUEBRA DE FLUXO = Quando a regra executa Ação Programada, mas mantém os mesmos localizadores (INCLUIR == REMOVER), podendo reexecutar em ciclo.',
+  "LOOPING POTENCIAL":
+    "LOOPING POTENCIAL = Quando duas regras se retroalimentam (uma remove o que a outra inclui, e vice-versa), gerando repetição.",
+};
+
+const ATP_MINI_HELP_TXT = [
+  ATP_TIPOS_TOOLTIPS["COLISÃO TOTAL"],
+  "",
+  ATP_TIPOS_TOOLTIPS["COLISÃO PARCIAL"],
+  "",
+  ATP_TIPOS_TOOLTIPS["SOBREPOSIÇÃO"],
+  "",
+  ATP_TIPOS_TOOLTIPS["POSSÍVEL SOBREPOSIÇÃO"],
+  "",
+  ATP_TIPOS_TOOLTIPS["PERDA DE OBJETO"],
+  "",
+  ATP_TIPOS_TOOLTIPS["PERDA DE OBJETO CONDICIONAL"],
+  "",
+  ATP_TIPOS_TOOLTIPS["CONTRADIÇÃO"],
+  "",
+  ATP_TIPOS_TOOLTIPS["QUEBRA DE FLUXO"],
+  "",
+  ATP_TIPOS_TOOLTIPS["LOOPING POTENCIAL"],
+  "",
+  "PRIORIDADE: menor número executa antes. Prioridade não definida executa por último (após todas as prioridades definidas).",
+].join("\n");
+
+function atpExprCanon(expr, fallback) {
+  const base = expr && typeof expr === "object" ? expr.canonical || "" : expr || "";
+  const out = String(base || "").trim();
+  return out || (fallback == null ? "" : String(fallback));
+}
+
+// Une todos os termos de todas as cláusulas de uma expressão num único Set
+// (usado para checar interseção entre expressões, não para comparar
+// igualdade - para igualdade usa-se sempre "canonical").
+function atpExprTermsUnion(expr) {
+  const out = new Set();
+  const clauses = Array.isArray(expr && expr.clauses) ? expr.clauses : [];
+  for (const clause of clauses) {
+    if (!Array.isArray(clause)) continue;
+    for (const t of clause) {
+      const tt = String(t || "").trim();
+      if (!tt || tt === "[*]" || tt === "E" || tt === "OU") continue;
+      out.add(tt);
+    }
+  }
+  return out;
+}
+
+function atpSetsEqual(a, b) {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
+}
+
+function atpHasIntersection(aSet, bSet) {
+  if (!aSet || !bSet || !aSet.size || !bSet.size) return false;
+  for (const x of aSet) if (bSet.has(x)) return true;
+  return false;
+}
+
+// Compara "Outros Critérios" de duas regras: 'identicos' (mesma
+// canonicalização), 'A_mais_ampla'/'B_mais_ampla' (uma delas não tem
+// critério nenhum, logo é mais abrangente) ou 'diferentes'.
+function atpRelationOutros(ruleA, ruleB) {
+  const gruposCanon = (oc) => {
+    if (!oc) return [];
+    if (Array.isArray(oc.groups) && oc.groups.length) {
+      return oc.groups.map((g) => String((g && g.canonical) || "").trim()).filter(Boolean);
+    }
+    if (typeof oc.canonical === "string") {
+      const c = oc.canonical.trim();
+      return c ? [c] : [];
+    }
+    return [];
+  };
+
+  const a = gruposCanon(ruleA && ruleA.outrosCriterios);
+  const b = gruposCanon(ruleB && ruleB.outrosCriterios);
+
+  if (!a.length && !b.length) return "identicos";
+  if (!a.length && b.length) return "A_mais_ampla";
+  if (a.length && !b.length) return "B_mais_ampla";
+
+  const setA = new Set(a);
+  const setB = new Set(b);
+  const iguais = setA.size === setB.size && Array.from(setA).every((x) => setB.has(x));
+  if (iguais) return "identicos";
+
+  const aContemB = Array.from(setB).every((x) => setA.has(x));
+  const bContemA = Array.from(setA).every((x) => setB.has(x));
+  if (bContemA && !aContemB) return "A_mais_ampla";
+  if (aContemB && !bContemA) return "B_mais_ampla";
+  return "diferentes";
+}
+
+// Detecta contradições DENTRO da própria regra: seleções mutuamente
+// exclusivas do mesmo campo em "Outros Critérios" (ex.: mesmo Dado
+// Complementar marcado como dois estados ao mesmo tempo).
+function atpDetectContradictions(rule) {
+  const oc = rule && rule.outrosCriterios;
+  const groups = (oc && oc.groups) || [];
+  const motivos = [];
+  const add = (msg) => {
+    if (msg && !motivos.includes(msg)) motivos.push(msg);
+  };
+
+  const analisarClausula = (terms, contextLabel) => {
+    const kv = new Map();
+    for (const t of terms) {
+      const p = String(t || "");
+      const eq = p.indexOf("=");
+      if (eq <= 0) continue;
+      const k = p.slice(0, eq);
+      const v = p.slice(eq + 1);
+      if (!kv.has(k)) kv.set(k, []);
+      kv.get(k).push(v);
+    }
+
+    for (const [k, vals] of kv.entries()) {
+      if (k !== "dadocomplementardoprocesso") continue;
+      const porGrupo = new Map();
+      for (const v of vals) {
+        const raw = String(v || "").trim();
+        const partes = raw
+          .split("-")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (partes.length < 2) continue;
+        const grupo = partes.slice(0, -1).join("-");
+        const estado = partes[partes.length - 1];
+        if (!porGrupo.has(grupo)) porGrupo.set(grupo, new Set());
+        porGrupo.get(grupo).add(estado);
+      }
+      for (const [grupo, estados] of porGrupo.entries()) {
+        if (estados.size >= 2) {
+          add(
+            `${contextLabel}Dado Complementar do Processo: "${grupo}" com múltiplos valores ao mesmo tempo (${Array.from(
+              estados
+            ).join(", ")}).`
+          );
+        }
+      }
+    }
+
+    for (const [k, vals] of kv.entries()) {
+      if (k !== "prazomultiplo" && k !== "prazo") continue;
+      const bucket = new Map();
+      for (const v of vals) {
+        const txtv = String(v || "").trim();
+        let m = txtv.match(/^Processos\s+(COM|SEM)\s+prazo\s+aberto\/ag\.\s*abertura(\s+.*)?$/i);
+        if (m) {
+          const pol = m[1].toUpperCase();
+          const escopo = String(m[2] || "").trim().toUpperCase();
+          const sig = `ABERTO${escopo ? " " + escopo : ""}`;
+          if (!bucket.has(sig)) bucket.set(sig, new Set());
+          bucket.get(sig).add(pol);
+        }
+      }
+      for (const [sig, set] of bucket.entries()) {
+        if (set.has("COM") && set.has("SEM")) {
+          add(
+            `${contextLabel}Prazo múltiplo: marcado como COM e SEM no mesmo critério (${sig.replace(
+              /^ABERTO/,
+              "prazo aberto/ag. abertura"
+            )}).`
+          );
+        }
+      }
+    }
+
+    for (const [k, vals] of kv.entries()) {
+      if (k !== "litisconsorcio") continue;
+      const polMap = new Map();
+      for (const v of vals) {
+        const t = String(v || "").trim();
+        const m = t.match(/^Processos\s+com\s+(APENAS\s+UMA|MAIS\s+DE\s+UMA)\s+parte\s+no\s+PÓLO\s+(PASSIVO|ATIVO)/i);
+        if (!m) continue;
+        const quant = /apenas/i.test(m[1]) ? "UMA" : "MAIS";
+        const polo = m[2].toUpperCase();
+        if (!polMap.has(polo)) polMap.set(polo, new Set());
+        polMap.get(polo).add(quant);
+      }
+      for (const [polo, set] of polMap.entries()) {
+        if (set.has("UMA") && set.has("MAIS")) {
+          add(`${contextLabel}Litisconsórcio: "${polo}" marcado como APENAS UMA e MAIS DE UMA parte ao mesmo tempo.`);
+        }
+      }
+    }
+
+    for (const [k, vals] of kv.entries()) {
+      if (k !== "representacaoprocessualdaspartes") continue;
+      const polMap = new Map();
+      for (const v of vals) {
+        const t = String(v || "").trim();
+        const m = t.match(/^Processos\s+(COM|SEM)\s+procurador\/advogado\s+no\s+PÓLO\s+(PASSIVO|ATIVO)/i);
+        if (!m) continue;
+        const pol = m[1].toUpperCase();
+        const polo = m[2].toUpperCase();
+        if (!polMap.has(polo)) polMap.set(polo, new Set());
+        polMap.get(polo).add(pol);
+      }
+      for (const [polo, set] of polMap.entries()) {
+        if (set.has("COM") && set.has("SEM")) {
+          add(`${contextLabel}Representação processual: "${polo}" marcado como COM e SEM procurador/advogado ao mesmo tempo.`);
+        }
+      }
+    }
+  };
+
+  for (const g of groups) {
+    const clauses = Array.isArray(g && g.clauses) ? g.clauses : [];
+    const cabecalho = g && g.header ? `${g.header}: ` : "";
+    for (const clause of clauses) {
+      const terms = Array.isArray(clause) ? clause : [];
+      analisarClausula(terms, cabecalho);
+    }
+  }
+
+  return motivos;
+}
+
+// Motor principal: compara toda regra ATIVA contra toda outra regra ATIVA
+// (O(n²), mas "n" aqui é o número de regras de automação de uma unidade -
+// tipicamente dezenas, nunca milhares) e devolve um Map
+// "número da regra -> Map(número da regra conflitante -> registro)".
+// Regras que conflitam com elas mesmas (Contradição) usam a chave -1.
+function atpAnalisarConflitos(rules) {
+  const conflictsByRule = new Map();
+
+  const ensureBucket = (baseNum) => {
+    if (!conflictsByRule.has(baseNum)) conflictsByRule.set(baseNum, new Map());
+    return conflictsByRule.get(baseNum);
+  };
+
+  const upsert = (baseNum, otherNum, tipo, impacto, motivo) => {
+    const bucket = ensureBucket(baseNum);
+    const rec = bucket.get(otherNum) || { tipos: new Set(), impactoMax: "Baixo", motivosByTipo: new Map() };
+    rec.tipos.add(tipo);
+    if ((ATP_IMPACTO_RANK[impacto] || 0) > (ATP_IMPACTO_RANK[rec.impactoMax] || 0)) rec.impactoMax = impacto;
+    if (motivo) {
+      const set = rec.motivosByTipo.get(tipo) || new Set();
+      set.add(motivo);
+      rec.motivosByTipo.set(tipo, set);
+    }
+    bucket.set(otherNum, rec);
+  };
+
+  const prioNum = (r) => (Number.isFinite(r && r.prioridade && r.prioridade.num) ? r.prioridade.num : null);
+  const prioIsTextoPrioridade = (r) => {
+    const txt = String((r && r.prioridade && (r.prioridade.text || r.prioridade.raw)) || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase();
+    return txt === "prioridade";
+  };
+  const prioExecutaAntesPOC = (a, b) => {
+    const na = prioNum(a);
+    const nb = prioNum(b);
+    if (na != null && nb != null) return na < nb;
+    const aTxt = prioIsTextoPrioridade(a);
+    const bTxt = prioIsTextoPrioridade(b);
+    if (na != null && bTxt) return true;
+    if (aTxt && nb != null) return false;
+    if (na != null && nb == null) return true;
+    if (na == null && nb != null) return false;
+    return false;
+  };
+  const prioLabel = (r) => {
+    const n = prioNum(r);
+    if (n != null) return `${n}ª`;
+    const txt = String((r && r.prioridade && (r.prioridade.text || r.prioridade.raw)) || "").trim();
+    return txt || "[*]";
+  };
+  const execOrder = (r) => {
+    const n = prioNum(r);
+    return n == null ? Number.POSITIVE_INFINITY : n;
+  };
+  const ruleNumVal = (r) => {
+    const n = Number(r && r.num);
+    return Number.isFinite(n) ? n : parseInt(String((r && r.num) || ""), 10) || 0;
+  };
+
+  const pickKeepDropTotal = (A, B) => {
+    const aN = ruleNumVal(A);
+    const bN = ruleNumVal(B);
+    return aN <= bN ? { keep: A, drop: B } : { keep: B, drop: A };
+  };
+  const pickKeepDropParcial = (A, B) => {
+    const oa = execOrder(A);
+    const ob = execOrder(B);
+    if (oa !== ob) return oa < ob ? { keep: A, drop: B } : { keep: B, drop: A };
+    const aN = ruleNumVal(A);
+    const bN = ruleNumVal(B);
+    return aN <= bN ? { keep: A, drop: B } : { keep: B, drop: A };
+  };
+
+  const normMsg = (s) =>
+    String(s || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase();
+  const MSG_PERDA_OBJETO = normMsg("Remover o processo do(s) localizador(es) informado(s).");
+
+  const removerTemAndNoMesmoRamo = (rule) => {
+    const clauses = Array.isArray(rule && rule.localizadorRemover && rule.localizadorRemover.clauses)
+      ? rule.localizadorRemover.clauses
+      : [];
+    for (const clause of clauses) {
+      if (!Array.isArray(clause)) continue;
+      const terms = clause.filter((t) => t && t !== "[*]" && t !== "E" && t !== "OU");
+      if (terms.length >= 2) return true;
+    }
+    return false;
+  };
+
+  const _termKV = (term) => {
+    const s = String(term || "").trim();
+    if (!s) return null;
+    const i = s.indexOf(":");
+    if (i > 0) {
+      const k = s.slice(0, i).trim();
+      const v = s.slice(i + 1).trim();
+      if (!k) return null;
+      return { k, v: v || "[*]" };
+    }
+    return { k: s, v: "[*]" };
+  };
+
+  const _clauseToMap = (clauseArr) => {
+    const m = new Map();
+    if (!Array.isArray(clauseArr)) return m;
+    for (const raw of clauseArr) {
+      const kv = _termKV(raw);
+      if (!kv) continue;
+      if (!m.has(kv.k)) m.set(kv.k, new Set());
+      m.get(kv.k).add(kv.v);
+    }
+    return m;
+  };
+
+  const _mapValuesIntersect = (sa, sb) => {
+    if (!sa || !sb) return true;
+    for (const v of sa) if (sb.has(v)) return true;
+    return false;
+  };
+
+  const outrosPossiblyOverlap = (ruleA, ruleB) => {
+    const clausesA = Array.isArray(ruleA.outrosCriterios && ruleA.outrosCriterios.clauses)
+      ? ruleA.outrosCriterios.clauses
+      : [];
+    const clausesB = Array.isArray(ruleB.outrosCriterios && ruleB.outrosCriterios.clauses)
+      ? ruleB.outrosCriterios.clauses
+      : [];
+    const listA = clausesA.length ? clausesA : [[]];
+    const listB = clausesB.length ? clausesB : [[]];
+
+    for (const ca of listA) {
+      const ma = _clauseToMap(ca);
+      for (const cb of listB) {
+        const mb = _clauseToMap(cb);
+        let compativel = true;
+        for (const [k, sa] of ma.entries()) {
+          if (!mb.has(k)) continue;
+          if (!_mapValuesIntersect(sa, mb.get(k))) {
+            compativel = false;
+            break;
+          }
+        }
+        if (compativel) return true;
+      }
+    }
+    return false;
+  };
+  void outrosPossiblyOverlap; // Reservado para evoluções futuras (não usado na v1, igual ao script de referência).
+
+  for (let i = 0; i < rules.length; i++) {
+    const A = rules[i];
+    for (let j = i + 1; j < rules.length; j++) {
+      const B = rules[j];
+
+      const removerEq = atpExprCanon(A.localizadorRemover, "") === atpExprCanon(B.localizadorRemover, "");
+      const tipoEq = atpExprCanon(A.tipoControleCriterio, "") === atpExprCanon(B.tipoControleCriterio, "");
+      const incluirEq = atpExprCanon(A.localizadorIncluirAcao, "") === atpExprCanon(B.localizadorIncluirAcao, "");
+      const outrosEq = atpRelationOutros(A, B) === "identicos";
+
+      const prioEq = prioLabel(A) === prioLabel(B) && prioNum(A) === prioNum(B);
+
+      if (removerEq && tipoEq && incluirEq && outrosEq) {
+        if (prioEq) {
+          const kd = pickKeepDropTotal(A, B);
+          const sug = `Sugestão: Excluir a regra ${kd.drop.num}, mantendo a ${kd.keep.num}.`;
+          upsert(
+            A.num,
+            B.num,
+            "Colisão Total",
+            "Alto",
+            "Prioridade, Localizador REMOVER, Tipo de Controle / Critério, Localizador INCLUIR / Ação e Outros Critérios idênticos.\n" +
+              sug
+          );
+          upsert(
+            B.num,
+            A.num,
+            "Colisão Total",
+            "Alto",
+            "Prioridade, Localizador REMOVER, Tipo de Controle / Critério, Localizador INCLUIR / Ação e Outros Critérios idênticos.\n" +
+              sug
+          );
+        } else {
+          const kd = pickKeepDropParcial(A, B);
+          const sug = `Sugestão: Excluir a regra ${kd.drop.num}, mantendo a ${kd.keep.num} (executa antes).`;
+          upsert(
+            A.num,
+            B.num,
+            "Colisão Parcial",
+            "Médio",
+            "Localizador REMOVER, Tipo de Controle / Critério, Localizador INCLUIR / Ação e Outros Critérios idênticos; prioridades diferentes.\n" +
+              sug
+          );
+          upsert(
+            B.num,
+            A.num,
+            "Colisão Parcial",
+            "Médio",
+            "Localizador REMOVER, Tipo de Controle / Critério, Localizador INCLUIR / Ação e Outros Critérios idênticos; prioridades diferentes.\n" +
+              sug
+          );
+        }
+      }
+
+      if (removerEq && tipoEq) {
+        const oa = execOrder(A);
+        const ob = execOrder(B);
+        const relAB = atpRelationOutros(A, B);
+
+        if (oa === ob && (relAB === "A_mais_ampla" || relAB === "B_mais_ampla")) {
+          const ampla = relAB === "A_mais_ampla" ? A : B;
+          const resto = relAB === "A_mais_ampla" ? B : A;
+          upsert(
+            resto.num,
+            ampla.num,
+            "Possível Sobreposição",
+            "Baixo",
+            `Mesmo Localizador REMOVER e mesmo Tipo de Controle / Critério; prioridades equivalentes. ` +
+              `A regra ${ampla.num} é mais ampla em "Outros Critérios" e pode capturar processos da mais restrita.\n` +
+              `Sugestão: Definir a prioridade da regra ${resto.num} para executar antes da ${ampla.num} (ou ajustar "Outros Critérios" para não sobrepor).`
+          );
+        }
+
+        if (oa !== ob) {
+          const earlier = oa < ob ? A : B;
+          const later = oa < ob ? B : A;
+          const relEL = atpRelationOutros(earlier, later);
+          const earlierCobreLater = relEL === "identicos" || relEL === "A_mais_ampla";
+
+          if (earlierCobreLater) {
+            const detalheOutros = relEL === "identicos" ? "Outros idênticos" : 'Regra anterior é mais ampla em "Outros Critérios"';
+            const pEarlier = prioLabel(earlier);
+            const pLater = prioLabel(later);
+            const sugOrdem = `Sugestão: Alterar a prioridade da regra ${later.num} (${pLater}) para menor que a regra ${earlier.num} (${pEarlier}), ou tornar a regra ${earlier.num} mais restritiva.`;
+
+            upsert(
+              later.num,
+              earlier.num,
+              "Sobreposição",
+              "Médio",
+              `Mesmo Localizador REMOVER e mesmo Tipo de Controle / Critério; ${detalheOutros}. ` +
+                `Prioridade ${pEarlier} executa antes de ${pLater}.\n` +
+                sugOrdem
+            );
+
+            const beh = normMsg(atpExprCanon(earlier.comportamentoRemover, ""));
+            if (beh === MSG_PERDA_OBJETO) {
+              upsert(
+                later.num,
+                earlier.num,
+                "Perda de Objeto",
+                "Alto",
+                `Mesmo Localizador REMOVER e mesmo Tipo de Controle / Critério; ${detalheOutros}. ` +
+                  `Regra ${earlier.num} (prioridade ${pEarlier}) executa antes ` +
+                  `e remove o processo do(s) localizador(es) informado(s), impedindo que sejam capturados pela regra ${later.num}.\n` +
+                  sugOrdem
+              );
+            }
+          }
+        }
+      }
+
+      const Arem = atpExprTermsUnion(A.localizadorRemover);
+      const Ainc = atpExprTermsUnion(A.localizadorIncluirAcao);
+      const Brem = atpExprTermsUnion(B.localizadorRemover);
+      const Binc = atpExprTermsUnion(B.localizadorIncluirAcao);
+
+      if (ATP_CONFIG.analisarPerdaObjetoCondicional) {
+        try {
+          const evalPerdaObjetoCondicional = (earlier, later) => {
+            if (!prioExecutaAntesPOC(earlier, later)) return;
+
+            const tipoEqPOC = atpExprCanon(earlier.tipoControleCriterio, "") === atpExprCanon(later.tipoControleCriterio, "");
+            if (!tipoEqPOC) return;
+
+            const relEL = atpRelationOutros(earlier, later);
+            const earlierCobreLater = relEL === "identicos" || relEL === "A_mais_ampla";
+            if (!earlierCobreLater) return;
+
+            const behPOC = normMsg(atpExprCanon(earlier.comportamentoRemover, ""));
+            if (behPOC !== MSG_PERDA_OBJETO) return;
+            if (removerTemAndNoMesmoRamo(earlier)) return;
+
+            const earlierRem = atpExprTermsUnion(earlier.localizadorRemover);
+            const laterRem = atpExprTermsUnion(later.localizadorRemover);
+            if (!atpHasIntersection(earlierRem, laterRem)) return;
+
+            const clausesLater = Array.isArray(later.localizadorRemover && later.localizadorRemover.clauses)
+              ? later.localizadorRemover.clauses
+              : [];
+            let registrado = false;
+
+            for (const clause of clausesLater) {
+              if (registrado) break;
+              if (!Array.isArray(clause)) continue;
+
+              const terms = clause.filter((t) => t && t !== "[*]" && t !== "E" && t !== "OU");
+              if (terms.length < 2) continue;
+
+              for (const x of terms) {
+                if (!earlierRem.has(x)) continue;
+                const y = terms.find((t) => t !== x) || null;
+                if (!y) continue;
+
+                const detalheOutros = relEL === "identicos" ? "Outros idênticos" : 'Regra anterior é mais ampla em "Outros Critérios"';
+                const pEarlier = prioLabel(earlier);
+                const pLater = prioLabel(later);
+                const sugPOC =
+                  `Sugestão: Ajustar a regra ${earlier.num} para não remover "${x}" neste cenário, ` +
+                  `ou definir a prioridade da regra ${later.num} (${pLater}) para executar antes da regra ${earlier.num} (${pEarlier}).`;
+
+                upsert(
+                  later.num,
+                  earlier.num,
+                  "Perda de Objeto Condicional",
+                  "Alto",
+                  `Mesmo Tipo de Controle / Critério; ${detalheOutros}. ` +
+                    `Regra ${earlier.num} (prioridade ${pEarlier}) executa antes da regra ${later.num} (prioridade ${pLater}) ` +
+                    `e remove "${x}" do Localizador REMOVER, enquanto a regra ${later.num} exige "${x}" E "${y}" (AND). ` +
+                    `Isso pode impedir o disparo da regra ${later.num} em parte dos casos.\n` +
+                    sugPOC
+                );
+                registrado = true;
+                break;
+              }
+            }
+          };
+
+          if (prioExecutaAntesPOC(A, B)) evalPerdaObjetoCondicional(A, B);
+          else if (prioExecutaAntesPOC(B, A)) evalPerdaObjetoCondicional(B, A);
+        } catch (e) {}
+      }
+
+      if (ATP_CONFIG.analisarLooping) {
+        if (atpHasIntersection(Arem, Binc) && atpHasIntersection(Brem, Ainc)) {
+          upsert(A.num, B.num, "Looping Potencial", "Alto", "A remove algo que B inclui e B remove algo que A inclui.");
+          upsert(B.num, A.num, "Looping Potencial", "Alto", "A remove algo que B inclui e B remove algo que A inclui.");
+        }
+      }
+    }
+  }
+
+  for (const r of rules || []) {
+    try {
+      const motivos = atpDetectContradictions(r);
+      if (motivos && motivos.length) {
+        const sug =
+          'Sugestão: Em "Outros Critérios", remova seleções mutuamente exclusivas do mesmo campo (ex.: COM e SEM; APENAS UMA e MAIS DE UMA; estados diferentes do mesmo Dado Complementar). Se a intenção for abranger alternativas, separe em regras distintas ou use conector OU quando disponível.';
+        upsert(r.num, -1, "Contradição", "Alto", motivos.join(" | ") + "\n" + sug);
+      }
+    } catch (e) {}
+  }
+
+  if (ATP_CONFIG.analisarQuebraFluxo) {
+    for (const r of rules || []) {
+      try {
+        const acoesAll =
+          r.localizadorIncluirAcao && Array.isArray(r.localizadorIncluirAcao.acoes) ? r.localizadorIncluirAcao.acoes : [];
+        if (!acoesAll.length) continue;
+
+        const normKey = (s) =>
+          String(s || "")
+            .trim()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toUpperCase();
+
+        const IGNORE_ACOES = new Set([
+          "ALTERAR SITUACAO AUTOMATICAMENTE",
+          "ALTERAR SITUACAO DA JUSTICA GRATUITA DA PARTE",
+          "INSERIR DADO COMPLEMENTAR NO PROCESSO",
+          "RETIFICAR AUTUACAO",
+          "VERIFICACAO DE DADOS PROCESSUAIS",
+        ]);
+
+        const acoes = acoesAll.filter((a) => {
+          const nome = normKey(a && a.acao);
+          if (!nome) return false;
+          if (IGNORE_ACOES.has(nome)) return false;
+          if (nome === "LANCAR EVENTO AUTOMATIZADO") {
+            const vars = Array.isArray(a && a.vars) ? a.vars : [];
+            const temConclusos = vars.some((v) => normKey(v && v.valor).includes("CONCLUSOS"));
+            if (temConclusos) return false;
+          }
+          return true;
+        });
+        if (!acoes.length) continue;
+
+        const remSet = atpExprTermsUnion(r.localizadorRemover);
+        const incSet = atpExprTermsUnion(r.localizadorIncluirAcao);
+        const remClauses = Array.isArray(r.localizadorRemover && r.localizadorRemover.clauses)
+          ? r.localizadorRemover.clauses
+          : [];
+        const remIsOr = remClauses.length > 1;
+        const incHas = incSet.size > 0;
+
+        const matchAnyRemBranch = (() => {
+          if (!remIsOr || !incHas) return false;
+          for (const clause of remClauses) {
+            if (!Array.isArray(clause)) continue;
+            const branch = new Set(clause.filter((t) => t && t !== "[*]" && t !== "E" && t !== "OU"));
+            if (branch.size && atpSetsEqual(branch, incSet)) return true;
+          }
+          return false;
+        })();
+
+        if (incHas && (atpSetsEqual(remSet, incSet) || matchAnyRemBranch)) {
+          const titulos = Array.from(new Set(acoes.map((a) => String((a && a.acao) || "").trim()).filter(Boolean)));
+          const resumoAcoes = titulos.length
+            ? titulos.slice(0, 4).join(" | ") + (titulos.length > 4 ? " | …" : "")
+            : "(ação programada)";
+
+          const sug =
+            "Sugestão: Defina um Localizador INCLUIR diferente do Localizador REMOVER (próximo passo do fluxo) após executar a ação, evitando reexecução no ciclo seguinte.";
+          upsert(
+            r.num,
+            -1,
+            "Quebra de Fluxo",
+            "Alto",
+            `A regra executa Ação Programada (${resumoAcoes}), mas mantém exatamente os mesmos Localizadores (INCLUIR == REMOVER). Isso pode fazer a regra rodar novamente em novo ciclo e gerar erro/duplicidade.\n` +
+              sug
+          );
+        }
+      } catch (e) {}
+    }
+  }
+
+  return conflictsByRule;
+}
+
+function atpChavePar(tipo, a, b) {
+  if (String(b) === "(Própria Regra)") return `${tipo}|${a}|SELF`;
+  const an = Number(a);
+  const bn = Number(b);
+  if (Number.isFinite(an) && Number.isFinite(bn)) {
+    const lo = Math.min(an, bn);
+    const hi = Math.max(an, bn);
+    return `${tipo}|${lo}|${hi}`;
+  }
+  const as = String(a);
+  const bs = String(b);
+  const lo = as <= bs ? as : bs;
+  const hi = as <= bs ? bs : as;
+  return `${tipo}|${lo}|${hi}`;
+}
+
+// Achata o Map produzido por "atpAnalisarConflitos" numa lista de
+// registros (um por par de regras x tipo de conflito), já deduplicada
+// (cada upsert() na análise grava o par nos dois sentidos - A->B e B->A -
+// para facilitar consulta por regra; aqui só um dos dois sentidos vira
+// registro) e ordenada por número de regra, pronta para exibir no painel
+// ou exportar em TXT.
+function atpGerarRegistrosColisoes(conflictsByRule) {
+  const registros = [];
+  const vistos = new Set();
+
+  for (const [baseNum, bucket] of conflictsByRule.entries()) {
+    for (const [outroNum, rec] of bucket.entries()) {
+      const ehPropriaRegra = Number(outroNum) < 0;
+      const bVal = ehPropriaRegra ? "(Própria Regra)" : String(outroNum);
+      const aVal = String(baseNum);
+
+      for (const tipo of rec.tipos) {
+        const chave = atpChavePar(tipo, aVal, bVal);
+        if (vistos.has(chave)) continue;
+        vistos.add(chave);
+
+        const motivosDoTipo = rec.motivosByTipo && rec.motivosByTipo.get(tipo);
+        const motivoBruto = motivosDoTipo && motivosDoTipo.size ? Array.from(motivosDoTipo).join(" | ") : "";
+        const partes = motivoBruto.split(/\n?\s*Sugest[aã]o:\s*/i);
+        const motivo = (partes[0] || "").trim();
+        const sugestao = (partes[1] || "").trim();
+
+        let a = aVal;
+        let b = bVal;
+        if (!ehPropriaRegra) {
+          const an = Number(aVal);
+          const bnv = Number(bVal);
+          if (Number.isFinite(an) && Number.isFinite(bnv) && an > bnv) {
+            a = bVal;
+            b = aVal;
+          } else if ((!Number.isFinite(an) || !Number.isFinite(bnv)) && String(aVal) > String(bVal)) {
+            a = bVal;
+            b = aVal;
+          }
+        }
+
+        registros.push({ a, b, tipo, impacto: rec.impactoMax || "Médio", motivo, sugestao });
+      }
+    }
+  }
+
+  registros.sort((x, y) => {
+    const ax = Number(x.a);
+    const ay = Number(y.a);
+    if (Number.isFinite(ax) && Number.isFinite(ay) && ax !== ay) return ax - ay;
+    if (String(x.a) !== String(y.a)) return String(x.a).localeCompare(String(y.a));
+    const bx = Number(x.b);
+    const by = Number(y.b);
+    if (Number.isFinite(bx) && Number.isFinite(by) && bx !== by) return bx - by;
+    if (String(x.b) !== String(y.b)) return String(x.b).localeCompare(String(y.b));
+    return String(x.tipo).localeCompare(String(y.tipo));
+  });
+
+  return registros;
+}
+
+// Relatório técnico em TXT com todas as colisões, no mesmo formato usado
+// pela ferramenta de referência (resumo por tipo + detalhamento por par +
+// mini-guia de referência no final).
+function atpConstruirRelatorioColisoesTxt(registros, urlOrigem) {
+  const linhas = [];
+  linhas.push("Relatório de Colisões (ATP / eProc)");
+  linhas.push(`Data/Hora: ${new Date().toLocaleString("pt-BR")}`);
+  if (urlOrigem) linhas.push(`URL: ${urlOrigem}`);
+  linhas.push("");
+  linhas.push(`Total de conflitos listados: ${registros.length}`);
+  linhas.push("Resumo por tipo:");
+
+  const contagemPorTipo = new Map();
+  for (const r of registros) contagemPorTipo.set(r.tipo, (contagemPorTipo.get(r.tipo) || 0) + 1);
+  Array.from(contagemPorTipo.keys())
+    .sort((a, b) => contagemPorTipo.get(b) - contagemPorTipo.get(a))
+    .forEach((tipo) => linhas.push(`- ${tipo}: ${contagemPorTipo.get(tipo)}`));
+
+  linhas.push("");
+  linhas.push("Detalhamento:");
+
+  for (const r of registros) {
+    linhas.push("");
+    linhas.push(r.b === "(Própria Regra)" ? `Regra (${r.a}) x (Própria Regra)` : `Regra (${r.a}) x Regra (${r.b})`);
+    linhas.push(`Tipo: ${r.tipo}`);
+    if (r.motivo) linhas.push(`Colisão: ${r.motivo}`);
+    if (r.sugestao) {
+      linhas.push("Sugestão:");
+      linhas.push(`- ${r.sugestao}`);
+    }
+  }
+
+  if (!registros.length) {
+    linhas.push("");
+    linhas.push("Nenhuma colisão foi encontrada.");
+  }
+
+  linhas.push("");
+  linhas.push("----------------------------------------------------------------");
+  linhas.push("");
+  linhas.push("Mini-help:");
+  linhas.push(ATP_MINI_HELP_TXT);
+
+  return linhas.join("\n");
+}
+
+// Paginas proprias (portrait) com os conflitos encontrados pela Análise de
+// Automações (ATP) - subitem do Relatório da Unidade, vinculado a "Regras
+// de automação" (ver "exportarRelatorioGerencialUnidade"). Mesmo estilo
+// visual de "construirPaginaListaLocalizadores": um item por linha, com
+// marcador "-" e recuo pendurado.
+async function construirPaginaConflitosAtp(nomeUnidade, registros) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  function novaPagina() {
+    const pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    return { pagina, y: altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem };
+  }
+
+  let { pagina, y } = novaPagina();
+
+  const titulo = `Conflitos entre Regras de Automação (ATP) — unidade "${sanitizarTextoPdf(nomeUnidade)}" (${registros.length})`;
+  for (const linhaTitulo of quebrarLinhas(titulo, fonteNegrito, 12, larguraUtil)) {
+    if (y - 16 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+    pagina.drawText(linhaTitulo, { x: margem, y, size: 12, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+    y -= 16;
+  }
+  y -= 2;
+
+  const subtitulo = quebrarLinhas(
+    'Comparação automática das regras ATIVAS entre si (ver cartão "Análise de Automações (ATP)" no painel para o ' +
+      "detalhamento de cada tipo de conflito e sugestões de correção).",
+    fonteNormal,
+    8.5,
+    larguraUtil
+  );
+  for (const linhaSubtitulo of subtitulo) {
+    if (y - 12 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+    pagina.drawText(linhaSubtitulo, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+    y -= 12;
+  }
+  y -= 6;
+
+  if (registros.length === 0) {
+    if (y - 12 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+    pagina.drawText("Nenhum conflito encontrado.", { x: margem, y, size: 9, font: fonteNormal, color: COR_CINZA_TEXTO });
+    y -= 12;
+    desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+    return pdf.save();
+  }
+
+  const marcador = "-  ";
+  const larguraMarcador = fonteNormal.widthOfTextAtSize(marcador, 9);
+  const larguraTexto = larguraUtil - larguraMarcador;
+
+  for (const r of registros) {
+    const cabecalho =
+      r.b === "(Própria Regra)"
+        ? `Regra ${r.a} (própria regra) — ${r.tipo} (impacto ${r.impacto})`
+        : `Regra ${r.a} × Regra ${r.b} — ${r.tipo} (impacto ${r.impacto})`;
+
+    const linhasCabecalho = quebrarLinhas(sanitizarTextoPdf(cabecalho), fonteNegrito, 9, larguraTexto);
+    linhasCabecalho.forEach((linha, indice) => {
+      if (y - 12 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+      if (indice === 0) pagina.drawText("-", { x: margem, y, size: 9, font: fonteNormal, color: COR_CINZA_TEXTO });
+      pagina.drawText(linha, { x: margem + larguraMarcador, y, size: 9, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+      y -= 12;
+    });
+
+    if (r.motivo) {
+      const linhasMotivo = quebrarLinhas(sanitizarTextoPdf(r.motivo), fonteNormal, 8, larguraTexto);
+      for (const linha of linhasMotivo) {
+        if (y - 10 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+        pagina.drawText(linha, { x: margem + larguraMarcador, y, size: 8, font: fonteNormal, color: COR_CINZA_TEXTO });
+        y -= 10;
+      }
+    }
+    if (r.sugestao) {
+      const linhasSugestao = quebrarLinhas(sanitizarTextoPdf(`Sugestão: ${r.sugestao}`), fonteNormal, 8, larguraTexto);
+      for (const linha of linhasSugestao) {
+        if (y - 10 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+        pagina.drawText(linha, { x: margem + larguraMarcador, y, size: 8, font: fonteNormal, color: COR_CINZA_TEXTO });
+        y -= 10;
+      }
+    }
+    y -= 4;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+  return pdf.save();
+}
+
+// Orquestra a análise completa: abre a tela "Automatizar Tramitação
+// Processual" numa aba oculta (reaproveitando a mesma navegação/seleção de
+// órgão de "abrirAbaEListarRegrasAutomacao"), pede a extração estruturada
+// ao content script e roda o motor de comparação sobre o resultado.
+async function analisarConflitosRegrasAutomacao(urlBase, nomeUnidade, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  notificar("Abrindo a tela de Regras de Automação...");
+  const { regras, totalRegrasNaPagina, erro } = await abrirAbaEListarRegrasAutomacao(
+    urlBase,
+    nomeUnidade,
+    "LISTAR_REGRAS_AUTOMACAO_DETALHADO"
+  );
+
+  if (erro) {
+    return { regras: [], registros: [], totalRegrasNaPagina: 0, erro };
+  }
+  if (regras.length === 0) {
+    return {
+      regras: [],
+      registros: [],
+      totalRegrasNaPagina: totalRegrasNaPagina || 0,
+      erro: totalRegrasNaPagina > 0 ? null : "Nenhuma regra de automação ativa encontrada para a unidade atual.",
+    };
+  }
+
+  notificar(`Analisando conflitos entre ${regras.length} regra(s)...`);
+  const conflictsByRule = atpAnalisarConflitos(regras);
+  const registros = atpGerarRegistrosColisoes(conflictsByRule);
+
+  return { regras, registros, totalRegrasNaPagina, erro: null };
+}
+
+// Atalho para o cartão do painel: sempre a unidade/perfil atualmente
+// habilitado na aba ativa (sem escolher outra unidade) - mesmo padrão já
+// usado por "exportarRelatorioUnidadeAtual" para o Relatório da Unidade.
+async function analisarConflitosAutomacoesUnidadeAtual(aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.id || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+
+  const resultado = await analisarConflitosRegrasAutomacao(abaAtual.url, null, notificar);
+  return { ...resultado, urlOrigem: abaAtual.url };
 }
 
 // Monta um documento HTML autocontido, um "cartao" por regra ativa,
@@ -10725,6 +11746,36 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
           .catch(() => {});
       });
     sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "ANALISAR_CONFLITOS_AUTOMACAO") {
+    // Mesmo padrao das demais operacoes em segundo plano.
+    analisarConflitosAutomacoesUnidadeAtual((texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_ANALISE_ATP", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime.sendMessage({ tipo: "ANALISE_ATP_FINALIZADA", ok: true, resultado }).catch(() => {});
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({ tipo: "ANALISE_ATP_FINALIZADA", ok: false, erro: e && e.message ? e.message : String(e) })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (mensagem && mensagem.tipo === "BAIXAR_RELATORIO_COLISOES_ATP") {
+    (async () => {
+      try {
+        const txt = atpConstruirRelatorioColisoesTxt(mensagem.registros || [], mensagem.urlOrigem || "");
+        await baixarUm("eproc/relatorio_colisoes_ATP.txt", construirDataUrl("text/plain", txt));
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) });
+      }
+    })();
     return true;
   }
 

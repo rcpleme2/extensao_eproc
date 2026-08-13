@@ -1555,6 +1555,7 @@ const chkRelParalisados = document.getElementById("chk-rel-paralisados");
 const chkRelRemessasJuizesLeigos = document.getElementById("chk-rel-remessas-juizes-leigos");
 const chkRelAudiencias = document.getElementById("chk-rel-audiencias");
 const chkRelRegrasAutomacao = document.getElementById("chk-rel-regras-automacao");
+const chkRelApenasResumo = document.getElementById("chk-rel-apenas-resumo");
 const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
 const btnMarcarTudoRelatorio = document.getElementById("btn-marcar-tudo-relatorio");
 const btnDesmarcarTudoRelatorio = document.getElementById("btn-desmarcar-tudo-relatorio");
@@ -1783,6 +1784,7 @@ function lerOpcoesRelatorioUnidade() {
     audiencias: chkRelAudiencias.checked,
     regrasAutomacao: chkRelRegrasAutomacao.checked,
     localizadores: chkRelLocalizadores.checked,
+    apenasResumo: chkRelApenasResumo.checked,
   };
 }
 
@@ -1931,6 +1933,7 @@ const chkRelAltAgendaPadraoAudiencias = document.getElementById("chk-relalt-agen
 const chkRelAltAudienciasDetalhado = document.getElementById("chk-relalt-audiencias-detalhado");
 const chkRelAltRegrasAutomacao = document.getElementById("chk-relalt-regras-automacao");
 const chkRelAltLocalizadores = document.getElementById("chk-relalt-localizadores");
+const chkRelAltApenasResumo = document.getElementById("chk-relalt-apenas-resumo");
 const btnMarcarTudoRelatorioAlt = document.getElementById("btn-marcar-tudo-relatorio-alt");
 const btnDesmarcarTudoRelatorioAlt = document.getElementById("btn-desmarcar-tudo-relatorio-alt");
 const btnExportarRelatorioUnidadeAlt = document.getElementById("btn-exportar-relatorio-unidade-alt");
@@ -1956,6 +1959,7 @@ function lerOpcoesRelatorioUnidadeAlt() {
     audienciasDetalhado: chkRelAltAudienciasDetalhado.checked,
     regrasAutomacao: chkRelAltRegrasAutomacao.checked,
     localizadores: chkRelAltLocalizadores.checked,
+    apenasResumo: chkRelAltApenasResumo.checked,
   };
 }
 
@@ -3101,3 +3105,147 @@ document.getElementById("card-transcricao-ia").addEventListener("toggle", (e) =>
 atualizarStatusSetupIA();
 atualizarPromptsIA();
 atualizarListaCompletaIA();
+
+// ---- Análise de Automações (ATP) ----
+//
+// Compara as Regras de Automação (tela "Automatizar Tramitação
+// Processual") entre si e destaca possíveis conflitos (colisões,
+// sobreposições, perda de objeto, contradições, quebras de fluxo) - toda a
+// extração/comparação roda no background.js; aqui só dispara a análise e
+// renderiza o resultado.
+const areaStatusAtp = document.getElementById("area-status-atp");
+const btnAnalisarAtp = document.getElementById("btn-analisar-atp");
+const areaProgressoAtp = document.getElementById("area-progresso-atp");
+const textoProgressoAtp = document.getElementById("texto-progresso-atp");
+const areaResumoAtp = document.getElementById("area-resumo-atp");
+const listaConflitosAtp = document.getElementById("lista-conflitos-atp");
+const areaAcoesResultadoAtp = document.getElementById("area-acoes-resultado-atp");
+const btnBaixarRelatorioAtp = document.getElementById("btn-baixar-relatorio-atp");
+const areaErrosAtp = document.getElementById("area-erros-atp");
+
+let ultimosRegistrosAtp = [];
+let ultimaUrlOrigemAtp = "";
+
+function renderizarConflitosAtp(registros) {
+  listaConflitosAtp.innerHTML = "";
+  listaConflitosAtp.hidden = registros.length === 0;
+
+  for (const registro of registros) {
+    const li = document.createElement("li");
+    li.className = "item-fila-lote-ia";
+
+    const rotulo = document.createElement("span");
+
+    const linhaPar = document.createElement("strong");
+    linhaPar.textContent =
+      registro.b === "(Própria Regra)" ? `Regra ${registro.a} (própria regra)` : `Regra ${registro.a} × Regra ${registro.b}`;
+    rotulo.appendChild(linhaPar);
+
+    const linhaTipo = document.createElement("small");
+    linhaTipo.textContent = ` — ${registro.tipo} (impacto ${registro.impacto})`;
+    rotulo.appendChild(linhaTipo);
+
+    if (registro.motivo) {
+      const motivo = document.createElement("small");
+      motivo.textContent = registro.motivo;
+      motivo.style.display = "block";
+      rotulo.appendChild(motivo);
+    }
+    if (registro.sugestao) {
+      const sugestao = document.createElement("small");
+      sugestao.textContent = `Sugestão: ${registro.sugestao}`;
+      sugestao.style.display = "block";
+      rotulo.appendChild(sugestao);
+    }
+
+    li.appendChild(rotulo);
+    listaConflitosAtp.appendChild(li);
+  }
+}
+
+btnAnalisarAtp.addEventListener("click", async () => {
+  btnAnalisarAtp.disabled = true;
+  areaErrosAtp.hidden = true;
+  areaResumoAtp.hidden = true;
+  areaAcoesResultadoAtp.hidden = true;
+  listaConflitosAtp.hidden = true;
+  listaConflitosAtp.innerHTML = "";
+  areaProgressoAtp.hidden = false;
+  textoProgressoAtp.textContent = "Iniciando...";
+  aplicarStatus(areaStatusAtp, "Analisando conflitos entre as regras de automação...", undefined);
+
+  try {
+    const resposta = await chrome.runtime.sendMessage({ tipo: "ANALISAR_CONFLITOS_AUTOMACAO" });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a análise.");
+    }
+  } catch (e) {
+    aplicarStatus(areaStatusAtp, "Erro ao iniciar a análise.", "erro");
+    areaErrosAtp.hidden = false;
+    areaErrosAtp.textContent = e && e.message ? e.message : String(e);
+    areaProgressoAtp.hidden = true;
+    btnAnalisarAtp.disabled = false;
+  }
+});
+
+btnBaixarRelatorioAtp.addEventListener("click", async () => {
+  btnBaixarRelatorioAtp.disabled = true;
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "BAIXAR_RELATORIO_COLISOES_ATP",
+      registros: ultimosRegistrosAtp,
+      urlOrigem: ultimaUrlOrigemAtp,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao gerar o relatório.");
+    }
+  } catch (e) {
+    areaErrosAtp.hidden = false;
+    areaErrosAtp.textContent = e && e.message ? e.message : String(e);
+  } finally {
+    btnBaixarRelatorioAtp.disabled = false;
+  }
+});
+
+chrome.runtime.onMessage.addListener((mensagem) => {
+  if (!mensagem) return;
+
+  if (mensagem.tipo === "PROGRESSO_ANALISE_ATP") {
+    textoProgressoAtp.textContent = mensagem.texto || "Processando...";
+    aplicarStatus(areaStatusAtp, mensagem.texto || "Processando...", undefined);
+  }
+
+  if (mensagem.tipo === "ANALISE_ATP_FINALIZADA") {
+    areaProgressoAtp.hidden = true;
+    btnAnalisarAtp.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      const registros = resultado.registros || [];
+      ultimosRegistrosAtp = registros;
+      ultimaUrlOrigemAtp = resultado.urlOrigem || "";
+
+      if (resultado.erro) {
+        aplicarStatus(areaStatusAtp, "Análise concluída com aviso.", "erro");
+        areaErrosAtp.hidden = false;
+        areaErrosAtp.textContent = resultado.erro;
+        return;
+      }
+
+      const totalRegras = (resultado.regras || []).length;
+      areaResumoAtp.hidden = false;
+      areaResumoAtp.textContent =
+        registros.length === 0
+          ? `${totalRegras} regra(s) analisada(s). Nenhum conflito encontrado.`
+          : `${totalRegras} regra(s) analisada(s). ${registros.length} conflito(s) encontrado(s).`;
+
+      renderizarConflitosAtp(registros);
+      areaAcoesResultadoAtp.hidden = registros.length === 0;
+      aplicarStatus(areaStatusAtp, "Análise concluída.", "ok");
+    } else {
+      aplicarStatus(areaStatusAtp, "Erro ao analisar.", "erro");
+      areaErrosAtp.hidden = false;
+      areaErrosAtp.textContent = mensagem.erro || "Falha desconhecida ao analisar as regras de automação.";
+    }
+  }
+});

@@ -869,6 +869,661 @@ function textoComQuebras(elemento) {
   return (clone.textContent || "").replace(/[ \t]+/g, " ").trim();
 }
 
+// ===========================================================================
+// ATP - Análise detalhada de conflitos entre Regras de Automação
+// ===========================================================================
+// Extração estruturada (localizador REMOVER, Tipo de Controle/Critério,
+// localizador INCLUIR/Ação e Outros Critérios, cada um como uma expressão
+// lógica E/OU) da mesma tela "Automatizar Tramitação Processual" já lida por
+// "listarRegrasAutomacaoAtivas" acima - só que aqui o objetivo não é montar
+// um resumo em texto para o PDF/painel, e sim dados estruturados o
+// suficiente para comparar REGRAS ENTRE SI e detectar conflitos (colisões,
+// sobreposições, perda de objeto, contradições, quebra de fluxo).
+//
+// A lógica de extração/canonicalização abaixo é uma adaptação da lida no
+// projeto de código aberto "Análise de ATP eProc"
+// (https://github.com/oadrianocardoso/analise-atp-eproc, de Adriano
+// Cardoso) - a extração (que precisa do DOM real da tela) roda aqui no
+// content script; a comparação entre regras em si (pura, sem DOM) roda no
+// background.js, sobre os dados já extraídos e enviados por mensagem.
+//
+// Cada expressão lógica retornada aqui tem o formato
+// "{ canonical: string, clauses: string[][] }" - "clauses" é uma forma
+// normal disjuntiva (array de cláusulas; cada cláusula é um array de termos
+// unidos por E; cláusulas diferentes são unidas por OU). Arrays em vez de
+// Set/Map de propósito: o resultado precisa atravessar chrome.runtime
+// sendMessage/sendResponse até o background.js.
+
+function atpClean(x) {
+  const s = typeof x === "string" ? x : x && x.textContent ? x.textContent : "";
+  return s.replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function atpRmAcc(v) {
+  const s0 = v == null ? "" : String(v);
+  return s0.normalize ? s0.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : s0;
+}
+
+function atpNormKey(label) {
+  const k = (label || "").replace(/:/g, "").trim();
+  const semAcento = atpRmAcc(k).toLowerCase();
+  return semAcento.replace(/[^a-z0-9]/g, "") || null;
+}
+
+function atpParsePriority(p) {
+  const s = String(p ?? "").trim();
+  const m = s.match(/\d+/);
+  return m ? { raw: s, num: Number(m[0]), text: s } : { raw: s || "[*]", num: null, text: s || "[*]" };
+}
+
+// Remove artefatos visuais que não fazem parte do conteúdo em si (link
+// "alternar visualização" e reticências finais de texto truncado) antes de
+// extrair o texto/expressão de um bloco.
+function atpRemoveAlternarUI(root) {
+  if (!root || !root.querySelectorAll) return;
+  try {
+    root.querySelectorAll('span[id^="alternarVisualizacao"], a[href*="alternarVisualizacaoLista"]').forEach((n) => n.remove());
+  } catch (e) {}
+}
+
+function atpStripExpandArtifacts(root) {
+  if (!root) return;
+  try {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const nos = [];
+    while (walker.nextNode()) nos.push(walker.currentNode);
+    for (const tn of nos) {
+      const txt = String(tn.textContent || "");
+      if (/^\s*\.\.\.\s*$/.test(txt)) {
+        tn.textContent = " ";
+        continue;
+      }
+      tn.textContent = txt.replace(/\.\.\.\s*$/g, "");
+    }
+  } catch (e) {}
+}
+
+// Parseia uma expressão com conectores E/OU (em negrito, ex.:
+// "Localizador A" <b>OU</b> "Localizador B") e também separa termos por
+// <br> - devolve a expressão já em forma normal disjuntiva, canonicalizada
+// (termos/cláusulas ordenados) para poder comparar duas expressões só
+// comparando a string "canonical".
+function atpParsearExpressaoLogica(root) {
+  if (!root) return { clauses: [], canonical: "" };
+
+  const tokens = [];
+  let buf = "";
+
+  const flush = () => {
+    const t = atpClean(buf);
+    if (t) tokens.push({ type: "term", value: t });
+    buf = "";
+  };
+
+  const walk = (node) => {
+    const filhos = Array.from(node.childNodes || []);
+    for (const filho of filhos) {
+      if (filho.nodeType === 3) {
+        buf += " " + (filho.textContent || "");
+        continue;
+      }
+      if (filho.nodeType !== 1) continue;
+
+      const el = filho;
+      const tag = (el.tagName || "").toUpperCase();
+
+      if (tag === "BR") {
+        flush();
+        continue;
+      }
+
+      const negrito = !!(el.matches && el.matches('span[style*="font-weight:bold"], span.font-weight-bold, b, strong'));
+      const texto = atpClean(el.textContent || "");
+
+      if (negrito && (texto === "E" || texto === "OU")) {
+        flush();
+        tokens.push({ type: "op", value: texto });
+        continue;
+      }
+
+      walk(el);
+    }
+  };
+
+  walk(root);
+  flush();
+
+  const clausesSet = [];
+  let atual = new Set();
+  let ultimoOp = null;
+
+  const fecharClausula = () => {
+    if (atual.size) clausesSet.push(atual);
+    atual = new Set();
+  };
+
+  for (const t of tokens) {
+    if (t.type === "op") {
+      ultimoOp = t.value;
+      continue;
+    }
+    const termo = atpClean(t.value);
+    if (!termo) continue;
+
+    if (ultimoOp === "OU") fecharClausula();
+    atual.add(termo);
+    ultimoOp = null;
+  }
+  fecharClausula();
+
+  const clauses = clausesSet.map((s) => Array.from(s).map(atpClean).filter(Boolean).sort());
+  clauses.sort((a, b) => a.join("||").localeCompare(b.join("||")));
+  const canonical = clauses.map((arr) => arr.join(" && ")).join(" || ");
+
+  return { clauses, canonical };
+}
+
+// Coluna "Localizador REMOVER".
+function atpExtrairLocalizadorRemover(td) {
+  if (!td) return { canonical: "", clauses: [] };
+
+  const divCompleto = td.querySelector('div[id^="dadosCompletos_"]');
+  const raiz = (divCompleto || td).cloneNode(true);
+  atpRemoveAlternarUI(raiz);
+  atpStripExpandArtifacts(raiz);
+  raiz.querySelectorAll("img").forEach((n) => n.remove());
+  raiz.querySelectorAll('span[onmouseover*="Comportamento do Localizador REMOVER"]').forEach((n) => n.remove());
+
+  const expr = atpParsearExpressaoLogica(raiz);
+  if (expr && expr.canonical) return expr;
+
+  const txt = atpClean(raiz.textContent || "");
+  if (!txt) return { canonical: "", clauses: [] };
+  return { canonical: txt, clauses: [[txt]] };
+}
+
+// "Comportamento do Localizador REMOVER" (tooltip do ícone de lupa da
+// coluna REMOVER) - usado para detectar quando uma regra "remove o
+// processo do(s) localizador(es) informado(s)" (relevante para "Perda de
+// Objeto").
+function atpExtrairComportamentoRemover(tdRemover) {
+  if (!tdRemover) return { canonical: "", clauses: [] };
+
+  const el = tdRemover.querySelector(
+    '[onmouseover*="infraTooltipMostrar"][onmouseover*="Comportamento do Localizador REMOVER"]'
+  );
+  if (!el) return { canonical: "", clauses: [] };
+
+  const onmouseover = el.getAttribute("onmouseover") || "";
+  const m = onmouseover.match(/infraTooltipMostrar\(\s*(?:'([^']*)'|"([^"]*)")/);
+  const msgBruta = m ? m[1] || m[2] || "" : "";
+  const canonical = atpClean(
+    msgBruta
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+  );
+
+  if (!canonical) return { canonical: "", clauses: [] };
+  return { canonical, clauses: [[canonical]] };
+}
+
+// Coluna "Localizador INCLUIR/Ação": expressão lógica dos localizadores de
+// destino + lista de "ações programadas" (Lançar Evento Automatizado etc.,
+// identificadas pelo texto em negrito azul da própria tela do eproc), usada
+// para detectar "Quebra de Fluxo" (ação programada que mantém a regra no
+// mesmo localizador).
+function atpExtrairLocalizadorIncluirAcao(tdIncluir) {
+  if (!tdIncluir) return { canonical: "", clauses: [], acoes: [] };
+
+  const acoes = (() => {
+    try {
+      const raiz = tdIncluir.cloneNode(true);
+
+      const brs = Array.from(raiz.querySelectorAll("br"));
+      if (brs.length >= 2) {
+        let node = raiz.firstChild;
+        const parar = brs[1];
+        while (node && node !== parar) {
+          const proximo = node.nextSibling;
+          node.remove();
+          node = proximo;
+        }
+        if (node === parar) node.remove();
+      }
+
+      const divs = Array.from(raiz.querySelectorAll("div"));
+
+      const temNegrito = (st) => /font-weight\s*:\s*(bold|[6-9]00)\b/.test(st);
+      const temAzul = (st) => /color\s*:\s*(blue|rgb\s*\(\s*0\s*,\s*0\s*,\s*255\s*\)|#0000ff)\b/.test(st);
+      const temPreto = (st) => /color\s*:\s*(black|rgb\s*\(\s*0\s*,\s*0\s*,\s*0\s*\)|#000)\b/.test(st);
+
+      const ehAzul = (d) => {
+        const st = String(d.getAttribute("style") || "").toLowerCase();
+        return temAzul(st) && temNegrito(st);
+      };
+      const ehEtapaPreta = (d) => {
+        const st = String(d.getAttribute("style") || "").toLowerCase();
+        if (!(temPreto(st) && temNegrito(st))) return false;
+        const t = atpClean(d.textContent || "");
+        return /^#\d+\s*-\s*/.test(t) || /^#\d+\b/.test(t);
+      };
+
+      const divsAzuis = divs.filter(ehAzul);
+      if (!divsAzuis.length) return [];
+
+      const resultado = [];
+
+      for (const azul of divsAzuis) {
+        let etapa = "";
+        let anterior = azul.previousElementSibling;
+        while (anterior && anterior.tagName === "DIV") {
+          if (ehEtapaPreta(anterior)) {
+            etapa = atpClean(anterior.textContent || "");
+            break;
+          }
+          anterior = anterior.previousElementSibling;
+        }
+
+        const acao = atpClean(azul.textContent || "");
+        const vars = [];
+
+        const coletados = [];
+        let n = azul.nextSibling;
+
+        const ehNoDeEtapa = (node) => {
+          if (!node || node.nodeType !== 1) return false;
+          if (node.tagName !== "DIV") return false;
+          return ehEtapaPreta(node);
+        };
+
+        while (n) {
+          if (ehNoDeEtapa(n)) break;
+          if (n.nodeType === 1 && n.tagName === "DIV" && ehAzul(n)) break;
+          coletados.push(n);
+          n = n.nextSibling;
+        }
+
+        let rotuloPendente = null;
+
+        const empilharVar = (nome, valor) => {
+          const nn = atpClean(nome || "");
+          const vv = atpClean(valor || "");
+          if (!nn || !vv) return;
+          vars.push({ nome: nn, valor: vv });
+        };
+
+        for (const node of coletados) {
+          if (node.nodeType === 3) {
+            const txt = String(node.textContent || "");
+            if (txt.includes(":")) {
+              const partes = txt.split(":");
+              const rotulo = atpClean(partes[0] || "");
+              if (rotulo) rotuloPendente = rotulo;
+            }
+            continue;
+          }
+
+          if (node.nodeType !== 1) continue;
+          if (node.tagName === "BR") continue;
+
+          if (node.tagName === "SPAN") {
+            const st = String(node.getAttribute("style") || "").toLowerCase();
+            const negrito = st.includes("font-weight:bold") || st.includes("font-weight: bold");
+            if (negrito && rotuloPendente) {
+              empilharVar(rotuloPendente, node.textContent || "");
+              rotuloPendente = null;
+            }
+            continue;
+          }
+
+          if (rotuloPendente) {
+            const sp = node.querySelector && node.querySelector('span[style*="font-weight"]');
+            if (sp) {
+              empilharVar(rotuloPendente, sp.textContent || "");
+              rotuloPendente = null;
+            }
+          } else {
+            const nosTexto = [];
+            try {
+              const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, null);
+              while (walker.nextNode()) nosTexto.push(walker.currentNode);
+            } catch (e) {}
+            for (const tn of nosTexto) {
+              const t = String(tn.textContent || "");
+              if (t.includes(":")) {
+                const rotulo = atpClean(t.split(":")[0] || "");
+                if (rotulo) {
+                  const sp = node.querySelector && node.querySelector('span[style*="font-weight"]');
+                  if (sp) empilharVar(rotulo, sp.textContent || "");
+                }
+              }
+            }
+          }
+        }
+
+        if (acao) resultado.push({ etapa, acao, vars });
+      }
+
+      return resultado;
+    } catch (e) {
+      return [];
+    }
+  })();
+
+  const divCompleto = tdIncluir.querySelector('div[id^="dadosCompletos_"]');
+  if (divCompleto) {
+    const raiz = divCompleto.cloneNode(true);
+    atpRemoveAlternarUI(raiz);
+    atpStripExpandArtifacts(raiz);
+    const expr = atpParsearExpressaoLogica(raiz);
+    return { canonical: (expr && expr.canonical) || "", clauses: (expr && expr.clauses) || [], acoes };
+  }
+
+  const clone = tdIncluir.cloneNode(true);
+  const brs = Array.from(clone.querySelectorAll("br"));
+  if (brs.length >= 2) {
+    let node = brs[1];
+    while (node) {
+      const proximo = node.nextSibling;
+      node.remove();
+      node = proximo;
+    }
+  }
+  clone.querySelectorAll("img").forEach((n) => n.remove());
+
+  const expr = atpParsearExpressaoLogica(clone);
+  if (expr && expr.canonical) return { canonical: expr.canonical, clauses: expr.clauses, acoes };
+
+  const txt = atpClean(clone.textContent || "");
+  if (!txt) return { canonical: "", clauses: [], acoes };
+  return { canonical: txt, clauses: [[txt]], acoes };
+}
+
+// Coluna "Tipo de Controle / Critério" - formato "Por X ou Por Y / termo1
+// OU termo2 ..." - devolve uma expressão OR de pares "controle: critério".
+function atpExtrairTipoControleCriterio(td) {
+  if (!td) return { canonical: "", clauses: [], pares: [] };
+
+  const divCompleto = td.querySelector('div[id^="dadosCompletos_"]');
+  const base = divCompleto || td;
+  const raiz = base.cloneNode(true);
+  raiz.querySelectorAll("img").forEach((n) => n.remove());
+
+  const completo = atpClean(raiz.textContent || "");
+  if (!completo) return { canonical: "", clauses: [], pares: [] };
+
+  const barra = completo.indexOf("/");
+  if (barra === -1) {
+    const expr = atpParsearExpressaoLogica(raiz);
+    if (expr && expr.canonical) return { canonical: expr.canonical, clauses: expr.clauses, pares: [] };
+    return { canonical: completo, clauses: [[completo]], pares: [] };
+  }
+
+  const cabecalho = atpClean(completo.slice(0, barra));
+  const controlesBrutos = cabecalho
+    .split(/\s+ou\s+/i)
+    .map((s) => atpClean(s))
+    .filter(Boolean);
+  const controles = controlesBrutos.map((c) => (/^por\s+/i.test(c) ? c : "Por " + c));
+
+  const corpo = atpClean(completo.slice(barra + 1));
+  const termosBrutos = corpo
+    .split(/\s+OU\s+/i)
+    .map((s) => atpClean(s))
+    .filter(Boolean);
+
+  const mapearControlePorRotulo = (rotulo) => {
+    const L = atpClean(rotulo || "").toLowerCase();
+    if (!L) return "";
+    if (L.startsWith("evento")) return "Por Evento";
+    if (L.startsWith("peti")) return "Por Petição";
+    if (L.startsWith("document")) return "Por Documento";
+    return "";
+  };
+
+  const removerPrefixo = (t) => atpClean(t).replace(/^(EVENTO|PETIÇÃO|PETICAO|DOCUMENTO)\s*-\s*/i, "");
+
+  const pares = [];
+  if (controles.length === 1) {
+    const ctrl = controles[0];
+    for (const t of termosBrutos) {
+      const criterio = removerPrefixo(t);
+      if (criterio) pares.push({ controle: ctrl, criterio });
+    }
+  } else {
+    const semRotulo = [];
+    for (const t of termosBrutos) {
+      const m = t.match(/^(EVENTO|PETIÇÃO|PETICAO|DOCUMENTO)\s*-\s*/i);
+      const rotulo = m ? m[1] : "";
+      const mapeado = mapearControlePorRotulo(rotulo);
+      const criterio = removerPrefixo(t);
+
+      if (mapeado && controles.some((c) => atpClean(c).toLowerCase() === mapeado.toLowerCase())) {
+        pares.push({ controle: mapeado, criterio });
+      } else {
+        semRotulo.push(criterio);
+      }
+    }
+    if (controles.length) {
+      for (let i = 0; i < semRotulo.length; i++) {
+        const ctrl = controles[Math.min(i, controles.length - 1)];
+        if (semRotulo[i]) pares.push({ controle: ctrl, criterio: semRotulo[i] });
+      }
+    }
+  }
+
+  const partes = pares
+    .map((p) => `${p.controle}: ${p.criterio}`)
+    .map(atpClean)
+    .filter(Boolean);
+  const canonical = partes.join(" || ");
+  const clauses = partes.map((x) => [x]);
+
+  return { canonical, clauses, pares };
+}
+
+// Coluna "Outros Critérios" - cada "grupo" (bloco visual da própria tela)
+// vira uma expressão lógica própria; os grupos são combinados por E entre
+// si (limitação da tela: não há OU explícito ENTRE grupos, só dentro de
+// cada um).
+function atpExtrairOutrosCriterios(tdOutros) {
+  const vazio = { canonical: "", clauses: [], groups: [] };
+  if (!tdOutros) return vazio;
+
+  const raiz = (() => {
+    if (tdOutros.matches && tdOutros.matches('div[id^="dadosCompletos_"]')) return tdOutros;
+    const achado = tdOutros.querySelector ? tdOutros.querySelector('div[id^="dadosCompletos_"]') : null;
+    return achado || tdOutros;
+  })();
+
+  const gruposEls = Array.from(raiz.querySelectorAll ? raiz.querySelectorAll("div.ml-0.pt-2") : []);
+  if (!gruposEls.length) {
+    const bruto = atpClean(raiz.innerText || raiz.textContent || "");
+    return bruto
+      ? { canonical: bruto, clauses: [[bruto]], groups: [{ canonical: bruto, clauses: [[bruto]], header: "" }] }
+      : vazio;
+  }
+
+  const txt = (n) => atpClean((n && (n.textContent || n.innerText)) || "");
+
+  const ehConector = (el) => {
+    if (!el || el.nodeType !== 1) return false;
+    const t = txt(el);
+    if (!(t === "E" || t === "OU")) return false;
+    return !!(el.matches && el.matches('span[style*="font-weight:bold"], span.font-weight-bold, b, strong'));
+  };
+
+  const ehRotulo = (el) => {
+    if (!el || el.nodeType !== 1) return false;
+    if (!(el.matches && el.matches("span"))) return false;
+    if (el.classList && el.classList.contains("lblFiltro")) return true;
+    if (el.classList && el.classList.contains("font-weight-bold")) {
+      const t = txt(el);
+      if (!t) return false;
+      if (t === "E" || t === "OU") return false;
+      return t.trim().endsWith(":");
+    }
+    return false;
+  };
+
+  const extrairGrupo = (grupoEl) => {
+    const tokens = [];
+    let chaveAtual = null;
+    let buf = "";
+
+    const flush = () => {
+      const v = atpClean(buf);
+      if (chaveAtual && v) {
+        const termo = `${chaveAtual}=${v}`;
+        tokens.push({ type: "term", key: chaveAtual, value: v, term: termo });
+      }
+      buf = "";
+    };
+
+    const walk = (node) => {
+      for (const filho of Array.from(node.childNodes || [])) {
+        if (filho.nodeType === 3) {
+          buf += " " + (filho.textContent || "");
+          continue;
+        }
+        if (filho.nodeType !== 1) continue;
+
+        const el = filho;
+
+        if (ehRotulo(el)) {
+          flush();
+          chaveAtual = atpNormKey(txt(el));
+          continue;
+        }
+
+        if (ehConector(el)) {
+          flush();
+          tokens.push({ type: "op", value: txt(el) });
+          continue;
+        }
+
+        if ((el.tagName || "").toUpperCase() === "BR") {
+          buf += " ";
+          continue;
+        }
+
+        walk(el);
+      }
+    };
+
+    walk(grupoEl);
+    flush();
+
+    if (!tokens.some((t) => t.type === "term")) {
+      const bruto = atpClean(grupoEl.innerText || grupoEl.textContent || "");
+      if (!bruto) return { canonical: "", clauses: [] };
+      return { canonical: bruto, clauses: [[bruto]] };
+    }
+
+    const clausesSet = [];
+    let atual = new Set();
+    let ultimoOp = null;
+
+    const fecharClausula = () => {
+      if (atual.size) clausesSet.push(atual);
+      atual = new Set();
+    };
+
+    for (const t of tokens) {
+      if (t.type === "op") {
+        ultimoOp = t.value;
+        continue;
+      }
+      const termo = atpClean(t.term || t.value || "");
+      if (!termo) continue;
+      if (ultimoOp === "OU") fecharClausula();
+      atual.add(termo);
+      ultimoOp = null;
+    }
+    fecharClausula();
+
+    const clauses = clausesSet.map((s) => Array.from(s).map(atpClean).filter(Boolean).sort());
+    clauses.sort((a, b) => a.join("||").localeCompare(b.join("||")));
+    const canonical = clauses.map((arr) => arr.join(" && ")).join(" || ");
+
+    return { canonical, clauses };
+  };
+
+  const groups = gruposEls.map(extrairGrupo).filter((g) => g && g.canonical);
+  if (!groups.length) return vazio;
+
+  const canonical = groups
+    .map((g) => g.canonical)
+    .sort((a, b) => a.localeCompare(b))
+    .join(" && ");
+
+  const clauses = [];
+  for (const g of groups) for (const c of g.clauses || []) clauses.push(c);
+
+  return { canonical, clauses, groups };
+}
+
+// Extrai uma linha (regra) da tabela em formato estruturado, pronto para
+// ser comparado com as demais regras no background.js.
+function atpExtrairRegraDetalhada(tr) {
+  const tds = Array.from(tr.querySelectorAll(":scope > td"));
+  if (tds.length < 8) return null;
+
+  const tdNumPrior = tds[1];
+  const tdRemover = tds[3];
+  const tdTipo = tds[4];
+  const tdIncluir = tds[5];
+  const tdOutros = tds[6];
+
+  const spanNumero = tdNumPrior.querySelector("span > span");
+  let num = spanNumero ? atpClean(spanNumero.textContent || "") : "";
+  if (!num) {
+    const m = atpClean(tdNumPrior.textContent || "").match(/^\s*(\d{1,6})\b/);
+    num = m ? m[1] : "";
+  }
+  if (!num) return null;
+
+  const opcaoPrioridade = tdNumPrior.querySelector("select.selPrioridade option[selected]");
+  const prioridadeTexto = opcaoPrioridade
+    ? atpClean(opcaoPrioridade.textContent || "")
+    : atpClean(tdNumPrior.textContent || "");
+  const prioridade = atpParsePriority(prioridadeTexto);
+
+  return {
+    num,
+    prioridade,
+    localizadorRemover: atpExtrairLocalizadorRemover(tdRemover),
+    comportamentoRemover: atpExtrairComportamentoRemover(tdRemover),
+    localizadorIncluirAcao: atpExtrairLocalizadorIncluirAcao(tdIncluir),
+    tipoControleCriterio: atpExtrairTipoControleCriterio(tdTipo),
+    outrosCriterios: atpExtrairOutrosCriterios(tdOutros),
+  };
+}
+
+// Ponto de entrada: lê a tabela inteira da tela "Automatizar Tramitação
+// Processual" e devolve as regras ATIVAS (mesmo filtro de "switch ligado"
+// já usado em "listarRegrasAutomacaoAtivas"), já em formato estruturado.
+function listarRegrasAutomacaoDetalhado() {
+  const linhas = Array.from(document.querySelectorAll('tr[id^="trLocalizadorAut_"]'));
+  const regras = [];
+
+  for (const linha of linhas) {
+    const m = linha.id.match(/^trLocalizadorAut_(.+)$/);
+    const id = m ? m[1] : null;
+    const switchEl = id ? document.getElementById(`customSwitch${id}`) : null;
+    const ativa = switchEl ? switchEl.checked : true;
+    if (!ativa) continue;
+
+    const regra = atpExtrairRegraDetalhada(linha);
+    if (regra) regras.push(regra);
+  }
+
+  return { regras, totalRegrasNaPagina: linhas.length };
+}
+
 function listarRegrasAutomacaoAtivas() {
   const linhas = Array.from(document.querySelectorAll('tr[id^="trLocalizadorAut_"]'));
   const regras = [];
@@ -1007,6 +1662,11 @@ function listarRegrasAutomacaoAtivas() {
       outrosCriteriosResumo,
       linkEditar: linkEditar ? linkEditar.href : "",
       linkLog: linkLog ? linkLog.href : "",
+      // Extração estruturada (expressões lógicas E/OU de REMOVER, Tipo de
+      // Controle/Critério, INCLUIR/Ação e Outros Critérios) da MESMA linha,
+      // para a Análise de Automações (ATP) poder comparar as regras entre
+      // si sem precisar de uma segunda navegação até esta tela.
+      atp: atpExtrairRegraDetalhada(linha),
     });
   }
 
@@ -1092,6 +1752,9 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
   if (mensagem && mensagem.tipo === "LISTAR_REGRAS_AUTOMACAO") {
     sendResponse(listarRegrasAutomacaoAtivas());
+  }
+  if (mensagem && mensagem.tipo === "LISTAR_REGRAS_AUTOMACAO_DETALHADO") {
+    sendResponse(listarRegrasAutomacaoDetalhado());
   }
   if (mensagem && mensagem.tipo === "LER_PERFIL_ATUAL") {
     sendResponse(lerPerfilAtual());
