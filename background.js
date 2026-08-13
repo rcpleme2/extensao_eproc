@@ -6894,6 +6894,13 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   agendaPadraoAudiencias: false,
   audienciasDetalhado: false,
   regrasAutomacao: true,
+  // Subitem próprio, marcável independentemente de "regrasAutomacao" - a
+  // extensão só abre a tela de regras de automação (custo de uma
+  // navegação em aba oculta) se PELO MENOS um dos dois estiver marcado
+  // (ver "opcoesFinais.regrasAutomacao || opcoesFinais.analiseAtp" mais
+  // abaixo), reaproveitando a mesma extração para os dois quando ambos
+  // estão marcados.
+  analiseAtp: true,
   localizadores: true,
   // Não é um "item a incluir" como os demais (não soma na checagem de "ao
   // menos um item selecionado" logo abaixo) - é um modo de exibição: com
@@ -7336,15 +7343,15 @@ async function exportarRelatorioGerencialUnidade(
   // (perfil MAGISTRADO/GESTÃO DA UNIDADE, valorUnidade nulo), esse filtro
   // não aparece na tela - a extensão nem tenta selecioná-lo.
   const regrasAutomacao = { regras: [], erros: [] };
-  // Análise de Automações (ATP): subitem vinculado a "Regras de
-  // automação" - com o mesmo item marcado, o relatório também compara as
-  // regras entre si e lista os conflitos encontrados (ver
-  // "atpAnalisarConflitos"), reaproveitando a MESMA extração acima (cada
-  // regra já vem com um campo "atp" estruturado, ver "atp:" em
-  // "listarRegrasAutomacaoAtivas" em content.js) - sem precisar de uma
-  // segunda navegação até a tela de regras.
+  // Análise de Automações (ATP): subitem PRÓPRIO, marcável
+  // independentemente de "Regras de automação" - a extensão só abre a
+  // tela de regras (custo de uma navegação em aba oculta) se PELO MENOS
+  // um dos dois estiver marcado, reaproveitando a MESMA extração para os
+  // dois quando ambos estão marcados (cada regra já vem com um campo
+  // "atp" estruturado, ver "atp:" em "listarRegrasAutomacaoAtivas" em
+  // content.js).
   const analiseAtp = { registros: [], erro: null };
-  if (opcoesFinais.regrasAutomacao) {
+  if (opcoesFinais.regrasAutomacao || opcoesFinais.analiseAtp) {
     notificar("Consultando regras de automação ativas...");
     const r = await abrirAbaEListarRegrasAutomacao(abaAtual.url, valorUnidade ? nomeUnidade : null);
     regrasAutomacao.regras = r.regras || [];
@@ -7355,7 +7362,7 @@ async function exportarRelatorioGerencialUnidade(
       );
     }
 
-    if (regrasAutomacao.regras.length > 0) {
+    if (opcoesFinais.analiseAtp && regrasAutomacao.regras.length > 0) {
       notificar("Analisando conflitos entre as regras de automação...");
       const regrasDetalhadas = regrasAutomacao.regras.map((regra) => regra.atp).filter(Boolean);
       if (regrasDetalhadas.length > 0) {
@@ -7496,23 +7503,39 @@ async function exportarRelatorioGerencialUnidade(
   // Quais seções terão, de fato, uma tabela discriminada anexada ao final -
   // só essas ganham "id" no resumo (logo, só essas mostram a dica "ver
   // relação »" e recebem um link clicável). Evita prometer um link para uma
-  // seção que ficou sem linhas (ex.: opção marcada, mas zero processos).
-  const temTabelaDiscriminada = {
-    processosAtivos: separarPorCompetencia
-      ? processosAtivosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
-      : Boolean(processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0),
-    suspensos: separarPorCompetencia
-      ? suspensosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
-      : Boolean(suspensos.tabela && suspensos.tabela.linhas.length > 0),
-    mandados: Boolean(opcoesFinais.mandados && mandados.linhas.length > 0),
-    paralisados: separarPorCompetencia
-      ? paralisadosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
-      : Boolean(processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0),
-    remessasJuizesLeigos: Boolean(opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0),
-    audiencias: Boolean(opcoesFinais.audiencias && audiencias.linhas.length > 0),
-    agendaPadraoAudiencias: Boolean(opcoesFinais.agendaPadraoAudiencias && agendaPadraoAudiencias.linhas.length > 0),
-    audienciasDetalhado: Boolean(opcoesFinais.audienciasDetalhado && audienciasDetalhado.linhas.length > 0),
-  };
+  // seção que ficou sem linhas (ex.: opção marcada, mas zero processos) -
+  // e, com "apenasResumo" marcado, NENHUMA seção ganha "id"/dica/link, já
+  // que a seção 2 (tabelas discriminadas) inteira fica de fora do PDF
+  // nesse modo (ver "opcoesFinais.apenasResumo" mais abaixo) - sem essa
+  // checagem aqui, a "dica" "ver relação »" continuaria aparecendo no
+  // resumo apontando para uma tabela que nunca chega a existir no PDF.
+  const temTabelaDiscriminada = opcoesFinais.apenasResumo
+    ? {
+        processosAtivos: false,
+        suspensos: false,
+        mandados: false,
+        paralisados: false,
+        remessasJuizesLeigos: false,
+        audiencias: false,
+        agendaPadraoAudiencias: false,
+        audienciasDetalhado: false,
+      }
+    : {
+        processosAtivos: separarPorCompetencia
+          ? processosAtivosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
+          : Boolean(processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0),
+        suspensos: separarPorCompetencia
+          ? suspensosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
+          : Boolean(suspensos.tabela && suspensos.tabela.linhas.length > 0),
+        mandados: Boolean(opcoesFinais.mandados && mandados.linhas.length > 0),
+        paralisados: separarPorCompetencia
+          ? paralisadosPorCompetencia.some((r) => r.tabela && r.tabela.linhas && r.tabela.linhas.length > 0)
+          : Boolean(processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0),
+        remessasJuizesLeigos: Boolean(opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0),
+        audiencias: Boolean(opcoesFinais.audiencias && audiencias.linhas.length > 0),
+        agendaPadraoAudiencias: Boolean(opcoesFinais.agendaPadraoAudiencias && agendaPadraoAudiencias.linhas.length > 0),
+        audienciasDetalhado: Boolean(opcoesFinais.audienciasDetalhado && audienciasDetalhado.linhas.length > 0),
+      };
 
   const secoesResumo = [];
   if (opcoesFinais.processosAtivos) {
@@ -7580,10 +7603,20 @@ async function exportarRelatorioGerencialUnidade(
     // "Aguardando cumprimento" cada oficial tem.
     const contagemPorSituacao = new Map();
     const contagemPorOficial = new Map();
+    // Data de Remessa mais antiga entre os mandados "Aguardando
+    // cumprimento" de cada oficial - ou seja, há quanto tempo o mandado
+    // mais velho está em posse daquele servidor (ver "MANDADOS POR
+    // CUMPRIDOR" logo abaixo).
+    const dataRemessaMaisAntigaPorOficial = new Map();
     for (const m of mandados.linhas) {
       contagemPorSituacao.set(m.situacao, (contagemPorSituacao.get(m.situacao) || 0) + 1);
       if (m.responsavel) {
         contagemPorOficial.set(m.responsavel, (contagemPorOficial.get(m.responsavel) || 0) + 1);
+        const dataMs = parseDataBr(m.dataRemessa);
+        if (dataMs != null) {
+          const atual = dataRemessaMaisAntigaPorOficial.get(m.responsavel);
+          if (atual == null || dataMs < atual) dataRemessaMaisAntigaPorOficial.set(m.responsavel, dataMs);
+        }
       }
     }
     const linhasSituacao = Array.from(contagemPorSituacao.entries())
@@ -7595,7 +7628,11 @@ async function exportarRelatorioGerencialUnidade(
     if (contagemPorOficial.size > 0) {
       const linhasOficial = Array.from(contagemPorOficial.entries())
         .sort((a, b) => b[1] - a[1])
-        .map(([nome, contagem]) => ({ rotulo: nome, valor: contagem }));
+        .map(([nome, contagem]) => {
+          const dataMs = dataRemessaMaisAntigaPorOficial.get(nome);
+          const dataFormatada = dataMs != null ? new Date(dataMs).toLocaleDateString("pt-BR") : null;
+          return { rotulo: nome, valor: dataFormatada ? `${contagem} (${dataFormatada})` : contagem };
+        });
       secoesResumo.push({ titulo: "MANDADOS POR CUMPRIDOR", linhas: linhasOficial });
     }
   }
@@ -7869,10 +7906,13 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
     const bytesRegras = await construirPdfRegras(regrasAutomacao.regras, nomeUnidade);
     await anexarPaginas(bytesRegras);
+  }
 
-    // Análise de Automações (ATP): subitem de "Regras de automação" -
-    // entra logo depois dos cartões de cada regra, com a lista de
-    // conflitos encontrados entre elas (ver "analiseAtp" acima).
+  // Análise de Automações (ATP): subitem PRÓPRIO (ver "analiseAtp" acima)
+  // - entra logo depois dos cartões de "Regras de Automação" quando os
+  // dois estão marcados, mas pode aparecer sozinho se só a Análise de
+  // Automações estiver marcada.
+  if (opcoesFinais.analiseAtp && regrasAutomacao.regras.length > 0) {
     const bytesConflitosAtp = await construirPaginaConflitosAtp(nomeUnidade, analiseAtp.registros);
     await anexarPaginas(bytesConflitosAtp);
   }
@@ -9252,6 +9292,16 @@ function parseDataHoraBr(texto) {
   return new Date(Number(ano), Number(mes) - 1, Number(dia), Number(hora), Number(min), Number(seg)).getTime();
 }
 
+// Igual a "parseDataHoraBr", mas so' exige a parte "dd/mm/aaaa" (sem
+// hora) - usado em colunas que trazem so' a data, como "Remessa" da
+// tabela de Mandados em Aberto.
+function parseDataBr(texto) {
+  const m = (texto || "").match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return null;
+  const [, dia, mes, ano] = m;
+  return new Date(Number(ano), Number(mes) - 1, Number(dia)).getTime();
+}
+
 // Abre uma aba oculta direto na URL de processos de UM localizador
 // (recebida do painel, ja' capturada durante a listagem de
 // Localizadores do Órgão), coleta todas as paginas e gera os arquivos
@@ -9647,7 +9697,7 @@ function selecionarOrgaoRegrasAutomacaoNaPagina(nomeUnidade) {
 // logica de raspagem ja' usada quando o usuario estava manualmente
 // nessa tela, so' que agora rodando numa aba que a propria extensao
 // controla, sem exigir navegacao manual.
-async function abrirAbaEListarRegrasAutomacao(urlBase, nomeUnidade, tipoMensagem = "LISTAR_REGRAS_AUTOMACAO") {
+async function abrirAbaEListarRegrasAutomacao(urlBase, nomeUnidade) {
   let aba;
   try {
     await adquirirSlotDeAbaOculta();
@@ -9720,7 +9770,7 @@ async function abrirAbaEListarRegrasAutomacao(urlBase, nomeUnidade, tipoMensagem
     let erroConexao = null;
     for (let tentativa = 0; tentativa < 6; tentativa += 1) {
       try {
-        resposta = await chrome.tabs.sendMessage(aba.id, { tipo: tipoMensagem });
+        resposta = await chrome.tabs.sendMessage(aba.id, { tipo: "LISTAR_REGRAS_AUTOMACAO" });
         erroConexao = null;
       } catch (e) {
         resposta = null;
@@ -9791,49 +9841,6 @@ const ATP_CONFIG = {
   analisarPerdaObjetoCondicional: true,
   analisarQuebraFluxo: true,
 };
-
-const ATP_TIPOS_TOOLTIPS = {
-  "COLISÃO TOTAL":
-    'COLISÃO TOTAL = Quando "Prioridade", "Localizador REMOVER", "Tipo de Controle / Critério", "Localizador INCLUIR / Ação" e "Outros Critérios" são iguais.',
-  "COLISÃO PARCIAL":
-    'COLISÃO PARCIAL = Quando "Localizador REMOVER", "Tipo de Controle / Critério", "Localizador INCLUIR / Ação" e "Outros Critérios" são iguais, mas a "Prioridade" é diferente.',
-  SOBREPOSIÇÃO:
-    'SOBREPOSIÇÃO = Quando "Localizador REMOVER" e "Tipo de Controle / Critério" são iguais, uma regra é mais ampla em "Outros Critérios" (ou idêntica) e executa antes da outra.',
-  "POSSÍVEL SOBREPOSIÇÃO":
-    'POSSÍVEL SOBREPOSIÇÃO = Quando "Localizador REMOVER" e "Tipo de Controle / Critério" são iguais, há diferença de abrangência em "Outros Critérios" e as prioridades de execução são equivalentes.',
-  "PERDA DE OBJETO":
-    "PERDA DE OBJETO = Quando uma regra anterior remove o processo do(s) localizador(es) informado(s), impedindo que a regra seguinte capture o objeto necessário.",
-  "PERDA DE OBJETO CONDICIONAL":
-    "PERDA DE OBJETO CONDICIONAL = Quando uma regra pode remover parte do conjunto que outra regra exige em combinação (AND), bloqueando disparos em parte dos casos.",
-  CONTRADIÇÃO:
-    "CONTRADIÇÃO = Quando a própria regra contém critérios mutuamente exclusivos no mesmo ramo (AND), tornando-a logicamente impossível.",
-  "QUEBRA DE FLUXO":
-    'QUEBRA DE FLUXO = Quando a regra executa Ação Programada, mas mantém os mesmos localizadores (INCLUIR == REMOVER), podendo reexecutar em ciclo.',
-  "LOOPING POTENCIAL":
-    "LOOPING POTENCIAL = Quando duas regras se retroalimentam (uma remove o que a outra inclui, e vice-versa), gerando repetição.",
-};
-
-const ATP_MINI_HELP_TXT = [
-  ATP_TIPOS_TOOLTIPS["COLISÃO TOTAL"],
-  "",
-  ATP_TIPOS_TOOLTIPS["COLISÃO PARCIAL"],
-  "",
-  ATP_TIPOS_TOOLTIPS["SOBREPOSIÇÃO"],
-  "",
-  ATP_TIPOS_TOOLTIPS["POSSÍVEL SOBREPOSIÇÃO"],
-  "",
-  ATP_TIPOS_TOOLTIPS["PERDA DE OBJETO"],
-  "",
-  ATP_TIPOS_TOOLTIPS["PERDA DE OBJETO CONDICIONAL"],
-  "",
-  ATP_TIPOS_TOOLTIPS["CONTRADIÇÃO"],
-  "",
-  ATP_TIPOS_TOOLTIPS["QUEBRA DE FLUXO"],
-  "",
-  ATP_TIPOS_TOOLTIPS["LOOPING POTENCIAL"],
-  "",
-  "PRIORIDADE: menor número executa antes. Prioridade não definida executa por último (após todas as prioridades definidas).",
-].join("\n");
 
 function atpExprCanon(expr, fallback) {
   const base = expr && typeof expr === "object" ? expr.canonical || "" : expr || "";
@@ -10544,57 +10551,12 @@ function atpGerarRegistrosColisoes(conflictsByRule) {
   return registros;
 }
 
-// Relatório técnico em TXT com todas as colisões, no mesmo formato usado
-// pela ferramenta de referência (resumo por tipo + detalhamento por par +
-// mini-guia de referência no final).
-function atpConstruirRelatorioColisoesTxt(registros, urlOrigem) {
-  const linhas = [];
-  linhas.push("Relatório de Colisões (ATP / eProc)");
-  linhas.push(`Data/Hora: ${new Date().toLocaleString("pt-BR")}`);
-  if (urlOrigem) linhas.push(`URL: ${urlOrigem}`);
-  linhas.push("");
-  linhas.push(`Total de conflitos listados: ${registros.length}`);
-  linhas.push("Resumo por tipo:");
-
-  const contagemPorTipo = new Map();
-  for (const r of registros) contagemPorTipo.set(r.tipo, (contagemPorTipo.get(r.tipo) || 0) + 1);
-  Array.from(contagemPorTipo.keys())
-    .sort((a, b) => contagemPorTipo.get(b) - contagemPorTipo.get(a))
-    .forEach((tipo) => linhas.push(`- ${tipo}: ${contagemPorTipo.get(tipo)}`));
-
-  linhas.push("");
-  linhas.push("Detalhamento:");
-
-  for (const r of registros) {
-    linhas.push("");
-    linhas.push(r.b === "(Própria Regra)" ? `Regra (${r.a}) x (Própria Regra)` : `Regra (${r.a}) x Regra (${r.b})`);
-    linhas.push(`Tipo: ${r.tipo}`);
-    if (r.motivo) linhas.push(`Colisão: ${r.motivo}`);
-    if (r.sugestao) {
-      linhas.push("Sugestão:");
-      linhas.push(`- ${r.sugestao}`);
-    }
-  }
-
-  if (!registros.length) {
-    linhas.push("");
-    linhas.push("Nenhuma colisão foi encontrada.");
-  }
-
-  linhas.push("");
-  linhas.push("----------------------------------------------------------------");
-  linhas.push("");
-  linhas.push("Mini-help:");
-  linhas.push(ATP_MINI_HELP_TXT);
-
-  return linhas.join("\n");
-}
-
 // Paginas proprias (portrait) com os conflitos encontrados pela Análise de
-// Automações (ATP) - subitem do Relatório da Unidade, vinculado a "Regras
-// de automação" (ver "exportarRelatorioGerencialUnidade"). Mesmo estilo
-// visual de "construirPaginaListaLocalizadores": um item por linha, com
-// marcador "-" e recuo pendurado.
+// Automações (ATP) - subitem PRÓPRIO do Relatório da Unidade, marcável
+// independentemente de "Regras de automação" (ver
+// "exportarRelatorioGerencialUnidade"). Mesmo estilo visual de
+// "construirPaginaListaLocalizadores": um item por linha, com marcador
+// "-" e recuo pendurado.
 async function construirPaginaConflitosAtp(nomeUnidade, registros) {
   const pdf = await PDFDocument.create();
   const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
@@ -10682,58 +10644,6 @@ async function construirPaginaConflitosAtp(nomeUnidade, registros) {
 
   desenharRodapePaginas(pdf, fonteNormal, largura, margem);
   return pdf.save();
-}
-
-// Orquestra a análise completa: abre a tela "Automatizar Tramitação
-// Processual" numa aba oculta (reaproveitando a mesma navegação/seleção de
-// órgão de "abrirAbaEListarRegrasAutomacao"), pede a extração estruturada
-// ao content script e roda o motor de comparação sobre o resultado.
-async function analisarConflitosRegrasAutomacao(urlBase, nomeUnidade, aoProgredir) {
-  const notificar = (texto) => {
-    if (aoProgredir) aoProgredir(texto);
-  };
-
-  notificar("Abrindo a tela de Regras de Automação...");
-  const { regras, totalRegrasNaPagina, erro } = await abrirAbaEListarRegrasAutomacao(
-    urlBase,
-    nomeUnidade,
-    "LISTAR_REGRAS_AUTOMACAO_DETALHADO"
-  );
-
-  if (erro) {
-    return { regras: [], registros: [], totalRegrasNaPagina: 0, erro };
-  }
-  if (regras.length === 0) {
-    return {
-      regras: [],
-      registros: [],
-      totalRegrasNaPagina: totalRegrasNaPagina || 0,
-      erro: totalRegrasNaPagina > 0 ? null : "Nenhuma regra de automação ativa encontrada para a unidade atual.",
-    };
-  }
-
-  notificar(`Analisando conflitos entre ${regras.length} regra(s)...`);
-  const conflictsByRule = atpAnalisarConflitos(regras);
-  const registros = atpGerarRegistrosColisoes(conflictsByRule);
-
-  return { regras, registros, totalRegrasNaPagina, erro: null };
-}
-
-// Atalho para o cartão do painel: sempre a unidade/perfil atualmente
-// habilitado na aba ativa (sem escolher outra unidade) - mesmo padrão já
-// usado por "exportarRelatorioUnidadeAtual" para o Relatório da Unidade.
-async function analisarConflitosAutomacoesUnidadeAtual(aoProgredir) {
-  const notificar = (texto) => {
-    if (aoProgredir) aoProgredir(texto);
-  };
-
-  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!abaAtual || !abaAtual.id || !abaAtual.url) {
-    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
-  }
-
-  const resultado = await analisarConflitosRegrasAutomacao(abaAtual.url, null, notificar);
-  return { ...resultado, urlOrigem: abaAtual.url };
 }
 
 // Monta um documento HTML autocontido, um "cartao" por regra ativa,
@@ -11746,36 +11656,6 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
           .catch(() => {});
       });
     sendResponse({ ok: true });
-    return true;
-  }
-
-  if (mensagem && mensagem.tipo === "ANALISAR_CONFLITOS_AUTOMACAO") {
-    // Mesmo padrao das demais operacoes em segundo plano.
-    analisarConflitosAutomacoesUnidadeAtual((texto) => {
-      chrome.runtime.sendMessage({ tipo: "PROGRESSO_ANALISE_ATP", texto }).catch(() => {});
-    })
-      .then((resultado) => {
-        chrome.runtime.sendMessage({ tipo: "ANALISE_ATP_FINALIZADA", ok: true, resultado }).catch(() => {});
-      })
-      .catch((e) => {
-        chrome.runtime
-          .sendMessage({ tipo: "ANALISE_ATP_FINALIZADA", ok: false, erro: e && e.message ? e.message : String(e) })
-          .catch(() => {});
-      });
-    sendResponse({ ok: true });
-    return true;
-  }
-
-  if (mensagem && mensagem.tipo === "BAIXAR_RELATORIO_COLISOES_ATP") {
-    (async () => {
-      try {
-        const txt = atpConstruirRelatorioColisoesTxt(mensagem.registros || [], mensagem.urlOrigem || "");
-        await baixarUm("eproc/relatorio_colisoes_ATP.txt", construirDataUrl("text/plain", txt));
-        sendResponse({ ok: true });
-      } catch (e) {
-        sendResponse({ ok: false, erro: e && e.message ? e.message : String(e) });
-      }
-    })();
     return true;
   }
 

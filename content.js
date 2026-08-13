@@ -1503,27 +1503,6 @@ function atpExtrairRegraDetalhada(tr) {
   };
 }
 
-// Ponto de entrada: lê a tabela inteira da tela "Automatizar Tramitação
-// Processual" e devolve as regras ATIVAS (mesmo filtro de "switch ligado"
-// já usado em "listarRegrasAutomacaoAtivas"), já em formato estruturado.
-function listarRegrasAutomacaoDetalhado() {
-  const linhas = Array.from(document.querySelectorAll('tr[id^="trLocalizadorAut_"]'));
-  const regras = [];
-
-  for (const linha of linhas) {
-    const m = linha.id.match(/^trLocalizadorAut_(.+)$/);
-    const id = m ? m[1] : null;
-    const switchEl = id ? document.getElementById(`customSwitch${id}`) : null;
-    const ativa = switchEl ? switchEl.checked : true;
-    if (!ativa) continue;
-
-    const regra = atpExtrairRegraDetalhada(linha);
-    if (regra) regras.push(regra);
-  }
-
-  return { regras, totalRegrasNaPagina: linhas.length };
-}
-
 function listarRegrasAutomacaoAtivas() {
   const linhas = Array.from(document.querySelectorAll('tr[id^="trLocalizadorAut_"]'));
   const regras = [];
@@ -1752,9 +1731,6 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
   if (mensagem && mensagem.tipo === "LISTAR_REGRAS_AUTOMACAO") {
     sendResponse(listarRegrasAutomacaoAtivas());
-  }
-  if (mensagem && mensagem.tipo === "LISTAR_REGRAS_AUTOMACAO_DETALHADO") {
-    sendResponse(listarRegrasAutomacaoDetalhado());
   }
   if (mensagem && mensagem.tipo === "LER_PERFIL_ATUAL") {
     sendResponse(lerPerfilAtual());

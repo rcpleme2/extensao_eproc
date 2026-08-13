@@ -933,7 +933,12 @@ enquanto ele só mostra o **Relatório para Correição** (ver abaixo).
    fim.** Cada bloco do resumo que tem uma tabela correspondente exibe a dica
    **"ver relação »"** na faixa do título e é **clicável** — leva direto à
    sua tabela discriminada, lá no final do PDF (link interno do PDF; funciona
-   em qualquer leitor que respeite links). As seções abaixo descrevem cada
+   em qualquer leitor que respeite links). Marcando a opção **"Apenas
+   resumos"**, a etapa **(3)** inteira (tabelas discriminadas de
+   processos) fica de fora do PDF — só a capa/resumo, os gráficos, Regras
+   de Automação/Análise de Automações (ATP) e Localizadores entram; nesse
+   modo, nenhum bloco do resumo mostra a dica "ver relação »" (não haveria
+   tabela nenhuma para o link levar). As seções abaixo descrevem cada
    bloco **na ordem dos checkboxes "Itens a incluir no PDF"** (o resumo segue
    essa ordem; as tabelas, a mesma ordem, mas agrupadas no final):
    - Nome da unidade e data/hora da extração.
@@ -1373,9 +1378,12 @@ cobertas abaixo.
   frequente, Total por último), e **"MANDADOS POR CUMPRIDOR"**, com a
   contagem de mandados aguardando cumprimento por Responsável (também da
   mais frequente para a menos frequente; só aparece quando algum mandado
-  já tem oficial designado). Não precisa de nenhuma seleção de unidade (a
-  tela já reflete a unidade habilitada, mesma lógica das demais seções
-  deste cartão).
+  já tem oficial designado). Ao lado da contagem de cada oficial, entre
+  parênteses, a **Data da Remessa mais antiga** entre os mandados dele —
+  ou seja, há quanto tempo o mandado mais velho está em posse daquele
+  servidor (ex.: "5 (10/01/2024)"). Não precisa de nenhuma seleção de
+  unidade (a tela já reflete a unidade habilitada, mesma lógica das demais
+  seções deste cartão).
 - O nome usado na capa/título do PDF (o texto "Unidade: `<nome>`", diferente
   do título "Relatório da Unidade" acima) vem do próprio seletor de perfil
   do eproc (`#selInfraUnidades`, cabeçalho superior) — não a sigla exibida
@@ -1575,21 +1583,25 @@ para confirmar o caminho atual do menu.
 
 ## Análise de Automações (ATP)
 
-Cartão próprio no painel (ícone 🧩): compara as **Regras de Automação**
-da unidade atualmente habilitada (mesma tela "Automatizar Tramitação
-Processual" da seção anterior) **entre si**, para encontrar conflitos que
-passam despercebidos ao ler a tabela original regra por regra. A lógica de
-extração/comparação é uma adaptação do motor de análise do projeto de
-código aberto ["Análise de ATP eProc"](https://github.com/oadrianocardoso/analise-atp-eproc)
+**Subitem próprio** do Relatório da Unidade/Relatório para Correição
+("Itens a incluir no PDF"), marcável **independentemente** do item
+"Regras de automação": compara as **Regras de Automação** da unidade
+atualmente habilitada (tela "Automatizar Tramitação Processual") **entre
+si**, para encontrar conflitos que passam despercebidos ao ler a tabela
+original regra por regra. A lógica de extração/comparação é uma adaptação
+do motor de análise do projeto de código aberto
+["Análise de ATP eProc"](https://github.com/oadrianocardoso/analise-atp-eproc)
 (de Adriano Cardoso), portado para rodar como parte desta extensão em vez
 de um userscript separado (Tampermonkey).
 
-Clique em **"Analisar conflitos entre regras"**: a extensão abre a tela de
-regras numa aba oculta, extrai de cada regra ativa uma expressão lógica
-estruturada (E/OU) do **Localizador REMOVER**, do **Tipo de Controle /
-Critério**, do **Localizador INCLUIR / Ação** (incluindo as ações
-programadas, ex. "Lançar Evento Automatizado") e dos **Outros Critérios**,
-e então compara toda regra contra toda outra regra ativa, procurando por:
+Com o item marcado, a extensão abre a tela de regras numa aba oculta
+(a mesma navegação já usada por "Regras de automação" — quando os dois
+itens estão marcados, só uma navegação é feita, reaproveitada pelos
+dois), extrai de cada regra ativa uma expressão lógica estruturada (E/OU)
+do **Localizador REMOVER**, do **Tipo de Controle / Critério**, do
+**Localizador INCLUIR / Ação** (incluindo as ações programadas, ex.
+"Lançar Evento Automatizado") e dos **Outros Critérios**, e então compara
+toda regra contra toda outra regra ativa, procurando por:
 
 - **Colisão Total**: duas regras idênticas em tudo (Prioridade, REMOVER,
   Tipo de Controle/Critério, INCLUIR/Ação e Outros Critérios) — uma delas é
@@ -1617,12 +1629,15 @@ de análise, mas fica desligado por padrão, igual na ferramenta de
 referência: é o tipo mais sujeito a falso positivo, já que alternar entre
 dois localizadores pode ser parte legítima do fluxo normal do processo.)
 
-Cada conflito encontrado aparece na lista do painel com a regra (ou par de
-regras) envolvida, o tipo, o motivo técnico e uma sugestão de correção.
-Com pelo menos um conflito, o botão **"Baixar relatório de colisões
-(TXT)"** gera um arquivo com o resumo por tipo, o detalhamento de cada
-caso e um mini-guia de referência dos tipos de conflito no final — pronto
-para anexar em chamado ou revisar com a equipe responsável pelas regras.
+Cada conflito encontrado entra em páginas próprias do PDF, logo depois dos
+cartões de "Regras de Automação" (quando os dois itens estão marcados) —
+uma linha por par de regras (ou "própria regra", no caso de Contradição),
+com o tipo, o motivo técnico e uma sugestão de correção. Sem nenhum
+conflito, a seção entra só com "Nenhum conflito encontrado" em vez de
+ficar totalmente ausente. Se **apenas** o item "Análise de Automações"
+estiver marcado (sem "Regras de automação"), a extensão ainda consulta as
+regras (mesma navegação), só não gera o bloco com os cartões de cada
+regra — só a lista de conflitos.
 
 **Limitações**: assim como a ferramenta de referência, a análise avalia
 só as regras **ativas** da unidade atualmente habilitada (perfil
