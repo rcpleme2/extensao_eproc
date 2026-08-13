@@ -1662,6 +1662,11 @@ function listarRegrasAutomacaoAtivas() {
       outrosCriteriosResumo,
       linkEditar: linkEditar ? linkEditar.href : "",
       linkLog: linkLog ? linkLog.href : "",
+      // Extração estruturada (expressões lógicas E/OU de REMOVER, Tipo de
+      // Controle/Critério, INCLUIR/Ação e Outros Critérios) da MESMA linha,
+      // para a Análise de Automações (ATP) poder comparar as regras entre
+      // si sem precisar de uma segunda navegação até esta tela.
+      atp: atpExtrairRegraDetalhada(linha),
     });
   }
 

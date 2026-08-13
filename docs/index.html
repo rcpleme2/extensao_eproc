@@ -352,7 +352,7 @@
     </summary>
     <div class="card-corpo">
       <div class="linha-versao">
-        <span class="versao-numero">v8.2.0</span>
+        <span class="versao-numero">v8.5.0</span>
         <a class="btn-secundario" href="https://github.com/rcpleme2/extensao_eproc/archive/refs/heads/main.zip">⬇ Baixar versão atual (.zip)</a>
       </div>
       <p style="font-size: var(--fonte-pequena); color: var(--cor-texto-suave);">
@@ -360,6 +360,31 @@
         da extensão. Histórico completo de mudanças e o esquema de versionamento estão no
         <a href="https://github.com/rcpleme2/extensao_eproc#readme">README do repositório</a>.
       </p>
+
+      <div class="novidades">
+        <h3>Novidades da v8.5.0 <span class="versao-numero-pequena">ATP integrada ao Relatório da Unidade + modo "apenas resumos"</span></h3>
+        <ul>
+          <li>A <strong>Análise de Automações (ATP)</strong> agora entra automaticamente no <strong>Relatório da Unidade</strong>/<strong>Relatório para Correição</strong> junto com o item "Regras de automação" — a lista de conflitos encontrados aparece logo depois dos cartões de cada regra, sem precisar rodar a análise separadamente no cartão próprio.</li>
+          <li>Novo modo <strong>"Apenas resumos"</strong> no Relatório da Unidade/Correição: com essa opção marcada, as seções de processos (ativos, suspensos, paralisados, etc.) entram só com os totais já presentes no resumo/capa, sem as tabelas linha a linha — um PDF bem mais curto para unidades com muitos processos.</li>
+        </ul>
+      </div>
+
+      <div class="novidades">
+        <h3>Novidades da v8.4.0 <span class="versao-numero-pequena">Análise de Automações (ATP)</span></h3>
+        <ul>
+          <li>Novo cartão <strong>🧩 Análise de Automações (ATP)</strong>: compara as regras de "Automatizar Tramitação Processual" da unidade habilitada entre si e detecta <strong>Colisão Total/Parcial</strong>, <strong>Sobreposição/Possível Sobreposição</strong>, <strong>Perda de Objeto/Perda de Objeto Condicional</strong>, <strong>Contradição</strong> e <strong>Quebra de Fluxo</strong> — cada conflito com motivo técnico e sugestão de correção.</li>
+          <li>Relatório em <strong>TXT</strong> para download, com resumo por tipo de conflito, detalhamento por par de regras e um mini-guia de referência.</li>
+          <li>A extração/comparação é uma adaptação do motor do projeto de código aberto <a href="https://github.com/oadrianocardoso/analise-atp-eproc" target="_blank" rel="noopener">"Análise de ATP eProc"</a> (de Adriano Cardoso), portado para rodar como parte desta extensão.</li>
+        </ul>
+      </div>
+
+      <div class="novidades">
+        <h3>Novidades da v8.3.0 <span class="versao-numero-pequena">Transcrição via ChatGPT + suporte ao TRF4</span></h3>
+        <ul>
+          <li><strong>Transcrever Depoimentos</strong> ganhou um segundo provedor: além do Gemini (vídeo completo, sem limite prático de tamanho), agora é possível transcrever com <strong>ChatGPT/Whisper</strong> (áudio, até 25&nbsp;MB por arquivo) — identifica os interlocutores com menos precisão que o Gemini, por depender só do contexto do texto, não do áudio.</li>
+          <li>A extensão passa a funcionar também no <strong>eProc do TRF4</strong> (<code>*.trf4.jus.br</code>), além do TJPR — inclusive nos relatórios em PDF, cujo cabeçalho institucional agora reflete o tribunal de origem correto.</li>
+        </ul>
+      </div>
 
       <div class="novidades">
         <h3>Novidades da v8.2.0 <span class="versao-numero-pequena">ChatGPT (OpenAI) como terceiro provedor de IA</span></h3>
@@ -460,7 +485,7 @@
 
         <div class="funcao">
           <div class="funcao-cabecalho"><strong>Relatório da Unidade (PDF)</strong><span class="selo">Gestão da Unidade</span></div>
-          <p>Panorama da unidade habilitada na sessão: processos ativos e suspensos, conclusos para decisão/sentença, sem movimentação, paralisados, remessas aos juízes leigos, regras de automação e localizadores. Opcionalmente, separa os dados por competência (subtotais + tabelas próprias).</p>
+          <p>Panorama da unidade habilitada na sessão: processos ativos e suspensos, conclusos para decisão/sentença, sem movimentação, paralisados, remessas aos juízes leigos, regras de automação (com a Análise de Automações/ATP) e localizadores. Opcionalmente, separa os dados por competência (subtotais + tabelas próprias) e permite gerar só os resumos, sem a lista detalhada de processos de cada seção — um PDF bem mais curto para unidades com muitos processos.</p>
         </div>
 
         <div class="funcao">
@@ -476,6 +501,11 @@
         <div class="funcao">
           <div class="funcao-cabecalho"><strong>Regras de Automação (PDF)</strong></div>
           <p>Exporta as regras ativas de "Automatizar Tramitação Processual" como um fluxograma legível, um cartão por regra.</p>
+        </div>
+
+        <div class="funcao">
+          <div class="funcao-cabecalho"><strong>🧩 Análise de Automações (ATP)</strong><span class="selo">Novo</span></div>
+          <p>Compara as regras de "Automatizar Tramitação Processual" entre si e detecta conflitos: colisões (regras duplicadas/redundantes), sobreposições, perda de objeto (uma regra removendo o localizador que outra precisa), contradições internas e quebras de fluxo — cada um com motivo técnico e sugestão de correção, com relatório em TXT para download. Também entra automaticamente no Relatório da Unidade/Relatório para Correição junto com o item "Regras de automação".</p>
         </div>
 
       </div>

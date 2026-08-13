@@ -6895,6 +6895,13 @@ const OPCOES_RELATORIO_UNIDADE_PADRAO = {
   audienciasDetalhado: false,
   regrasAutomacao: true,
   localizadores: true,
+  // Não é um "item a incluir" como os demais (não soma na checagem de "ao
+  // menos um item selecionado" logo abaixo) - é um modo de exibição: com
+  // "true", as seções de lista de processos (Processos Ativos, Suspensos,
+  // Mandados, Parados, Remessas, Audiências) entram só com os totais já
+  // presentes no resumo/capa, sem as tabelas linha a linha (que costumam
+  // ser a maior parte das páginas em unidades com muitos processos).
+  apenasResumo: false,
 };
 
 // "valorUnidade" pode ser nulo de proposito: quando vem do cartão
@@ -7329,6 +7336,14 @@ async function exportarRelatorioGerencialUnidade(
   // (perfil MAGISTRADO/GESTÃO DA UNIDADE, valorUnidade nulo), esse filtro
   // não aparece na tela - a extensão nem tenta selecioná-lo.
   const regrasAutomacao = { regras: [], erros: [] };
+  // Análise de Automações (ATP): subitem vinculado a "Regras de
+  // automação" - com o mesmo item marcado, o relatório também compara as
+  // regras entre si e lista os conflitos encontrados (ver
+  // "atpAnalisarConflitos"), reaproveitando a MESMA extração acima (cada
+  // regra já vem com um campo "atp" estruturado, ver "atp:" em
+  // "listarRegrasAutomacaoAtivas" em content.js) - sem precisar de uma
+  // segunda navegação até a tela de regras.
+  const analiseAtp = { registros: [], erro: null };
   if (opcoesFinais.regrasAutomacao) {
     notificar("Consultando regras de automação ativas...");
     const r = await abrirAbaEListarRegrasAutomacao(abaAtual.url, valorUnidade ? nomeUnidade : null);
@@ -7338,6 +7353,15 @@ async function exportarRelatorioGerencialUnidade(
       regrasAutomacao.erros.push(
         `${r.totalRegrasNaPagina} regra(s) encontrada(s) na tela, mas nenhuma está com o switch "Ativa" ligado.`
       );
+    }
+
+    if (regrasAutomacao.regras.length > 0) {
+      notificar("Analisando conflitos entre as regras de automação...");
+      const regrasDetalhadas = regrasAutomacao.regras.map((regra) => regra.atp).filter(Boolean);
+      if (regrasDetalhadas.length > 0) {
+        const conflictsByRule = atpAnalisarConflitos(regrasDetalhadas);
+        analiseAtp.registros = atpGerarRegistrosColisoes(conflictsByRule);
+      }
     }
   }
 
@@ -7752,79 +7776,88 @@ async function exportarRelatorioGerencialUnidade(
   // cada competência com pelo menos 1 processo vira sua PRÓPRIA subseção
   // (tabela com título indicando a competência) - da competência com mais
   // processos para a com menos; o link do resumo aponta para a primeira.
-  if (opcoesFinais.processosAtivos) {
-    if (separarPorCompetencia) {
-      const ordenados = processosAtivosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
-      for (const { competencia, tabela } of ordenados) {
-        if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
-        if (alvosTabela.processosAtivos == null) alvosTabela.processosAtivos = pdfFinal.getPageCount();
-        const bytesTabela = await construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes, [], ` — Competência: ${competencia}`, true);
+  //
+  // "opcoesFinais.apenasResumo" (opção "Apenas resumos" no painel) pula a
+  // seção inteira: o relatório fica só com a capa/resumo (e os gráficos,
+  // que já são um resumo visual) e as seções que não são "lista de
+  // processos" (Regras de Automação, Localizadores) - sem as tabelas linha
+  // a linha, que costumam ser a maior parte das páginas do PDF em
+  // unidades com muitos processos.
+  if (!opcoesFinais.apenasResumo) {
+    if (opcoesFinais.processosAtivos) {
+      if (separarPorCompetencia) {
+        const ordenados = processosAtivosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+        for (const { competencia, tabela } of ordenados) {
+          if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+          if (alvosTabela.processosAtivos == null) alvosTabela.processosAtivos = pdfFinal.getPageCount();
+          const bytesTabela = await construirPdfProcessosAtivos(tabela, nomeUnidade, processosUrgentes, [], ` — Competência: ${competencia}`, true);
+          await anexarPaginas(bytesTabela);
+        }
+      } else if (processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
+        alvosTabela.processosAtivos = pdfFinal.getPageCount();
+        const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade, processosUrgentes, distribuicaoRitos);
         await anexarPaginas(bytesTabela);
       }
-    } else if (processosAtivos.tabela && processosAtivos.tabela.linhas.length > 0) {
-      alvosTabela.processosAtivos = pdfFinal.getPageCount();
-      const bytesTabela = await construirPdfProcessosAtivos(processosAtivos.tabela, nomeUnidade, processosUrgentes, distribuicaoRitos);
-      await anexarPaginas(bytesTabela);
     }
-  }
-  if (opcoesFinais.suspensos) {
-    if (separarPorCompetencia) {
-      const ordenados = suspensosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
-      for (const { competencia, tabela } of ordenados) {
-        if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
-        if (alvosTabela.suspensos == null) alvosTabela.suspensos = pdfFinal.getPageCount();
-        const bytesTabela = await construirPdfSuspensos(tabela, nomeUnidade, ` — Competência: ${competencia}`);
+    if (opcoesFinais.suspensos) {
+      if (separarPorCompetencia) {
+        const ordenados = suspensosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+        for (const { competencia, tabela } of ordenados) {
+          if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+          if (alvosTabela.suspensos == null) alvosTabela.suspensos = pdfFinal.getPageCount();
+          const bytesTabela = await construirPdfSuspensos(tabela, nomeUnidade, ` — Competência: ${competencia}`);
+          await anexarPaginas(bytesTabela);
+        }
+      } else if (suspensos.tabela && suspensos.tabela.linhas.length > 0) {
+        alvosTabela.suspensos = pdfFinal.getPageCount();
+        const bytesTabela = await construirPdfSuspensos(suspensos.tabela, nomeUnidade);
         await anexarPaginas(bytesTabela);
       }
-    } else if (suspensos.tabela && suspensos.tabela.linhas.length > 0) {
-      alvosTabela.suspensos = pdfFinal.getPageCount();
-      const bytesTabela = await construirPdfSuspensos(suspensos.tabela, nomeUnidade);
-      await anexarPaginas(bytesTabela);
     }
-  }
-  if (opcoesFinais.mandados && mandados.linhas.length > 0) {
-    alvosTabela.mandados = pdfFinal.getPageCount();
-    const bytesMandados = await construirPdfMandadosAbertos(mandados.linhas, nomeUnidade);
-    await anexarPaginas(bytesMandados);
-  }
-  if (opcoesFinais.paralisados) {
-    if (separarPorCompetencia) {
-      const ordenados = paralisadosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
-      for (const { competencia, tabela } of ordenados) {
-        if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
-        if (alvosTabela.paralisados == null) alvosTabela.paralisados = pdfFinal.getPageCount();
-        const bytesTabela = await construirPdfProcessosParalisados(tabela, nomeUnidade, ` — Competência: ${competencia}`);
+    if (opcoesFinais.mandados && mandados.linhas.length > 0) {
+      alvosTabela.mandados = pdfFinal.getPageCount();
+      const bytesMandados = await construirPdfMandadosAbertos(mandados.linhas, nomeUnidade);
+      await anexarPaginas(bytesMandados);
+    }
+    if (opcoesFinais.paralisados) {
+      if (separarPorCompetencia) {
+        const ordenados = paralisadosPorCompetencia.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+        for (const { competencia, tabela } of ordenados) {
+          if (!tabela || !tabela.linhas || tabela.linhas.length === 0) continue;
+          if (alvosTabela.paralisados == null) alvosTabela.paralisados = pdfFinal.getPageCount();
+          const bytesTabela = await construirPdfProcessosParalisados(tabela, nomeUnidade, ` — Competência: ${competencia}`);
+          await anexarPaginas(bytesTabela);
+        }
+      } else if (processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0) {
+        alvosTabela.paralisados = pdfFinal.getPageCount();
+        const bytesTabela = await construirPdfProcessosParalisados(processosParalisados.tabela, nomeUnidade);
         await anexarPaginas(bytesTabela);
       }
-    } else if (processosParalisados.tabela && processosParalisados.tabela.linhas.length > 0) {
-      alvosTabela.paralisados = pdfFinal.getPageCount();
-      const bytesTabela = await construirPdfProcessosParalisados(processosParalisados.tabela, nomeUnidade);
-      await anexarPaginas(bytesTabela);
     }
-  }
-  if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0) {
-    alvosTabela.remessasJuizesLeigos = pdfFinal.getPageCount();
-    const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
-    await anexarPaginas(bytesRemessas);
-  }
-  if (opcoesFinais.audiencias && audiencias.linhas.length > 0) {
-    alvosTabela.audiencias = pdfFinal.getPageCount();
-    const bytesAudiencias = await construirPdfTabelaAudiencias(nomeUnidade, audiencias.linhas);
-    await anexarPaginas(bytesAudiencias);
-  }
-  if (opcoesFinais.agendaPadraoAudiencias && agendaPadraoAudiencias.linhas.length > 0) {
-    alvosTabela.agendaPadraoAudiencias = pdfFinal.getPageCount();
-    const bytesAgenda = await construirPdfTabelaAgendaPadraoAudiencia(nomeUnidade, agendaPadraoAudiencias.linhas);
-    await anexarPaginas(bytesAgenda);
-  }
-  if (opcoesFinais.audienciasDetalhado && audienciasDetalhado.linhas.length > 0) {
-    alvosTabela.audienciasDetalhado = pdfFinal.getPageCount();
-    const bytesAudienciasNovo = await construirPdfTabelaAudienciasNovo(
-      nomeUnidade,
-      audienciasDetalhado.linhas,
-      audienciasDetalhado.periodoTexto
-    );
-    await anexarPaginas(bytesAudienciasNovo);
+    if (opcoesFinais.remessasJuizesLeigos && remessasJuizesLeigos.linhas.length > 0) {
+      alvosTabela.remessasJuizesLeigos = pdfFinal.getPageCount();
+      const bytesRemessas = await construirPdfRemessasJuizesLeigos(remessasJuizesLeigos.linhas, nomeUnidade);
+      await anexarPaginas(bytesRemessas);
+    }
+    if (opcoesFinais.audiencias && audiencias.linhas.length > 0) {
+      alvosTabela.audiencias = pdfFinal.getPageCount();
+      const bytesAudiencias = await construirPdfTabelaAudiencias(nomeUnidade, audiencias.linhas);
+      await anexarPaginas(bytesAudiencias);
+    }
+    if (opcoesFinais.agendaPadraoAudiencias && agendaPadraoAudiencias.linhas.length > 0) {
+      alvosTabela.agendaPadraoAudiencias = pdfFinal.getPageCount();
+      const bytesAgenda = await construirPdfTabelaAgendaPadraoAudiencia(nomeUnidade, agendaPadraoAudiencias.linhas);
+      await anexarPaginas(bytesAgenda);
+    }
+    if (opcoesFinais.audienciasDetalhado && audienciasDetalhado.linhas.length > 0) {
+      alvosTabela.audienciasDetalhado = pdfFinal.getPageCount();
+      const bytesAudienciasNovo = await construirPdfTabelaAudienciasNovo(
+        nomeUnidade,
+        audienciasDetalhado.linhas,
+        audienciasDetalhado.periodoTexto
+      );
+      await anexarPaginas(bytesAudienciasNovo);
+    }
   }
 
   // ===== 3) Regras de Automação e Localizadores (sem link no resumo) =====
@@ -7836,6 +7869,12 @@ async function exportarRelatorioGerencialUnidade(
   if (opcoesFinais.regrasAutomacao && regrasAutomacao.regras.length > 0) {
     const bytesRegras = await construirPdfRegras(regrasAutomacao.regras, nomeUnidade);
     await anexarPaginas(bytesRegras);
+
+    // Análise de Automações (ATP): subitem de "Regras de automação" -
+    // entra logo depois dos cartões de cada regra, com a lista de
+    // conflitos encontrados entre elas (ver "analiseAtp" acima).
+    const bytesConflitosAtp = await construirPaginaConflitosAtp(nomeUnidade, analiseAtp.registros);
+    await anexarPaginas(bytesConflitosAtp);
   }
 
   // Localizadores: lista de nomes (Corregedoria, sem total de processos -
@@ -10549,6 +10588,100 @@ function atpConstruirRelatorioColisoesTxt(registros, urlOrigem) {
   linhas.push(ATP_MINI_HELP_TXT);
 
   return linhas.join("\n");
+}
+
+// Paginas proprias (portrait) com os conflitos encontrados pela Análise de
+// Automações (ATP) - subitem do Relatório da Unidade, vinculado a "Regras
+// de automação" (ver "exportarRelatorioGerencialUnidade"). Mesmo estilo
+// visual de "construirPaginaListaLocalizadores": um item por linha, com
+// marcador "-" e recuo pendurado.
+async function construirPaginaConflitosAtp(nomeUnidade, registros) {
+  const pdf = await PDFDocument.create();
+  const fonteNormal = await pdf.embedFont(StandardFonts.Helvetica);
+  const fonteNegrito = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const largura = LARGURA_PAGINA_TEXTO;
+  const altura = ALTURA_PAGINA_TEXTO;
+  const margem = MARGEM_TEXTO;
+  const larguraUtil = largura - margem * 2;
+
+  function novaPagina() {
+    const pagina = pdf.addPage([largura, altura]);
+    desenharCabecalhoInstitucional(pagina, fonteNegrito, fonteNormal, largura, margem);
+    return { pagina, y: altura - PDF_ALTURA_CABECALHO_INSTITUCIONAL - margem };
+  }
+
+  let { pagina, y } = novaPagina();
+
+  const titulo = `Conflitos entre Regras de Automação (ATP) — unidade "${sanitizarTextoPdf(nomeUnidade)}" (${registros.length})`;
+  for (const linhaTitulo of quebrarLinhas(titulo, fonteNegrito, 12, larguraUtil)) {
+    if (y - 16 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+    pagina.drawText(linhaTitulo, { x: margem, y, size: 12, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+    y -= 16;
+  }
+  y -= 2;
+
+  const subtitulo = quebrarLinhas(
+    'Comparação automática das regras ATIVAS entre si (ver cartão "Análise de Automações (ATP)" no painel para o ' +
+      "detalhamento de cada tipo de conflito e sugestões de correção).",
+    fonteNormal,
+    8.5,
+    larguraUtil
+  );
+  for (const linhaSubtitulo of subtitulo) {
+    if (y - 12 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+    pagina.drawText(linhaSubtitulo, { x: margem, y, size: 8.5, font: fonteNormal, color: COR_CINZA_TEXTO });
+    y -= 12;
+  }
+  y -= 6;
+
+  if (registros.length === 0) {
+    if (y - 12 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+    pagina.drawText("Nenhum conflito encontrado.", { x: margem, y, size: 9, font: fonteNormal, color: COR_CINZA_TEXTO });
+    y -= 12;
+    desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+    return pdf.save();
+  }
+
+  const marcador = "-  ";
+  const larguraMarcador = fonteNormal.widthOfTextAtSize(marcador, 9);
+  const larguraTexto = larguraUtil - larguraMarcador;
+
+  for (const r of registros) {
+    const cabecalho =
+      r.b === "(Própria Regra)"
+        ? `Regra ${r.a} (própria regra) — ${r.tipo} (impacto ${r.impacto})`
+        : `Regra ${r.a} × Regra ${r.b} — ${r.tipo} (impacto ${r.impacto})`;
+
+    const linhasCabecalho = quebrarLinhas(sanitizarTextoPdf(cabecalho), fonteNegrito, 9, larguraTexto);
+    linhasCabecalho.forEach((linha, indice) => {
+      if (y - 12 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+      if (indice === 0) pagina.drawText("-", { x: margem, y, size: 9, font: fonteNormal, color: COR_CINZA_TEXTO });
+      pagina.drawText(linha, { x: margem + larguraMarcador, y, size: 9, font: fonteNegrito, color: COR_PRIMARIA_ESCURA });
+      y -= 12;
+    });
+
+    if (r.motivo) {
+      const linhasMotivo = quebrarLinhas(sanitizarTextoPdf(r.motivo), fonteNormal, 8, larguraTexto);
+      for (const linha of linhasMotivo) {
+        if (y - 10 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+        pagina.drawText(linha, { x: margem + larguraMarcador, y, size: 8, font: fonteNormal, color: COR_CINZA_TEXTO });
+        y -= 10;
+      }
+    }
+    if (r.sugestao) {
+      const linhasSugestao = quebrarLinhas(sanitizarTextoPdf(`Sugestão: ${r.sugestao}`), fonteNormal, 8, larguraTexto);
+      for (const linha of linhasSugestao) {
+        if (y - 10 < PDF_ALTURA_RODAPE + margem) ({ pagina, y } = novaPagina());
+        pagina.drawText(linha, { x: margem + larguraMarcador, y, size: 8, font: fonteNormal, color: COR_CINZA_TEXTO });
+        y -= 10;
+      }
+    }
+    y -= 4;
+  }
+
+  desenharRodapePaginas(pdf, fonteNormal, largura, margem);
+  return pdf.save();
 }
 
 // Orquestra a análise completa: abre a tela "Automatizar Tramitação

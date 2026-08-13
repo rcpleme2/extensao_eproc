@@ -112,12 +112,20 @@
         </label>
         <label class="opcao">
           <input type="checkbox" id="chk-rel-regras-automacao" checked />
-          Regras de automação
+          Regras de automação (inclui a Análise de Automações/ATP: conflitos entre as regras)
         </label>
         <label class="opcao">
           <input type="checkbox" id="chk-rel-localizadores" checked />
           Localizadores
         </label>
+      </div>
+
+      <div class="opcoes" id="area-modo-conteudo-relatorio">
+        <label class="opcao">
+          <input type="checkbox" id="chk-rel-apenas-resumo" />
+          Apenas resumos (sem a lista detalhada de processos de cada seção)
+        </label>
+        <span class="legenda-opcoes">Com essa opção marcada, as seções de processos (ativos, suspensos, paralisados etc.) entram só com os totais já presentes no resumo/capa, sem as tabelas linha a linha - útil para um PDF bem mais curto em unidades com muitos processos.</span>
       </div>
 
       <div class="botoes" id="area-btn-exportar-gerencial" hidden>
@@ -216,12 +224,20 @@
         </label>
         <label class="opcao">
           <input type="checkbox" id="chk-relalt-regras-automacao" checked />
-          Regras de automação
+          Regras de automação (inclui a Análise de Automações/ATP: conflitos entre as regras)
         </label>
         <label class="opcao">
           <input type="checkbox" id="chk-relalt-localizadores" checked />
           Localizadores
         </label>
+      </div>
+
+      <div class="opcoes" id="area-modo-conteudo-relatorio-alt">
+        <label class="opcao">
+          <input type="checkbox" id="chk-relalt-apenas-resumo" />
+          Apenas resumos (sem a lista detalhada de processos de cada seção)
+        </label>
+        <span class="legenda-opcoes">Com essa opção marcada, as seções de processos (ativos, suspensos, paralisados etc.) entram só com os totais já presentes no resumo/capa, sem as tabelas linha a linha - útil para um PDF bem mais curto em unidades com muitos processos.</span>
       </div>
 
       <div class="botoes">

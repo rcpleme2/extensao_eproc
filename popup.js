@@ -1555,6 +1555,7 @@ const chkRelParalisados = document.getElementById("chk-rel-paralisados");
 const chkRelRemessasJuizesLeigos = document.getElementById("chk-rel-remessas-juizes-leigos");
 const chkRelAudiencias = document.getElementById("chk-rel-audiencias");
 const chkRelRegrasAutomacao = document.getElementById("chk-rel-regras-automacao");
+const chkRelApenasResumo = document.getElementById("chk-rel-apenas-resumo");
 const chkRelLocalizadores = document.getElementById("chk-rel-localizadores");
 const btnMarcarTudoRelatorio = document.getElementById("btn-marcar-tudo-relatorio");
 const btnDesmarcarTudoRelatorio = document.getElementById("btn-desmarcar-tudo-relatorio");
@@ -1783,6 +1784,7 @@ function lerOpcoesRelatorioUnidade() {
     audiencias: chkRelAudiencias.checked,
     regrasAutomacao: chkRelRegrasAutomacao.checked,
     localizadores: chkRelLocalizadores.checked,
+    apenasResumo: chkRelApenasResumo.checked,
   };
 }
 
@@ -1931,6 +1933,7 @@ const chkRelAltAgendaPadraoAudiencias = document.getElementById("chk-relalt-agen
 const chkRelAltAudienciasDetalhado = document.getElementById("chk-relalt-audiencias-detalhado");
 const chkRelAltRegrasAutomacao = document.getElementById("chk-relalt-regras-automacao");
 const chkRelAltLocalizadores = document.getElementById("chk-relalt-localizadores");
+const chkRelAltApenasResumo = document.getElementById("chk-relalt-apenas-resumo");
 const btnMarcarTudoRelatorioAlt = document.getElementById("btn-marcar-tudo-relatorio-alt");
 const btnDesmarcarTudoRelatorioAlt = document.getElementById("btn-desmarcar-tudo-relatorio-alt");
 const btnExportarRelatorioUnidadeAlt = document.getElementById("btn-exportar-relatorio-unidade-alt");
@@ -1956,6 +1959,7 @@ function lerOpcoesRelatorioUnidadeAlt() {
     audienciasDetalhado: chkRelAltAudienciasDetalhado.checked,
     regrasAutomacao: chkRelAltRegrasAutomacao.checked,
     localizadores: chkRelAltLocalizadores.checked,
+    apenasResumo: chkRelAltApenasResumo.checked,
   };
 }
 
