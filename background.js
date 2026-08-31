@@ -2927,16 +2927,62 @@ function consultarUmaVezNaPagina(parametros) {
     throw new Error("Tempo esgotado esperando o resultado da consulta.");
   }
 
+  // Marca como visiveis as colunas pedidas no menu "Colunas visíveis"
+  // (div#selColunasVisiveis, aberto pelo span com data-toggle="dropdown"
+  // logo acima da tabela de resultado) - usado pelo Relatório de Excesso
+  // de Prazo da Corregedoria, ja' que "Situação", "Nº Dias Situação" e
+  // "Juízo" nao vem marcadas por padrao (so' "Situação" costuma vir).
+  // Cada item do menu e' um <a data-value="..."> com um <span> dentro
+  // mostrando o icone "done" quando a coluna ja' esta' visivel (ou um
+  // espaco em branco "&nbsp;" quando nao esta') - so' clica no item
+  // quando ele ainda NAO estiver marcado, pra' nao acabar ESCONDENDO uma
+  // coluna que ja' estava visivel. Ao final, clica fora do menu (no corpo
+  // da pagina) pra' fechar o dropdown e a tabela atualizar com as novas
+  // colunas - exatamente como um usuario faria manualmente.
+  async function habilitarColunasVisiveis(dataValues) {
+    const dropdown = document.getElementById("selColunasVisiveis");
+    if (!dropdown) {
+      throw new Error('Menu "Colunas visíveis" (#selColunasVisiveis) não encontrado nesta página.');
+    }
+    const botaoAbrir = dropdown.querySelector('[data-toggle="dropdown"]');
+    if (!botaoAbrir) {
+      throw new Error('Botão "Colunas visíveis" não encontrado nesta página.');
+    }
+
+    botaoAbrir.click();
+    await aguardar(300);
+
+    for (const dataValue of dataValues) {
+      const item = dropdown.querySelector(`a.dropdown-item[data-value="${dataValue}"]`);
+      if (!item) {
+        throw new Error(`Coluna "${dataValue}" não encontrada no menu "Colunas visíveis".`);
+      }
+      const marcador = item.querySelector("span");
+      const jaVisivel = Boolean(marcador && marcador.textContent.trim() === "done");
+      if (!jaVisivel) {
+        item.click();
+        await aguardar(250);
+      }
+    }
+
+    // Fecha o dropdown clicando fora dele - e' esse clique "fora da
+    // escolha" que faz a tabela redesenhar ja' com as colunas novas.
+    document.body.click();
+    await aguardar(300);
+  }
+
   // Le' a "relação de processos" (linhas da tabela de resultado, nao so'
   // o total) da tabela de resultado "#tblProcessoLista" - usada pelo
   // Relatório da Unidade para trazer a lista de processos ativos/
   // suspensos, alem do total. Nunca lanca excecao: sempre resolve com
   // { cabecalhos, linhas, erro }.
   async function extrairLinhasTblProcessoLista() {
-    // 12 pra' caber todas as colunas conhecidas da tabela real (checkbox,
+    // 15 pra' caber todas as colunas conhecidas da tabela real (checkbox,
     // Nº Processo, Autuação, Situação, Sigilo, Classe, Localizador, Último
-    // Evento, Data/Hora, Autor, Réu - 11 no total, com folga de 1).
-    const LIMITE_COLUNAS = 12;
+    // Evento, Data/Hora, Autor, Réu - 11 no total - mais as colunas
+    // opcionais que "habilitarColunasVisiveis" pode ligar por cima dessas,
+    // como Nº Dias Situação e Juízo, com folga).
+    const LIMITE_COLUNAS = 15;
     // 5000 (em vez de 500) porque o Relatório de Excesso de Prazo da
     // Corregedoria consulta TODO O ESTADO de uma vez (sem filtrar por
     // unidade), então facilmente passa de algumas centenas de processos -
@@ -3102,6 +3148,15 @@ function consultarUmaVezNaPagina(parametros) {
 
       await aguardar(200);
       const contagem = await clicarConsultarELer();
+
+      // Habilita colunas que nao vem marcadas por padrao no menu "Colunas
+      // visíveis" (ex.: "Nº Dias Situação" e "Juízo", usadas pelo
+      // Relatório de Excesso de Prazo) - roda DEPOIS de consultar, ja' que
+      // o menu fica ao lado da tabela de resultado (so' aparece pos-
+      // pesquisa).
+      if (parametros.colunasVisiveisNecessarias && parametros.colunasVisiveisNecessarias.length > 0) {
+        await habilitarColunasVisiveis(parametros.colunasVisiveisNecessarias);
+      }
 
       let tabela = null;
       if (parametros.extrairTabela) {
@@ -6764,11 +6819,18 @@ async function construirPdfSuspensos(tabela, nomeUnidade, sufixoTitulo = "") {
 // coluna "Juízo" so' aparece na tabela do eproc quando a consulta não está
 // restrita a uma única unidade, que e' exatamente o caso aqui (identifica
 // de qual juízo/vara cada processo é, ja' que a tabela mistura processos
-// de todas as unidades do estado). Casa cada campo pelo texto do
-// cabecalho (nao pela posicao), como as demais tabelas curadas.
+// de todas as unidades do estado); a coluna de dias e' rotulada "Nº Dias
+// Situação" no eproc (nao "Dias na situação", que e' so' o rotulo do
+// CAMPO DE FILTRO #txtDiasSituacao, uma tela diferente) e vem ANTES da
+// coluna "Situação" na tabela - "idxSituacao" precisa exigir que o
+// cabecalho COMECE com "situa" (em vez de so' conter, como as demais
+// tabelas curadas), senao "indiceColunaPorCabecalho" casaria com "Nº Dias
+// Situação" primeiro (que tambem contem "situa") e devolveria os dias na
+// coluna errada. Casa cada campo pelo texto do cabecalho (nao pela
+// posicao), como as demais tabelas curadas.
 async function construirPdfProcessosExcessoPrazo(tabela, dias) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
-  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /^situa/i);
   const idxDias = indiceColunaPorCabecalho(tabela.cabecalhos, /dias/i);
   const idxJuizo = indiceColunaPorCabecalho(tabela.cabecalhos, /ju[ií]zo/i);
   const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
@@ -8235,6 +8297,11 @@ async function exportarRelatorioExcessoPrazo(dias, aoProgredir) {
     urgente: false,
     diasSituacao: dias,
     extrairTabela: true,
+    // "Situação" costuma vir marcada por padrao, mas "Nº Dias Situação" e
+    // "Juízo" nao - sem essas duas colunas visiveis na tabela do eproc,
+    // essa informação simplesmente nao aparece pra' extrair (ver
+    // "habilitarColunasVisiveis" em "consultarUmaVezNaPagina").
+    colunasVisiveisNecessarias: ["DesStatusProcesso", "DiasProcessoSituacao", "SigOrgaoJuizo"],
   });
   if (r.erro) throw new Error(r.erro);
   if (!r.tabela || r.tabela.erro) {
