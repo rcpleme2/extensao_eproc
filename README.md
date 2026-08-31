@@ -211,6 +211,15 @@ clicável que leva direto à tabela detalhada correspondente, no final do
 PDF. Marcando **"Apenas resumos"**, o relatório sai bem mais enxuto — só
 com os números de cada seção, sem as tabelas linha a linha.
 
+**Relatório de Processos Conclusos com Excesso de Prazo**: depois de
+carregar as unidades e escolher uma ou mais no dropdown acima, escolha
+exclusivamente entre **30, 60, 90 ou 120 dias** e clique em **"Exportar
+Relatório de Excesso de Prazo (PDF)"**. A extensão filtra a situação
+CONCLUSÃO (aguarda despacho e aguarda sentença) com pelo menos aquele
+número de dias na situação e gera um PDF (um por unidade, se mais de uma
+tiver sido escolhida) com número do processo, situação, dias na situação,
+juízo e localizador de cada um.
+
 ### 🏢 Relatório da Unidade
 
 A mesma ideia do relatório acima, só que para quem já está logado

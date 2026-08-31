@@ -1568,6 +1568,11 @@ const areaBtnCompararUnidades = document.getElementById("area-btn-comparar-unida
 const btnCompararUnidades = document.getElementById("btn-comparar-unidades");
 const areaProgressoComparacaoUnidades = document.getElementById("area-progresso-comparacao-unidades");
 const textoProgressoComparacaoUnidades = document.getElementById("texto-progresso-comparacao-unidades");
+const areaExcessoPrazo = document.getElementById("area-excesso-prazo");
+const radiosDiasExcessoPrazo = Array.from(document.querySelectorAll('input[name="radio-dias-excesso-prazo"]'));
+const btnExportarExcessoPrazo = document.getElementById("btn-exportar-excesso-prazo");
+const areaProgressoExcessoPrazo = document.getElementById("area-progresso-excesso-prazo");
+const textoProgressoExcessoPrazo = document.getElementById("texto-progresso-excesso-prazo");
 // Relatório Geral (panorama) desativado por enquanto - ver comentário em
 // popup.html no lugar do botão. Refs comentadas junto para não quebrar
 // (document.getElementById de um id que não existe mais no DOM).
@@ -1680,6 +1685,7 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
   areaPersonalizarRelatorio.hidden = true;
   areaBtnExportarGerencial.hidden = true;
   areaBtnCompararUnidades.hidden = true;
+  areaExcessoPrazo.hidden = true;
   unidadesSelecionadasCorregedoria = [];
   areaProgressoUnidades.hidden = false;
   textoProgressoUnidades.textContent = "Iniciando...";
@@ -1746,6 +1752,7 @@ selectUnidadeRelatorio.addEventListener("change", () => {
     areaPersonalizarRelatorio.hidden = true;
     areaBtnExportarGerencial.hidden = true;
     areaBtnCompararUnidades.hidden = true;
+    areaExcessoPrazo.hidden = true;
     return;
   }
   unidadesSelecionadasCorregedoria = opcoesSelecionadas.map((opcaoSelecionada) => ({
@@ -1767,6 +1774,7 @@ selectUnidadeRelatorio.addEventListener("change", () => {
   // A comparação exige pelo menos 2 unidades (não faz sentido "comparar"
   // uma so' unidade consigo mesma) - o botão só aparece a partir daí.
   areaBtnCompararUnidades.hidden = unidadesSelecionadasCorregedoria.length < 2;
+  areaExcessoPrazo.hidden = false;
 });
 
 // Le' o estado atual dos checkboxes de "Itens a incluir no PDF" - as
@@ -1912,6 +1920,62 @@ btnCompararUnidades.addEventListener("click", async () => {
     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
     areaProgressoComparacaoUnidades.hidden = true;
     btnCompararUnidades.disabled = false;
+  }
+});
+
+// Relatório de Processos Conclusos com Excesso de Prazo: reaproveita a(s)
+// unidade(s) já escolhida(s) no dropdown acima (mesma checagem
+// "exigirUnidadesSelecionadas" dos demais relatórios deste painel) e exige
+// que o usuário escolha exclusivamente um entre 30/60/90/120 dias no grupo
+// de radio buttons antes de exportar.
+btnExportarExcessoPrazo.addEventListener("click", async () => {
+  areaErrosCorregedoria.hidden = true;
+
+  let unidades;
+  try {
+    unidades = exigirUnidadesSelecionadas();
+  } catch (e) {
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+    return;
+  }
+
+  const radioEscolhido = radiosDiasExcessoPrazo.find((radio) => radio.checked);
+  if (!radioEscolhido) {
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = 'Escolha um dos valores de "Dias na situação" (30, 60, 90 ou 120) antes de exportar.';
+    return;
+  }
+  const dias = Number(radioEscolhido.value);
+
+  btnExportarExcessoPrazo.disabled = true;
+  areaProgressoExcessoPrazo.hidden = false;
+  textoProgressoExcessoPrazo.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaCorregedoriaInfo);
+  setStatusCorregedoria(
+    unidades.length === 1
+      ? `Gerando o Relatório de Excesso de Prazo (${dias}+ dias) de "${unidades[0].nome}" em segundo plano...`
+      : `Gerando ${unidades.length} relatórios de excesso de prazo (${dias}+ dias) em segundo plano, um por vez (arquivos separados)...`
+  );
+
+  // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
+  // comecou; o resultado final chega pela mensagem
+  // RELATORIO_EXCESSO_PRAZO_FINALIZADO.
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "EXPORTAR_RELATORIO_EXCESSO_PRAZO",
+      unidades: unidades.map((u) => ({ valor: u.valor, nome: u.nome })),
+      dias,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
+    }
+  } catch (e) {
+    setStatusCorregedoria("Erro ao gerar o relatório de excesso de prazo.", "erro");
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+    areaProgressoExcessoPrazo.hidden = true;
+    btnExportarExcessoPrazo.disabled = false;
   }
 });
 
@@ -2275,6 +2339,50 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosCorregedoria.hidden = false;
       areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao gerar a comparação entre unidades.";
+    }
+  }
+
+  if (mensagem.tipo === "PROGRESSO_RELATORIO_EXCESSO_PRAZO") {
+    textoProgressoExcessoPrazo.textContent = mensagem.texto || "Processando...";
+  }
+
+  if (mensagem.tipo === "RELATORIO_EXCESSO_PRAZO_FINALIZADO") {
+    areaProgressoExcessoPrazo.hidden = true;
+    btnExportarExcessoPrazo.disabled = false;
+
+    if (mensagem.ok) {
+      const resultados = mensagem.resultados || [];
+      const sucessos = resultados.filter((r) => r.ok);
+      const falhas = resultados.filter((r) => !r.ok);
+
+      if (resultados.length <= 1) {
+        const unico = resultados[0] || {};
+        setStatusCorregedoria(
+          `Concluído! Relatório de Excesso de Prazo de "${unico.unidade || ""}" salvo em Downloads/eproc/ (${
+            unico.total || 0
+          } processo(s)).`,
+          unico.ok === false ? "erro" : "ok"
+        );
+      } else {
+        setStatusCorregedoria(
+          `Concluído! ${sucessos.length} de ${resultados.length} relatório(s) de excesso de prazo gerado(s) em Downloads/eproc/ (arquivos separados por unidade)${
+            falhas.length > 0 ? `, ${falhas.length} com erro` : ""
+          }.`,
+          falhas.length > 0 ? "erro" : "ok"
+        );
+      }
+
+      if (falhas.length > 0) {
+        areaErrosCorregedoria.hidden = false;
+        areaErrosCorregedoria.textContent = falhas
+          .map((f) => `${f.unidade}: ${f.erro || "falha desconhecida"}`)
+          .join("; ");
+      }
+    } else {
+      setStatusCorregedoria("Erro ao gerar o relatório de excesso de prazo.", "erro");
+      areaErrosCorregedoria.hidden = false;
+      areaErrosCorregedoria.textContent =
+        mensagem.erro || "Falha desconhecida ao gerar o relatório de excesso de prazo.";
     }
   }
 
