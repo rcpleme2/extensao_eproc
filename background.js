@@ -2937,7 +2937,12 @@ function consultarUmaVezNaPagina(parametros) {
     // Nº Processo, Autuação, Situação, Sigilo, Classe, Localizador, Último
     // Evento, Data/Hora, Autor, Réu - 11 no total, com folga de 1).
     const LIMITE_COLUNAS = 12;
-    const LIMITE_LINHAS = 500;
+    // 5000 (em vez de 500) porque o Relatório de Excesso de Prazo da
+    // Corregedoria consulta TODO O ESTADO de uma vez (sem filtrar por
+    // unidade), então facilmente passa de algumas centenas de processos -
+    // um limite pensado so' para consultas de uma única unidade cortaria
+    // boa parte do resultado sem nenhum aviso.
+    const LIMITE_LINHAS = 5000;
     try {
       if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
         return { cabecalhos: [], linhas: [], erro: "jQuery DataTables não disponível nesta página." };
@@ -6753,15 +6758,15 @@ async function construirPdfSuspensos(tabela, nomeUnidade, sufixoTitulo = "") {
 }
 
 // Relação de processos conclusos (grupo "CONCLUSÃO" inteiro - aguarda
-// despacho e aguarda sentença) com excesso de prazo, usada pelo relatório
-// próprio do cartão Corregedoria: Nº do Processo, Situação, Dias na
-// Situação, Juízo e Localizador. A coluna "Juízo" so' aparece na tabela do
-// eproc quando a consulta não está restrita a uma única unidade (não é o
-// caso aqui, ja' que sempre filtramos por "valorOrgaoJuizo" - ver
-// "exportarRelatorioExcessoPrazo"), entao cai no nome da unidade escolhida
-// no painel quando a coluna não existir. Casa cada campo pelo texto do
+// despacho e aguarda sentença) com excesso de prazo, de TODO O ESTADO
+// (sem filtrar por unidade nenhuma - ver "exportarRelatorioExcessoPrazo"):
+// Nº do Processo, Situação, Dias na Situação, Juízo e Localizador. A
+// coluna "Juízo" so' aparece na tabela do eproc quando a consulta não está
+// restrita a uma única unidade, que e' exatamente o caso aqui (identifica
+// de qual juízo/vara cada processo é, ja' que a tabela mistura processos
+// de todas as unidades do estado). Casa cada campo pelo texto do
 // cabecalho (nao pela posicao), como as demais tabelas curadas.
-async function construirPdfProcessosExcessoPrazo(tabela, nomeUnidade, dias) {
+async function construirPdfProcessosExcessoPrazo(tabela, dias) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
   const idxDias = indiceColunaPorCabecalho(tabela.cabecalhos, /dias/i);
@@ -6773,7 +6778,7 @@ async function construirPdfProcessosExcessoPrazo(tabela, nomeUnidade, dias) {
     processo: valorDe(linha, idxProcesso),
     situacao: abreviarSituacao(valorDe(linha, idxSituacao)),
     dias: valorDe(linha, idxDias),
-    juizo: valorDe(linha, idxJuizo) || nomeUnidade,
+    juizo: valorDe(linha, idxJuizo),
     localizador: formatarLocalizadores(valorDe(linha, idxLocalizador)),
   }));
 
@@ -6789,7 +6794,7 @@ async function construirPdfProcessosExcessoPrazo(tabela, nomeUnidade, dias) {
   return construirPdfTabelaCuradaRetrato(
     itens,
     colunas,
-    `Processos conclusos com excesso de prazo (${dias}+ dias na situação) — "${nomeUnidade}" — ${itens.length} processo(s)`
+    `Processos conclusos com excesso de prazo (${dias}+ dias na situação) — todo o estado — ${itens.length} processo(s)`
   );
 }
 
@@ -8200,22 +8205,20 @@ async function exportarComparacaoUnidades(unidades, aoProgredir) {
 }
 
 // Orquestra o Relatório de Processos Conclusos com Excesso de Prazo do
-// cartão Corregedoria: para cada unidade escolhida no dropdown de
-// "Carregar unidades", seleciona o grupo "CONCLUSÃO" inteiro no filtro
-// Situação (todas as variantes - aguarda despacho e aguarda sentença, sem
-// precisar escolher uma de cada vez), preenche "Dias na situação" com o
-// limiar escolhido pelo usuário (30/60/90/120) e gera um PDF por unidade
-// com a relação resultante (Nº do Processo, Situação, Dias na Situação,
-// Juízo e Localizador) - mesmo padrão "um PDF por unidade, em sequência"
-// já usado por "exportarRelatorioGerencialMultiplasUnidades".
-async function exportarRelatorioExcessoPrazo(unidades, dias, aoProgredir) {
+// cartão Corregedoria: relatório autônomo e independente do Relatório para
+// Correição - não pede/usa nenhuma unidade. Seleciona o grupo "CONCLUSÃO"
+// inteiro no filtro Situação (todas as variantes - aguarda despacho e
+// aguarda sentença, sem precisar escolher uma de cada vez), preenche
+// "Dias na situação" com o limiar escolhido pelo usuário (30/60/90/120) e
+// deixa o filtro Órgão/Juízo em branco de propósito, para a consulta
+// considerar TODO O ESTADO (todas as unidades de uma vez) em vez de
+// restringir a uma unidade - gera um único PDF com a relação resultante
+// (Nº do Processo, Situação, Dias na Situação, Juízo e Localizador).
+async function exportarRelatorioExcessoPrazo(dias, aoProgredir) {
   const notificar = (texto) => {
     if (aoProgredir) aoProgredir(texto);
   };
 
-  if (!unidades || unidades.length === 0) {
-    throw new Error("Selecione ao menos uma unidade antes de exportar.");
-  }
   if (![30, 60, 90, 120].includes(Number(dias))) {
     throw new Error('Escolha um dos valores de "Dias na situação": 30, 60, 90 ou 120.');
   }
@@ -8226,37 +8229,24 @@ async function exportarRelatorioExcessoPrazo(unidades, dias, aoProgredir) {
   }
   definirTribunalPelaUrl(abaAtual.url);
 
-  const resultados = [];
-  for (let i = 0; i < unidades.length; i++) {
-    const unidade = unidades[i];
-    const prefixo = unidades.length > 1 ? `[${i + 1}/${unidades.length}] ${unidade.nome} - ` : "";
-    try {
-      notificar(`${prefixo}Consultando processos conclusos há mais de ${dias} dias...`);
-      const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
-        grupoSituacao: "C",
-        urgente: false,
-        diasSituacao: dias,
-        valorOrgaoJuizo: unidade.valor,
-        extrairTabela: true,
-      });
-      if (r.erro) throw new Error(r.erro);
-      if (!r.tabela || r.tabela.erro) {
-        throw new Error((r.tabela && r.tabela.erro) || "Não foi possível ler a tabela de resultado.");
-      }
-
-      notificar(`${prefixo}Gerando PDF (${r.tabela.linhas.length} processo(s))...`);
-      const bytes = await construirPdfProcessosExcessoPrazo(r.tabela, unidade.nome, dias);
-      const nomeArquivo = `eproc/relatorio_excesso_prazo_${sanitizarNomeArquivo(unidade.nome)}_${dias}dias_${new Date()
-        .toISOString()
-        .slice(0, 10)}.pdf`;
-      await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytes));
-
-      resultados.push({ unidade: unidade.nome, ok: true, total: r.tabela.linhas.length });
-    } catch (e) {
-      resultados.push({ unidade: unidade.nome, ok: false, erro: e && e.message ? e.message : String(e) });
-    }
+  notificar(`Consultando, em todo o estado, processos conclusos há mais de ${dias} dias...`);
+  const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+    grupoSituacao: "C",
+    urgente: false,
+    diasSituacao: dias,
+    extrairTabela: true,
+  });
+  if (r.erro) throw new Error(r.erro);
+  if (!r.tabela || r.tabela.erro) {
+    throw new Error((r.tabela && r.tabela.erro) || "Não foi possível ler a tabela de resultado.");
   }
-  return resultados;
+
+  notificar(`Gerando PDF (${r.tabela.linhas.length} processo(s))...`);
+  const bytes = await construirPdfProcessosExcessoPrazo(r.tabela, dias);
+  const nomeArquivo = `eproc/relatorio_excesso_prazo_estado_${dias}dias_${new Date().toISOString().slice(0, 10)}.pdf`;
+  await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytes));
+
+  return { total: r.tabela.linhas.length };
 }
 
 // Reaproveita INTEIRAMENTE "exportarRelatorioGerencialUnidade" (mesmas
@@ -8718,30 +8708,19 @@ const PDF_LOCALIZADORES_ALTURA_LINHA = PDF_LOCALIZADORES_TAMANHO_FONTE * 1.35;
 const PDF_ALTURA_CABECALHO_INSTITUCIONAL = 40;
 const PDF_ALTURA_RODAPE = 22;
 
-// A extensao roda em mais de um tribunal (TJPR e, a partir daqui, TRF4 -
-// ver host_permissions/content_scripts no manifest.json), e o cabecalho
-// institucional dos PDFs precisa nomear o tribunal CERTO em vez de
-// cravar "TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ" pra todo mundo (seria
-// simplesmente errado nos relatórios gerados a partir do eproc do TRF4).
-// "tribunalAtualPdf" e' preenchido uma vez por operacao de exportacao,
-// logo apos descobrir a aba/URL do eproc em uso (ver
-// "definirTribunalPelaUrl" mais abaixo, chamada em cada
-// "exportarXxx"/"listarXxx" que gera PDF) - nao da' pra descobrir isso
-// direto de dentro de "desenharCabecalhoInstitucional" porque a essa
-// altura so' se tem os dados ja' extraidos, nao a URL de origem.
+// A extensao roda so' no eproc do TJPR (ver host_permissions/
+// content_scripts no manifest.json) - o cabecalho institucional dos PDFs
+// sempre nomeia o TJPR. "tribunalAtualPdf" e "definirTribunalPelaUrl"
+// continuam existindo (em vez de cravar a string direto em cada PDF) so'
+// para nao precisar tocar em cada "exportarXxx"/"listarXxx" que ja' chama
+// "definirTribunalPelaUrl" antes de gerar o PDF.
 const TRIBUNAIS_CONHECIDOS = {
   tjpr: { nomeCompleto: "TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ" },
-  trf4: { nomeCompleto: "TRIBUNAL REGIONAL FEDERAL DA 4ª REGIÃO" },
 };
 let tribunalAtualPdf = TRIBUNAIS_CONHECIDOS.tjpr;
 
-function definirTribunalPelaUrl(url) {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    tribunalAtualPdf = host.endsWith("trf4.jus.br") ? TRIBUNAIS_CONHECIDOS.trf4 : TRIBUNAIS_CONHECIDOS.tjpr;
-  } catch (e) {
-    tribunalAtualPdf = TRIBUNAIS_CONHECIDOS.tjpr;
-  }
+function definirTribunalPelaUrl() {
+  tribunalAtualPdf = TRIBUNAIS_CONHECIDOS.tjpr;
 }
 
 // Desenha o cabecalho institucional (barra + tribunal + eProc + linha) no
@@ -11711,16 +11690,16 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
 
   if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_EXCESSO_PRAZO") {
-    // Mesmo padrao das demais operacoes em segundo plano, so' que aqui o
-    // "resultados" que chega em RELATORIO_EXCESSO_PRAZO_FINALIZADO e' sempre
-    // um array (1 ou mais unidades, cada uma com seu proprio ok/erro) - ver
-    // exportarRelatorioExcessoPrazo.
-    exportarRelatorioExcessoPrazo(mensagem.unidades, mensagem.dias, (texto) => {
+    // Mesmo padrao das demais operacoes em segundo plano. Relatório
+    // autônomo (sem unidade nenhuma - considera todo o estado de uma vez),
+    // entao "resultado" que chega em RELATORIO_EXCESSO_PRAZO_FINALIZADO e'
+    // sempre um único objeto - ver exportarRelatorioExcessoPrazo.
+    exportarRelatorioExcessoPrazo(mensagem.dias, (texto) => {
       chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_EXCESSO_PRAZO", texto }).catch(() => {});
     })
-      .then((resultados) => {
+      .then((resultado) => {
         chrome.runtime
-          .sendMessage({ tipo: "RELATORIO_EXCESSO_PRAZO_FINALIZADO", ok: true, resultados })
+          .sendMessage({ tipo: "RELATORIO_EXCESSO_PRAZO_FINALIZADO", ok: true, resultado })
           .catch(() => {});
         retornarAbaParaInicioEproc();
       })

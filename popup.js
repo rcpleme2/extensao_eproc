@@ -1568,6 +1568,11 @@ const areaBtnCompararUnidades = document.getElementById("area-btn-comparar-unida
 const btnCompararUnidades = document.getElementById("btn-comparar-unidades");
 const areaProgressoComparacaoUnidades = document.getElementById("area-progresso-comparacao-unidades");
 const textoProgressoComparacaoUnidades = document.getElementById("texto-progresso-comparacao-unidades");
+// Relatório de Processos Conclusos com Excesso de Prazo: subseção
+// autônoma dentro do mesmo cartão Corregedoria - considera a situação
+// CONCLUSÃO de TODO O ESTADO (todas as unidades de uma vez, sem nenhuma
+// seleção de unidade), então não depende de nenhuma escolha feita na
+// subseção "Relatório para Correição" acima.
 const areaExcessoPrazo = document.getElementById("area-excesso-prazo");
 const radiosDiasExcessoPrazo = Array.from(document.querySelectorAll('input[name="radio-dias-excesso-prazo"]'));
 const btnExportarExcessoPrazo = document.getElementById("btn-exportar-excesso-prazo");
@@ -1685,7 +1690,6 @@ btnRelatorioGerencialUnidade.addEventListener("click", async () => {
   areaPersonalizarRelatorio.hidden = true;
   areaBtnExportarGerencial.hidden = true;
   areaBtnCompararUnidades.hidden = true;
-  areaExcessoPrazo.hidden = true;
   unidadesSelecionadasCorregedoria = [];
   areaProgressoUnidades.hidden = false;
   textoProgressoUnidades.textContent = "Iniciando...";
@@ -1752,7 +1756,6 @@ selectUnidadeRelatorio.addEventListener("change", () => {
     areaPersonalizarRelatorio.hidden = true;
     areaBtnExportarGerencial.hidden = true;
     areaBtnCompararUnidades.hidden = true;
-    areaExcessoPrazo.hidden = true;
     return;
   }
   unidadesSelecionadasCorregedoria = opcoesSelecionadas.map((opcaoSelecionada) => ({
@@ -1774,7 +1777,6 @@ selectUnidadeRelatorio.addEventListener("change", () => {
   // A comparação exige pelo menos 2 unidades (não faz sentido "comparar"
   // uma so' unidade consigo mesma) - o botão só aparece a partir daí.
   areaBtnCompararUnidades.hidden = unidadesSelecionadasCorregedoria.length < 2;
-  areaExcessoPrazo.hidden = false;
 });
 
 // Le' o estado atual dos checkboxes de "Itens a incluir no PDF" - as
@@ -1931,15 +1933,6 @@ btnCompararUnidades.addEventListener("click", async () => {
 btnExportarExcessoPrazo.addEventListener("click", async () => {
   areaErrosCorregedoria.hidden = true;
 
-  let unidades;
-  try {
-    unidades = exigirUnidadesSelecionadas();
-  } catch (e) {
-    areaErrosCorregedoria.hidden = false;
-    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
-    return;
-  }
-
   const radioEscolhido = radiosDiasExcessoPrazo.find((radio) => radio.checked);
   if (!radioEscolhido) {
     areaErrosCorregedoria.hidden = false;
@@ -1952,19 +1945,15 @@ btnExportarExcessoPrazo.addEventListener("click", async () => {
   areaProgressoExcessoPrazo.hidden = false;
   textoProgressoExcessoPrazo.textContent = "Iniciando...";
   iniciarCronometroStatus(areaCorregedoriaInfo);
-  setStatusCorregedoria(
-    unidades.length === 1
-      ? `Gerando o Relatório de Excesso de Prazo (${dias}+ dias) de "${unidades[0].nome}" em segundo plano...`
-      : `Gerando ${unidades.length} relatórios de excesso de prazo (${dias}+ dias) em segundo plano, um por vez (arquivos separados)...`
-  );
+  setStatusCorregedoria(`Gerando o Relatório de Excesso de Prazo (${dias}+ dias, todo o estado) em segundo plano...`);
 
   // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
   // comecou; o resultado final chega pela mensagem
-  // RELATORIO_EXCESSO_PRAZO_FINALIZADO.
+  // RELATORIO_EXCESSO_PRAZO_FINALIZADO. Sem escolha de unidade nenhuma -
+  // considera a situação CONCLUSÃO de todo o estado, em todas as unidades.
   try {
     const resposta = await chrome.runtime.sendMessage({
       tipo: "EXPORTAR_RELATORIO_EXCESSO_PRAZO",
-      unidades: unidades.map((u) => ({ valor: u.valor, nome: u.nome })),
       dias,
     });
     if (!resposta || !resposta.ok) {
@@ -2351,33 +2340,13 @@ chrome.runtime.onMessage.addListener((mensagem) => {
     btnExportarExcessoPrazo.disabled = false;
 
     if (mensagem.ok) {
-      const resultados = mensagem.resultados || [];
-      const sucessos = resultados.filter((r) => r.ok);
-      const falhas = resultados.filter((r) => !r.ok);
-
-      if (resultados.length <= 1) {
-        const unico = resultados[0] || {};
-        setStatusCorregedoria(
-          `Concluído! Relatório de Excesso de Prazo de "${unico.unidade || ""}" salvo em Downloads/eproc/ (${
-            unico.total || 0
-          } processo(s)).`,
-          unico.ok === false ? "erro" : "ok"
-        );
-      } else {
-        setStatusCorregedoria(
-          `Concluído! ${sucessos.length} de ${resultados.length} relatório(s) de excesso de prazo gerado(s) em Downloads/eproc/ (arquivos separados por unidade)${
-            falhas.length > 0 ? `, ${falhas.length} com erro` : ""
-          }.`,
-          falhas.length > 0 ? "erro" : "ok"
-        );
-      }
-
-      if (falhas.length > 0) {
-        areaErrosCorregedoria.hidden = false;
-        areaErrosCorregedoria.textContent = falhas
-          .map((f) => `${f.unidade}: ${f.erro || "falha desconhecida"}`)
-          .join("; ");
-      }
+      const resultado = mensagem.resultado || {};
+      setStatusCorregedoria(
+        `Concluído! Relatório de Excesso de Prazo (todo o estado) salvo em Downloads/eproc/ (${
+          resultado.total || 0
+        } processo(s)).`,
+        "ok"
+      );
     } else {
       setStatusCorregedoria("Erro ao gerar o relatório de excesso de prazo.", "erro");
       areaErrosCorregedoria.hidden = false;

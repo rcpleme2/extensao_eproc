@@ -9,7 +9,7 @@
   <header class="cabecalho-app">
     <div class="cabecalho-titulos">
       <h1>Extensão Auxiliar eProc</h1>
-      <span class="cabecalho-sub">TJPR · TRF4 · Sistema eProc</span>
+      <span class="cabecalho-sub">TJPR · Sistema eProc</span>
     </div>
     <button
       id="btn-abrir-configuracoes"
@@ -47,6 +47,11 @@
         <span id="texto-progresso-panoramico"></span>
       </div>
       -->
+
+      <div class="subsecao-titulo">
+        <span class="subsecao-icone" aria-hidden="true">📄</span>
+        Relatório para Correição
+      </div>
 
       <div class="botoes">
         <button id="btn-relatorio-gerencial-unidade" class="btn-secundario">Carregar unidades (Relatório para Correição)</button>
@@ -150,8 +155,15 @@
         <span id="texto-progresso-comparacao-unidades"></span>
       </div>
 
-      <div class="opcoes" id="area-excesso-prazo" hidden>
-        <span class="legenda-opcoes">Relatório de Processos Conclusos com Excesso de Prazo — processos em CONCLUSÃO (aguarda despacho/sentença) há mais de:</span>
+      <hr class="separador-subsecao" />
+
+      <div class="subsecao-titulo">
+        <span class="subsecao-icone" aria-hidden="true">⏱️</span>
+        Processos Conclusos com Excesso de Prazo
+      </div>
+
+      <div class="opcoes" id="area-excesso-prazo">
+        <span class="legenda-opcoes">Relatório autônomo (não depende de nenhuma unidade escolhida acima): considera a situação CONCLUSÃO (aguarda despacho/sentença) de todo o estado, em todas as unidades, há mais de:</span>
         <div class="linha-acoes-opcoes">
           <label class="opcao">
             <input type="radio" name="radio-dias-excesso-prazo" id="radio-excesso-prazo-30" value="30" />

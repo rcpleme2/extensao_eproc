@@ -1,7 +1,7 @@
 # Extensão Auxiliar eProc
 
 Uma extensão para Chrome/Edge que facilita o dia a dia de quem usa o
-**eproc** — hoje funciona no eProc do **TJPR** e do **TRF4**. Ela abre um
+**eproc** — hoje funciona no eProc do **TJPR**. Ela abre um
 painel lateral fixo do lado da janela do navegador, organizado em
 **cartões**, um por função: exportar documentos, analisar processos com
 IA, transcrever audiências, gerar relatórios da unidade e navegar por
@@ -211,14 +211,15 @@ clicável que leva direto à tabela detalhada correspondente, no final do
 PDF. Marcando **"Apenas resumos"**, o relatório sai bem mais enxuto — só
 com os números de cada seção, sem as tabelas linha a linha.
 
-**Relatório de Processos Conclusos com Excesso de Prazo**: depois de
-carregar as unidades e escolher uma ou mais no dropdown acima, escolha
-exclusivamente entre **30, 60, 90 ou 120 dias** e clique em **"Exportar
-Relatório de Excesso de Prazo (PDF)"**. A extensão filtra a situação
-CONCLUSÃO (aguarda despacho e aguarda sentença) com pelo menos aquele
-número de dias na situação e gera um PDF (um por unidade, se mais de uma
-tiver sido escolhida) com número do processo, situação, dias na situação,
-juízo e localizador de cada um.
+**Relatório de Processos Conclusos com Excesso de Prazo**: item autônomo
+do mesmo cartão — não depende de "Carregar unidades" nem de nenhuma
+unidade escolhida acima. Escolha exclusivamente entre **30, 60, 90 ou 120
+dias** e clique em **"Exportar Relatório de Excesso de Prazo (PDF)"**. A
+extensão filtra a situação CONCLUSÃO (aguarda despacho e aguarda
+sentença) com pelo menos aquele número de dias na situação, considerando
+**todo o estado de uma vez** (todas as unidades, sem filtrar por
+comarca/juízo), e gera um único PDF com número do processo, situação,
+dias na situação, juízo e localizador de cada um.
 
 ### 🏢 Relatório da Unidade
 
@@ -318,9 +319,9 @@ nada por conta própria.
 **Preciso estar logado?** Sim, todas as funções usam a sua própria
 sessão já autenticada no eproc.
 
-**Funciona em outro tribunal, além de TJPR e TRF4?** Por enquanto não —
-a extensão só tem permissão para rodar nos domínios desses dois
-tribunais (ver `manifest.json`).
+**Funciona em outro tribunal, além do TJPR?** Por enquanto não — a
+extensão só tem permissão para rodar nos domínios do TJPR (ver
+`manifest.json`).
 
 **Um download falhou, e agora?** O erro aparece no painel ao final do
 processo, mas os demais documentos/processos continuam sendo baixados

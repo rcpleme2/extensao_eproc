@@ -98,7 +98,7 @@ ao dever de sigilo processual.
 | `downloads` | Exportar relatórios e documentos para o seu computador. |
 | `sidePanel` | Exibir a interface da extensão no painel lateral. |
 | `alarms` | Verificar periodicamente o resultado de análises enviadas em lote à Anthropic. |
-| Acesso a `eproc1g.tjpr.jus.br`, `eproc1g.tre.tjpr.jus.br` e `*.trf4.jus.br` | Ler as páginas do eProc na sua sessão autenticada. |
+| Acesso a `eproc1g.tjpr.jus.br` e `eproc1g.tre.tjpr.jus.br` | Ler as páginas do eProc na sua sessão autenticada. |
 | Acesso a `api.anthropic.com`, `generativelanguage.googleapis.com` e `api.openai.com` | Enviar conteúdo às APIs de IA que você escolher, com as suas chaves. |
 
 ## 8. Segurança

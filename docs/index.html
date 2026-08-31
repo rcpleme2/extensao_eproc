@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Extensão Auxiliar eProc</title>
-<meta name="description" content="Extensão para Chrome/Edge com análise de processos por IA (Claude/Gemini/ChatGPT), transcrição de audiências, exportação de documentos, relatórios em PDF e automações para o sistema eProc do TJPR e do TRF4." />
+<meta name="description" content="Extensão para Chrome/Edge com análise de processos por IA (Claude/Gemini/ChatGPT), transcrição de audiências, exportação de documentos, relatórios em PDF e automações para o sistema eProc do TJPR." />
 <style>
   /* Mesmos tokens de design de popup.css - a página usa deliberadamente
      a mesma paleta/tipografia/componentes do próprio painel da extensão
@@ -292,7 +292,7 @@
     <img src="assets/icon48.png" alt="" />
     <div class="cabecalho-titulos">
       <h1>Extensão Auxiliar eProc</h1>
-      <div class="cabecalho-sub">TJPR · TRF4 · Sistema eProc</div>
+      <div class="cabecalho-sub">TJPR · Sistema eProc</div>
     </div>
   </header>
 
@@ -360,6 +360,14 @@
         da extensão. Manual de uso completo e código-fonte estão no
         <a href="https://github.com/rcpleme2/extensao_eproc#readme">repositório do GitHub</a>.
       </p>
+
+      <div class="novidades">
+        <h3>Novidades da v8.6.0 <span class="versao-numero-pequena">Relatório de Excesso de Prazo + extensão volta a ser exclusiva do TJPR</span></h3>
+        <ul>
+          <li>Novo relatório no cartão <strong>Corregedoria</strong>: <strong>Processos Conclusos com Excesso de Prazo</strong> — escolha 30, 60, 90 ou 120 dias e a extensão gera um PDF com todos os processos do estado inteiro em CONCLUSÃO (aguarda despacho/sentença) há pelo menos aquele número de dias, com número do processo, situação, dias na situação, juízo e localizador.</li>
+          <li>A extensão volta a funcionar exclusivamente no eProc do <strong>TJPR</strong> — o suporte ao TRF4 (adicionado na v8.3.0) foi removido.</li>
+        </ul>
+      </div>
 
       <div class="novidades">
         <h3>Novidades da v8.5.0 <span class="versao-numero-pequena">ATP integrada ao Relatório da Unidade + modo "apenas resumos"</span></h3>
@@ -442,7 +450,7 @@
     </summary>
     <div class="card-corpo">
       <ol>
-        <li>Faça login no eProc (<code>eproc1g.tjpr.jus.br</code>, <code>eproc1g.tre.tjpr.jus.br</code> ou <code>eproc.trf4.jus.br</code>) e abra a página desejada.</li>
+        <li>Faça login no eProc (<code>eproc1g.tjpr.jus.br</code> ou <code>eproc1g.tre.tjpr.jus.br</code>) e abra a página desejada.</li>
         <li>Clique no ícone da extensão para abrir o painel lateral — ou use o botão que ela adiciona ao lado da logo do "Portal jus.br", no cabeçalho do eProc.</li>
         <li>Escolha a ferramenta desejada num dos cartões (todos começam fechados; clique no título para abrir).</li>
       </ol>
