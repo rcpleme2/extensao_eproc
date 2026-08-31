@@ -3057,13 +3057,29 @@ function consultarUmaVezNaPagina(parametros) {
       const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
         (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
       );
-      const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) =>
+      const linhasSlice = linhasEl.slice(0, LIMITE_LINHAS);
+      const linhas = linhasSlice.map((tr) =>
         Array.from(tr.querySelectorAll("td")).slice(0, LIMITE_COLUNAS).map(textoCelula)
       );
 
-      return { cabecalhos, linhas, erro: null };
+      // Href (ja' resolvido para URL absoluta, via ".href" do proprio
+      // <a>) do link "Nº do Processo" de cada linha - usado pelo
+      // Relatório de Excesso de Prazo para abrir cada processo numa aba
+      // oculta e ler o magistrado responsável (ver
+      // "abrirAbaELerMagistrado"). "null" quando a coluna nao existe ou a
+      // celula nao tem link (nunca quebra a extração das demais colunas
+      // por causa disso).
+      const idxColunaProcesso = cabecalhos.findIndex((h) => /processo/i.test(h));
+      const linksProcesso = linhasSlice.map((tr) => {
+        if (idxColunaProcesso < 0) return null;
+        const td = tr.querySelectorAll("td")[idxColunaProcesso];
+        const link = td ? td.querySelector("a[href]") : null;
+        return link ? link.href : null;
+      });
+
+      return { cabecalhos, linhas, linksProcesso, erro: null };
     } catch (e) {
-      return { cabecalhos: [], linhas: [], erro: e && e.message ? e.message : String(e) };
+      return { cabecalhos: [], linhas: [], linksProcesso: [], erro: e && e.message ? e.message : String(e) };
     }
   }
 
@@ -4211,6 +4227,51 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
     return result || { contagem: null, erro: "Não foi possível consultar (sem resultado)." };
   } catch (e) {
     return { contagem: null, erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Le', na PRÓPRIA página do processo (não na movimentação), o nome do
+// magistrado responsável - campo "Juiz(a):" no cabeçalho (span#txtMagistrado,
+// ao lado de "Órgão Julgador"), já pronto na tela sem precisar abrir
+// nenhum evento da movimentação. Autocontida, executada via
+// chrome.scripting.executeScript.
+function lerMagistradoNaPaginaDoProcesso() {
+  const span = document.getElementById("txtMagistrado");
+  return ((span && span.textContent) || "").trim();
+}
+
+// Abre uma aba oculta direto no link de um processo (href já resolvido,
+// lido da própria célula "Nº do Processo" da tabela de resultado - ver
+// "linksProcesso" em "extrairLinhasTblProcessoLista"), lê o magistrado
+// responsável e fecha a aba - usado pelo Relatório de Excesso de Prazo
+// para anexar essa informação a cada processo da lista, um de cada vez,
+// já que ela só existe na página do próprio processo (não na tabela do
+// Relatório Geral). Respeita o mesmo limite de abas simultâneas das
+// demais operações em lote desta extensão (ver "adquirirSlotDeAbaOculta"),
+// então mesmo chamada em paralelo (Promise.all) para vários processos, só
+// algumas abas ficam abertas de verdade ao mesmo tempo. Nunca lança
+// exceção: sempre resolve com uma string (vazia se não conseguir).
+async function abrirAbaELerMagistrado(hrefProcesso) {
+  if (!hrefProcesso) return "";
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: hrefProcesso, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: lerMagistradoNaPaginaDoProcesso,
+    });
+    return result || "";
+  } catch (e) {
+    return "";
   } finally {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
@@ -6815,20 +6876,24 @@ async function construirPdfSuspensos(tabela, nomeUnidade, sufixoTitulo = "") {
 // Relação de processos conclusos (grupo "CONCLUSÃO" inteiro - aguarda
 // despacho e aguarda sentença) com excesso de prazo, de TODO O ESTADO
 // (sem filtrar por unidade nenhuma - ver "exportarRelatorioExcessoPrazo"):
-// Nº do Processo, Situação, Dias na Situação, Juízo e Localizador. A
-// coluna "Juízo" so' aparece na tabela do eproc quando a consulta não está
-// restrita a uma única unidade, que e' exatamente o caso aqui (identifica
-// de qual juízo/vara cada processo é, ja' que a tabela mistura processos
-// de todas as unidades do estado); a coluna de dias e' rotulada "Nº Dias
-// Situação" no eproc (nao "Dias na situação", que e' so' o rotulo do
-// CAMPO DE FILTRO #txtDiasSituacao, uma tela diferente) e vem ANTES da
-// coluna "Situação" na tabela - "idxSituacao" precisa exigir que o
-// cabecalho COMECE com "situa" (em vez de so' conter, como as demais
-// tabelas curadas), senao "indiceColunaPorCabecalho" casaria com "Nº Dias
-// Situação" primeiro (que tambem contem "situa") e devolveria os dias na
-// coluna errada. Casa cada campo pelo texto do cabecalho (nao pela
-// posicao), como as demais tabelas curadas.
-async function construirPdfProcessosExcessoPrazo(tabela, dias) {
+// Nº do Processo, Situação, Dias na Situação, Juízo, Localizador e
+// Magistrado responsável. A coluna "Juízo" so' aparece na tabela do eproc
+// quando a consulta não está restrita a uma única unidade, que e'
+// exatamente o caso aqui (identifica de qual juízo/vara cada processo é,
+// ja' que a tabela mistura processos de todas as unidades do estado); a
+// coluna de dias e' rotulada "Nº Dias Situação" no eproc (nao "Dias na
+// situação", que e' so' o rotulo do CAMPO DE FILTRO #txtDiasSituacao, uma
+// tela diferente) e vem ANTES da coluna "Situação" na tabela -
+// "idxSituacao" precisa exigir que o cabecalho COMECE com "situa" (em vez
+// de so' conter, como as demais tabelas curadas), senao
+// "indiceColunaPorCabecalho" casaria com "Nº Dias Situação" primeiro (que
+// tambem contem "situa") e devolveria os dias na coluna errada. Casa cada
+// campo pelo texto do cabecalho (nao pela posicao), como as demais
+// tabelas curadas. "magistrados" e' um array PARALELO a "tabela.linhas"
+// (mesmo indice = mesmo processo), ja' que o nome do magistrado nao vem
+// na tabela do Relatório Geral - foi lido à parte, processo por processo
+// (ver "abrirAbaELerMagistrado" em "exportarRelatorioExcessoPrazo").
+async function construirPdfProcessosExcessoPrazo(tabela, dias, magistrados) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /^situa/i);
   const idxDias = indiceColunaPorCabecalho(tabela.cabecalhos, /dias/i);
@@ -6836,21 +6901,23 @@ async function construirPdfProcessosExcessoPrazo(tabela, dias) {
   const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
 
   const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
-  const itens = tabela.linhas.map((linha) => ({
+  const itens = tabela.linhas.map((linha, i) => ({
     processo: valorDe(linha, idxProcesso),
     situacao: abreviarSituacao(valorDe(linha, idxSituacao)),
     dias: valorDe(linha, idxDias),
     juizo: valorDe(linha, idxJuizo),
     localizador: formatarLocalizadores(valorDe(linha, idxLocalizador)),
+    magistrado: (magistrados && magistrados[i]) || "",
   }));
 
   const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
   const colunas = [
-    { titulo: "Nº do Processo", largura: larguraUtil * 0.22, campo: "processo" },
-    { titulo: "Situação", largura: larguraUtil * 0.18, campo: "situacao" },
-    { titulo: "Dias na Situação", largura: larguraUtil * 0.13, campo: "dias" },
-    { titulo: "Juízo", largura: larguraUtil * 0.25, campo: "juizo" },
-    { titulo: "Localizador", largura: larguraUtil * 0.22, campo: "localizador" },
+    { titulo: "Nº do Processo", largura: larguraUtil * 0.18, campo: "processo" },
+    { titulo: "Situação", largura: larguraUtil * 0.14, campo: "situacao" },
+    { titulo: "Dias na Situação", largura: larguraUtil * 0.1, campo: "dias" },
+    { titulo: "Juízo", largura: larguraUtil * 0.2, campo: "juizo" },
+    { titulo: "Localizador", largura: larguraUtil * 0.18, campo: "localizador" },
+    { titulo: "Magistrado", largura: larguraUtil * 0.2, campo: "magistrado" },
   ];
 
   return construirPdfTabelaCuradaRetrato(
@@ -8308,12 +8375,33 @@ async function exportarRelatorioExcessoPrazo(dias, aoProgredir) {
     throw new Error((r.tabela && r.tabela.erro) || "Não foi possível ler a tabela de resultado.");
   }
 
-  notificar(`Gerando PDF (${r.tabela.linhas.length} processo(s))...`);
-  const bytes = await construirPdfProcessosExcessoPrazo(r.tabela, dias);
+  // Abre, um a um (com o mesmo limite de abas simultâneas das demais
+  // operações em lote - ver "adquirirSlotDeAbaOculta"), a página de CADA
+  // processo da lista e lê o magistrado responsável (campo "Juiz(a):") -
+  // essa informação não vem na tabela do Relatório Geral, so' na página
+  // do próprio processo. "linksProcesso" (paralelo a "r.tabela.linhas")
+  // vem da própria célula "Nº do Processo" da tabela de resultado.
+  const total = r.tabela.linhas.length;
+  const linksProcesso = r.tabela.linksProcesso || [];
+  let concluidos = 0;
+  const magistrados = await Promise.all(
+    linksProcesso.map((href) =>
+      abrirAbaELerMagistrado(href).then((nomeMagistrado) => {
+        concluidos += 1;
+        if (concluidos % 5 === 0 || concluidos === total) {
+          notificar(`Consultando magistrado responsável: ${concluidos}/${total} processo(s)...`);
+        }
+        return nomeMagistrado;
+      })
+    )
+  );
+
+  notificar(`Gerando PDF (${total} processo(s))...`);
+  const bytes = await construirPdfProcessosExcessoPrazo(r.tabela, dias, magistrados);
   const nomeArquivo = `eproc/relatorio_excesso_prazo_estado_${dias}dias_${new Date().toISOString().slice(0, 10)}.pdf`;
   await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytes));
 
-  return { total: r.tabela.linhas.length };
+  return { total };
 }
 
 // Reaproveita INTEIRAMENTE "exportarRelatorioGerencialUnidade" (mesmas

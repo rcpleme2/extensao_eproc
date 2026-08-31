@@ -218,8 +218,12 @@ dias** e clique em **"Exportar Relatório de Excesso de Prazo (PDF)"**. A
 extensão filtra a situação CONCLUSÃO (aguarda despacho e aguarda
 sentença) com pelo menos aquele número de dias na situação, considerando
 **todo o estado de uma vez** (todas as unidades, sem filtrar por
-comarca/juízo), e gera um único PDF com número do processo, situação,
-dias na situação, juízo e localizador de cada um.
+comarca/juízo). Para cada processo encontrado, a extensão abre a página
+dele (um de cada vez, em segundo plano) para descobrir o **magistrado
+responsável** — por isso esse relatório demora mais que os outros,
+proporcional à quantidade de processos. O PDF final traz número do
+processo, situação, dias na situação, juízo, localizador e magistrado de
+cada um.
 
 ### 🏢 Relatório da Unidade
 
