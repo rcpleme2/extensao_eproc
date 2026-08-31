@@ -223,7 +223,9 @@ dele (um de cada vez, em segundo plano) para descobrir o **magistrado
 responsável** — por isso esse relatório demora mais que os outros,
 proporcional à quantidade de processos. O PDF final traz número do
 processo, situação, dias na situação, juízo, localizador e magistrado de
-cada um.
+cada um, ordenados do processo há **mais tempo** na situação para o há
+**menos tempo**, e fecha com uma tabela-resumo de quantos processos cada
+magistrado tem na lista.
 
 ### 🏢 Relatório da Unidade
 

@@ -2949,20 +2949,46 @@ function consultarUmaVezNaPagina(parametros) {
       throw new Error('Botão "Colunas visíveis" não encontrado nesta página.');
     }
 
-    botaoAbrir.click();
-    await aguardar(300);
-
-    for (const dataValue of dataValues) {
+    function itemDe(dataValue) {
       const item = dropdown.querySelector(`a.dropdown-item[data-value="${dataValue}"]`);
       if (!item) {
         throw new Error(`Coluna "${dataValue}" não encontrada no menu "Colunas visíveis".`);
       }
-      const marcador = item.querySelector("span");
-      const jaVisivel = Boolean(marcador && marcador.textContent.trim() === "done");
-      if (!jaVisivel) {
-        item.click();
+      return item;
+    }
+
+    function estaMarcada(dataValue) {
+      const marcador = itemDe(dataValue).querySelector("span");
+      return Boolean(marcador && marcador.textContent.trim() === "done");
+    }
+
+    botaoAbrir.click();
+    await aguardar(300);
+
+    for (const dataValue of dataValues) {
+      if (!estaMarcada(dataValue)) {
+        itemDe(dataValue).click();
         await aguardar(250);
       }
+    }
+
+    // Garantia: confere de novo (com ate' 3 tentativas extras) que TODAS
+    // as colunas pedidas ficaram de fato marcadas - um clique perdido por
+    // timing deixaria essa coluna faltando silenciosamente na extração
+    // mais adiante, sem nenhum aviso.
+    for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+      const faltando = dataValues.filter((dataValue) => !estaMarcada(dataValue));
+      if (faltando.length === 0) break;
+      for (const dataValue of faltando) {
+        itemDe(dataValue).click();
+        await aguardar(250);
+      }
+    }
+    const aindaFaltando = dataValues.filter((dataValue) => !estaMarcada(dataValue));
+    if (aindaFaltando.length > 0) {
+      throw new Error(
+        `Não foi possível marcar como visível a(s) coluna(s) no menu "Colunas visíveis": ${aindaFaltando.join(", ")}.`
+      );
     }
 
     // Fecha o dropdown clicando fora dele - e' esse clique "fora da
@@ -6901,14 +6927,25 @@ async function construirPdfProcessosExcessoPrazo(tabela, dias, magistrados) {
   const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
 
   const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
-  const itens = tabela.linhas.map((linha, i) => ({
-    processo: valorDe(linha, idxProcesso),
-    situacao: abreviarSituacao(valorDe(linha, idxSituacao)),
-    dias: valorDe(linha, idxDias),
-    juizo: valorDe(linha, idxJuizo),
-    localizador: formatarLocalizadores(valorDe(linha, idxLocalizador)),
-    magistrado: (magistrados && magistrados[i]) || "",
-  }));
+  const itens = tabela.linhas
+    .map((linha, i) => {
+      const dias = valorDe(linha, idxDias);
+      return {
+        processo: valorDe(linha, idxProcesso),
+        situacao: abreviarSituacao(valorDe(linha, idxSituacao)),
+        dias,
+        // So' os digitos do texto (ex.: "45" de "45"), para ordenar por
+        // tempo na situação sem depender de "dias" já vir formatado como
+        // numero puro - texto sem nenhum digito vira 0 (fica no final,
+        // nunca quebra a ordenação).
+        diasOrdenavel: Number(String(dias).replace(/\D+/g, "")) || 0,
+        juizo: valorDe(linha, idxJuizo),
+        localizador: formatarLocalizadores(valorDe(linha, idxLocalizador)),
+        magistrado: (magistrados && magistrados[i]) || "",
+      };
+    })
+    // Do processo há MAIS tempo na situação para o há MENOS tempo.
+    .sort((a, b) => b.diasOrdenavel - a.diasOrdenavel);
 
   const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
   const colunas = [
@@ -6920,11 +6957,46 @@ async function construirPdfProcessosExcessoPrazo(tabela, dias, magistrados) {
     { titulo: "Magistrado", largura: larguraUtil * 0.2, campo: "magistrado" },
   ];
 
-  return construirPdfTabelaCuradaRetrato(
+  const bytesLista = await construirPdfTabelaCuradaRetrato(
     itens,
     colunas,
-    `Processos conclusos com excesso de prazo (${dias}+ dias na situação) — todo o estado — ${itens.length} processo(s)`
+    `Processos conclusos com excesso de prazo (${dias}+ dias na situação) — todo o estado — ${itens.length} processo(s), do maior para o menor tempo na situação`
   );
+
+  // Tabela-resumo final: quantos processos (da lista acima) cada
+  // magistrado tem em CONCLUSÃO com excesso de prazo - processos sem
+  // magistrado identificado (ex.: "abrirAbaELerMagistrado" falhou nesse
+  // processo especifico) entram agrupados a parte, em vez de sumirem da
+  // contagem. Ordenado do magistrado com mais processos para o com menos
+  // (empate resolvido por ordem alfabética).
+  const contagemPorMagistrado = new Map();
+  for (const item of itens) {
+    const nome = item.magistrado || "(magistrado não identificado)";
+    contagemPorMagistrado.set(nome, (contagemPorMagistrado.get(nome) || 0) + 1);
+  }
+  const resumoMagistrados = Array.from(contagemPorMagistrado.entries())
+    .map(([magistrado, total]) => ({ magistrado, total: String(total), totalOrdenavel: total }))
+    .sort((a, b) => b.totalOrdenavel - a.totalOrdenavel || a.magistrado.localeCompare(b.magistrado, "pt-BR"));
+
+  const colunasResumo = [
+    { titulo: "Magistrado", largura: larguraUtil * 0.75, campo: "magistrado" },
+    { titulo: "Nº de Processos", largura: larguraUtil * 0.25, campo: "total" },
+  ];
+  const bytesResumo = await construirPdfTabelaCuradaRetrato(
+    resumoMagistrados,
+    colunasResumo,
+    `Processos por magistrado — ${resumoMagistrados.length} magistrado(s)`
+  );
+
+  // Junta as duas tabelas num unico PDF: lista detalhada primeiro,
+  // resumo por magistrado ao final.
+  const pdfFinal = await PDFDocument.create();
+  for (const bytes of [bytesLista, bytesResumo]) {
+    const pdfParcial = await PDFDocument.load(bytes);
+    const paginas = await pdfFinal.copyPages(pdfParcial, pdfParcial.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+  return pdfFinal.save();
 }
 
 // Relação de processos paralisados (a partir de "DIAS_MINIMO_PARALISADOS"
