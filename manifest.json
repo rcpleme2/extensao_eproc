@@ -36,7 +36,7 @@
         "https://eproc1g.tjpr.jus.br/eproc/controlador.php*",
         "https://eproc1g.tre.tjpr.jus.br/eproc/controlador.php*"
       ],
-      "js": ["content.js"],
+      "js": ["log.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

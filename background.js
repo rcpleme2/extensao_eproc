@@ -5,7 +5,8 @@
 // pdf.js) roda numa aba oculta, nao aqui (ver comentario mais abaixo,
 // perto de "Construcao do MD unico", sobre o motivo).
 
-importScripts("libs/pdf-lib.min.js");
+importScripts("log.js", "libs/pdf-lib.min.js");
+logExt.instrumentar("background");
 const { PDFDocument, StandardFonts, rgb, PDFName } = self.PDFLib;
 
 // Cria um link interno (clicavel) numa pagina de origem apontando para
@@ -364,7 +365,7 @@ function lerEstadoDivDochtml(tabId) {
 // Retorna sempre { conteudo, erro }, nunca lanca excecao, para o chamador
 // poder relatar o motivo exato de uma falha em vez de so' "nao deu certo".
 //
-// Diagnostico ("[eproc-html]" no console do service worker, em
+// Diagnostico ("[ext_eproc][html]" no console do service worker, em
 // chrome://extensions): loga a URL apos o carregamento, se a div
 // "#divdochtml" chegou a existir no DOM (independente de ter conteudo) e
 // quantas tentativas de poll foram feitas - para descobrir se o problema
@@ -378,19 +379,19 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
     } catch (e) {
       return { conteudo: null, erro: `Falha ao abrir aba oculta: ${String(e)}` };
     }
-    console.log("[eproc-html]", "Aba criada", tab.id, "para", url);
+    console.log("[ext_eproc][html]", "Aba criada", tab.id, "para", url);
 
     await aguardarCarregamentoAba(tab.id);
 
     const abaCarregada = await chrome.tabs.get(tab.id).catch(() => null);
-    console.log("[eproc-html]", "Aba", tab.id, "carregada. URL atual:", abaCarregada && abaCarregada.url);
+    console.log("[ext_eproc][html]", "Aba", tab.id, "carregada. URL atual:", abaCarregada && abaCarregada.url);
 
     let ultimoEstado = { existe: false, conteudo: "" };
     for (let tentativa = 0; tentativa < 60; tentativa += 1) {
       ultimoEstado = await lerEstadoDivDochtml(tab.id);
       if (tentativa === 0) {
         console.log(
-          "[eproc-html]",
+          "[ext_eproc][html]",
           "Primeira leitura - div existe?",
           ultimoEstado.existe,
           "| URL da página:",
@@ -406,7 +407,7 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
         // atos ordinatorios ligados ao DJEN). Usa esse texto direto, sem
         // esperar os 18s de polling por uma div que nunca vai aparecer.
         if (!ultimoEstado.existe && ultimoEstado.corpoTextoCompleto && ultimoEstado.corpoTextoCompleto.length > 30) {
-          console.log("[eproc-html]", "Página sem #divdochtml, mas com conteúdo pronto no body - usando direto.");
+          console.log("[ext_eproc][html]", "Página sem #divdochtml, mas com conteúdo pronto no body - usando direto.");
           return { conteudo: null, textoBruto: ultimoEstado.corpoTextoCompleto, erro: null };
         }
       }
@@ -416,7 +417,7 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
       // tentando ler uma aba que nao existe mais pelos proximos segundos
       // - para na hora e relata isso especificamente.
       if (ultimoEstado.abaSumiu) {
-        console.warn("[eproc-html]", "A aba fechou sozinha antes de terminar (tentativa", tentativa, ").");
+        console.warn("[ext_eproc][html]", "A aba fechou sozinha antes de terminar (tentativa", tentativa, ").");
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -424,7 +425,7 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
 
     if (!ultimoEstado.conteudo || !ultimoEstado.conteudo.trim()) {
       console.warn(
-        "[eproc-html]",
+        "[ext_eproc][html]",
         "Div não preencheu a tempo. Existia?",
         ultimoEstado.existe,
         "| URL final:",
@@ -464,7 +465,7 @@ async function abrirAbaEExtrairHtmlDivDochtml(url) {
   if (primeira.conteudo || primeira.textoBruto) return primeira;
 
   console.warn(
-    "[eproc-html]",
+    "[ext_eproc][html]",
     "Primeira tentativa falhou, tentando novamente com uma aba nova:",
     primeira.erro
   );
@@ -527,7 +528,7 @@ async function obterConteudoHtmlReal(url, nomeDocumento) {
     };
   }
 
-  console.warn("[eproc-html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
+  console.warn("[ext_eproc][html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
   const fallback = await tentarFallbackFetchHtml(url);
   if (fallback.html) return fallback;
 
@@ -574,7 +575,7 @@ async function obterTextoHtmlReal(url) {
   let erroFinal = erro;
 
   if (!html) {
-    console.warn("[eproc-html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
+    console.warn("[ext_eproc][html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
     const fallback = await tentarFallbackFetchHtml(url);
     if (fallback.html) {
       html = fallback.html;
@@ -954,8 +955,8 @@ function criarResolvedorUrlDocumento() {
 //
 // Prefixo usado em todos os logs deste modo (console do "Inspect views:
 // service worker" em chrome://extensions, e da propria aba oculta), para
-// facilitar filtrar ("[eproc-md]") quando algo falhar.
-const LOG_MD = "[eproc-md]";
+// facilitar filtrar ("[ext_eproc][md]") quando algo falhar.
+const LOG_MD = "[ext_eproc][md]";
 
 // Impede que uma unica etapa demorada (ex.: um fetch que nunca retorna)
 // trave o processo inteiro para sempre - sem isso, uma promessa que nunca
@@ -2478,7 +2479,7 @@ async function verificarTodosLotesPendentesIA() {
         houveMudanca = true;
       }
     } catch (e) {
-      console.error("[eproc-ia-lote] Falha ao verificar lote", lote.batchId, ":", e);
+      console.error("[ext_eproc][ia-lote] Falha ao verificar lote", lote.batchId, ":", e);
     }
   }
 
@@ -2492,6 +2493,7 @@ async function verificarTodosLotesPendentesIA() {
 }
 
 chrome.alarms.onAlarm.addListener((alarme) => {
+  logExt("Alarme disparado:", alarme.name);
   if (alarme.name === NOME_ALARME_LOTES_IA) verificarTodosLotesPendentesIA();
 });
 
@@ -3893,7 +3895,7 @@ function clicarLinkAtuacaoJuizLeigoNaPagina() {
 // telas panoramicas ("Processos sem Movimentação N Dias (todas Varas)" e
 // "Relatório de Atuação Conciliador/Juiz Leigo"), das quais NAO temos
 // amostra HTML (diferente das demais telas desta extensao, calibradas
-// contra paginas reais). Estrategia defensiva, com log "[eproc]"
+// contra paginas reais). Estrategia defensiva, com log "[ext_eproc][relatorio]"
 // detalhado para calibrar depois com o HTML real se falhar:
 // 1. Se "diasPreencher" vier, tenta achar um campo de dias (input number
 //    ou id/name contendo "dias") e preenche.
@@ -3985,9 +3987,9 @@ function extrairTabelaGenericaNaPagina(diasPreencher) {
           nativeSetter.call(alvo, String(diasPreencher));
           alvo.dispatchEvent(new Event("input", { bubbles: true }));
           alvo.dispatchEvent(new Event("change", { bubbles: true }));
-          console.log("[eproc]", "Campo de dias preenchido:", alvo.id || alvo.name);
+          console.log("[ext_eproc][relatorio]", "Campo de dias preenchido:", alvo.id || alvo.name);
         } else {
-          console.warn("[eproc]", "Nenhum campo de dias encontrado nesta tela - seguindo sem preencher.");
+          console.warn("[ext_eproc][relatorio]", "Nenhum campo de dias encontrado nesta tela - seguindo sem preencher.");
         }
       }
 
@@ -3995,26 +3997,26 @@ function extrairTabelaGenericaNaPagina(diasPreencher) {
         (el) => /consultar/i.test(el.textContent || el.value || "")
       );
       if (botaoConsultar) {
-        console.log("[eproc]", "Clicando em Consultar...");
+        console.log("[ext_eproc][relatorio]", "Clicando em Consultar...");
         botaoConsultar.click();
         // A consulta pode ser AJAX ou recarregar a pagina; espera um
         // tempo generoso e segue - se recarregar, este script morre e o
         // chamador retenta a extracao numa nova chamada.
         await aguardar(4000);
       } else {
-        console.log("[eproc]", "Nenhum botão Consultar encontrado - a tela pode já abrir consultada.");
+        console.log("[ext_eproc][relatorio]", "Nenhum botão Consultar encontrado - a tela pode já abrir consultada.");
       }
 
       const resultado = extrairDeDataTable() || extrairDeTabelaHtml();
       if (!resultado || resultado.linhas.length === 0) {
-        console.warn("[eproc]", "Nenhuma tabela de resultado encontrada. Título da página:", document.title);
+        console.warn("[ext_eproc][relatorio]", "Nenhuma tabela de resultado encontrada. Título da página:", document.title);
         return {
           cabecalhos: [],
           linhas: [],
           erro: "Nenhuma tabela de resultado encontrada nesta tela (envie o HTML da página para calibrar a extração).",
         };
       }
-      console.log("[eproc]", "Tabela extraída:", resultado.linhas.length, "linha(s),", resultado.cabecalhos.length, "coluna(s).");
+      console.log("[ext_eproc][relatorio]", "Tabela extraída:", resultado.linhas.length, "linha(s),", resultado.cabecalhos.length, "coluna(s).");
       return { cabecalhos: resultado.cabecalhos, linhas: resultado.linhas, erro: null };
     } catch (e) {
       return { cabecalhos: [], linhas: [], erro: e && e.message ? e.message : String(e) };
@@ -4061,7 +4063,7 @@ async function abrirAbaEExtrairTabelaRelatorio(urlBase, funcClicarLink, nomeRela
       });
       resultado = result;
     } catch (e) {
-      console.warn("[eproc]", nomeRelatorio, "- primeira extração interrompida (provável recarregamento):", String(e));
+      console.warn("[ext_eproc][relatorio]", nomeRelatorio, "- primeira extração interrompida (provável recarregamento):", String(e));
     }
 
     if (!resultado || (resultado.erro && resultado.linhas.length === 0)) {
@@ -11994,4 +11996,10 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
 
   return false;
+});
+
+chrome.runtime.onInstalled.addListener((d) => logExt("Extensão instalada/atualizada:", d.reason, chrome.runtime.getManifest().version));
+chrome.downloads.onChanged.addListener((d) => {
+  if (d.state && d.state.current) logExt("Download", d.id, "→", d.state.current);
+  if (d.error) logExt.warn("Download", d.id, "erro:", d.error.current);
 });

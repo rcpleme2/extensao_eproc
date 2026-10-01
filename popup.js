@@ -1,3 +1,5 @@
+logExt.instrumentar("popup");
+
 const areaStatus = document.getElementById("area-status");
 const btnDetectar = document.getElementById("btn-detectar");
 const btnBaixar = document.getElementById("btn-baixar");
@@ -1025,6 +1027,7 @@ function iniciarCronometroStatus(el) {
 function aplicarStatus(el, texto, tipo, abrirCartao = true) {
   const finalizado = tipo === "ok" || tipo === "erro";
   el.dataset.statusTexto = texto;
+  if (texto) logExt(tipo === "erro" ? "Status (erro):" : "Status:", texto);
 
   const cron = cronometros.get(el);
   if (finalizado && cron) {
@@ -3188,3 +3191,46 @@ document.getElementById("card-transcricao-ia").addEventListener("toggle", (e) =>
 atualizarStatusSetupIA();
 atualizarPromptsIA();
 atualizarListaCompletaIA();
+
+// ---- Log das interações do usuário no painel ----
+// Delegação única: registra cada clique em botão, mudança de campo
+// (sem imprimir o valor de campos de texto/senha, que podem conter chaves
+// de API ou prompts) e abertura/fechamento de cartões.
+function descreverElementoLog(el) {
+  return el.id || el.name || (el.textContent || "").trim().slice(0, 40) || el.tagName.toLowerCase();
+}
+
+document.addEventListener(
+  "click",
+  (ev) => {
+    const alvo = ev.target.closest && ev.target.closest("button, a, summary, input[type=checkbox], input[type=radio]");
+    if (!alvo) return;
+    logExt("Clique:", alvo.tagName.toLowerCase(), descreverElementoLog(alvo));
+  },
+  true
+);
+
+document.addEventListener(
+  "change",
+  (ev) => {
+    const el = ev.target;
+    if (!el || !el.tagName) return;
+    let valor;
+    if (el.type === "checkbox" || el.type === "radio") valor = el.checked;
+    else if (el.tagName === "SELECT") valor = el.options[el.selectedIndex] ? el.options[el.selectedIndex].text : el.value;
+    else valor = `<${(el.value || "").length} caractere(s)>`;
+    logExt("Campo alterado:", descreverElementoLog(el), "=", valor);
+  },
+  true
+);
+
+document.addEventListener(
+  "toggle",
+  (ev) => {
+    if (ev.target && ev.target.tagName === "DETAILS") {
+      const titulo = ev.target.querySelector("summary");
+      logExt("Cartão", ev.target.open ? "aberto:" : "fechado:", (titulo && titulo.textContent.trim().slice(0, 50)) || ev.target.id);
+    }
+  },
+  true
+);
