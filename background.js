@@ -3018,28 +3018,68 @@ function consultarUmaVezNaPagina(parametros) {
     // boa parte do resultado sem nenhum aviso.
     const LIMITE_LINHAS = 5000;
     try {
-      if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
-        return { cabecalhos: [], linhas: [], erro: "jQuery DataTables não disponível nesta página." };
-      }
-      const tabelaEl = jQuery("#tblProcessoLista");
-      if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tblProcessoLista")) {
-        return { cabecalhos: [], linhas: [], erro: 'Tabela "#tblProcessoLista" não encontrada ou ainda não inicializada.' };
-      }
-      const dt = tabelaEl.DataTable();
-
-      const aguardarRedesenho = () =>
-        Promise.race([
-          new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true))),
-          aguardar(8000).then(() => false),
-        ]);
-
-      // Mostra todas as linhas de uma vez (sem paginacao do DataTables)
-      // antes de ler - senao so' pegariamos a pagina atual visivel.
-      const promessaMostrarTudo = aguardarRedesenho();
-      dt.page.len(-1).draw(false);
-      await promessaMostrarTudo;
-
+      // Pagina "como um usuario": sem depender da API do DataTables
+      // (jQuery nao e' mais global na versao atual do eproc, e a consulta
+      // passou a ser paginada pelo servidor, que so' oferece 10/25/50/100
+      // linhas por pagina - "page.len(-1)" nao funciona mais). Poe o maior
+      // tamanho de pagina no seletor nativo e clica em "Próximo" ate' o
+      // fim, juntando as linhas de cada pagina.
       const tabelaDom = document.getElementById("tblProcessoLista");
+      if (!tabelaDom) {
+        return { cabecalhos: [], linhas: [], linksProcesso: [], erro: 'Tabela "#tblProcessoLista" não encontrada nesta página.' };
+      }
+
+      const elProcessando = () => document.getElementById("tblProcessoLista_processing");
+      const processando = () => {
+        const el = elProcessando();
+        return Boolean(el) && getComputedStyle(el).display !== "none";
+      };
+      const assinaturaTabela = () => {
+        const primeira = tabelaDom.querySelector("tbody tr");
+        const ativa = document.querySelector("#tblProcessoLista_paginate li.active");
+        return [
+          primeira ? primeira.id || primeira.textContent.slice(0, 60) : "",
+          tabelaDom.querySelectorAll("tbody tr").length,
+          ativa ? ativa.textContent.trim() : "",
+        ].join("|");
+      };
+      // Espera a tabela terminar de redesenhar apos uma acao (trocar o
+      // tamanho da pagina, clicar em Próximo): a assinatura da tabela
+      // mudou E o indicador "Processando..." sumiu (ou, se nada mudou,
+      // passou tempo suficiente para concluir que o resultado e' igual).
+      async function aguardarRedesenho(assinaturaAntes, minimoMs) {
+        const inicio = Date.now();
+        while (Date.now() - inicio < 30000) {
+          await aguardar(150);
+          if (processando()) continue;
+          const mudou = assinaturaTabela() !== assinaturaAntes;
+          if (mudou && Date.now() - inicio >= 150) {
+            await aguardar(150);
+            if (!processando()) return true;
+          } else if (!mudou && Date.now() - inicio >= minimoMs) {
+            return false;
+          }
+        }
+        return false;
+      }
+
+      // Garante que a tabela ja' terminou a consulta inicial.
+      for (let i = 0; i < 100 && processando(); i += 1) await aguardar(150);
+
+      const seletorTamanho = document.querySelector('select[name="tblProcessoLista_length"]');
+      if (seletorTamanho) {
+        const opcoesNumericas = Array.from(seletorTamanho.options)
+          .map((o) => ({ valor: o.value, n: Number(o.value) }))
+          .filter((o) => o.n > 0)
+          .sort((x, y) => y.n - x.n);
+        if (opcoesNumericas.length > 0 && seletorTamanho.value !== opcoesNumericas[0].valor) {
+          const antes = assinaturaTabela();
+          seletorTamanho.value = opcoesNumericas[0].valor;
+          seletorTamanho.dispatchEvent(new Event("change", { bubbles: true }));
+          await aguardarRedesenho(antes, 2500);
+        }
+      }
+
       const cabecalhos = Array.from(tabelaDom.querySelectorAll("thead th"))
         .map((th) => (th.textContent || "").replace(/\s+/g, " ").trim())
         .slice(0, LIMITE_COLUNAS);
@@ -3082,28 +3122,46 @@ function consultarUmaVezNaPagina(parametros) {
       // corrigido em "extrairLinhasRemessasJuizesLeigosNaPagina"). Exigir
       // o mesmo numero de <td> que de colunas no cabecalho descarta essa
       // linha "vazia".
-      const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
-        (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
-      );
-      const linhasSlice = linhasEl.slice(0, LIMITE_LINHAS);
-      const linhas = linhasSlice.map((tr) =>
-        Array.from(tr.querySelectorAll("td")).slice(0, LIMITE_COLUNAS).map(textoCelula)
-      );
-
-      // Href (ja' resolvido para URL absoluta, via ".href" do proprio
-      // <a>) do link "Nº do Processo" de cada linha - usado pelo
-      // Relatório de Excesso de Prazo para abrir cada processo numa aba
-      // oculta e ler o magistrado responsável (ver
-      // "abrirAbaELerMagistrado"). "null" quando a coluna nao existe ou a
-      // celula nao tem link (nunca quebra a extração das demais colunas
-      // por causa disso).
+      const linhasPorPagina = () =>
+        Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
+          (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
+        );
+      const idsVistos = new Set();
+      const linhasPreparadas = [];
+      // Le' o texto das celulas da pagina ATUAL imediatamente (o DOM e'
+      // reaproveitado/substituido a cada pagina), junto com o link.
       const idxColunaProcesso = cabecalhos.findIndex((h) => /processo/i.test(h));
-      const linksProcesso = linhasSlice.map((tr) => {
-        if (idxColunaProcesso < 0) return null;
-        const td = tr.querySelectorAll("td")[idxColunaProcesso];
-        const link = td ? td.querySelector("a[href]") : null;
-        return link ? link.href : null;
-      });
+      const coletarPagina = () => {
+        for (const tr of linhasPorPagina()) {
+          const chave = tr.id || tr.textContent;
+          if (idsVistos.has(chave)) continue;
+          idsVistos.add(chave);
+          if (linhasPreparadas.length >= LIMITE_LINHAS) continue;
+          const tds = Array.from(tr.querySelectorAll("td"));
+          const td = idxColunaProcesso >= 0 ? tds[idxColunaProcesso] : null;
+          const link = td ? td.querySelector("a[href]") : null;
+          linhasPreparadas.push({
+            celulas: tds.slice(0, LIMITE_COLUNAS).map(textoCelula),
+            href: link ? link.href : null,
+          });
+        }
+      };
+
+      coletarPagina();
+      const MAX_PAGINAS = 500;
+      for (let pagina = 1; pagina < MAX_PAGINAS && linhasPreparadas.length < LIMITE_LINHAS; pagina += 1) {
+        const itemProximo = document.getElementById("tblProcessoLista_next");
+        const linkProximo = itemProximo ? itemProximo.querySelector("a, button") : null;
+        if (!itemProximo || !linkProximo || itemProximo.classList.contains("disabled")) break;
+        const antes = assinaturaTabela();
+        linkProximo.click();
+        const mudou = await aguardarRedesenho(antes, 3000);
+        if (!mudou) break; // clique nao trocou de pagina - evita laço infinito
+        coletarPagina();
+      }
+
+      const linhas = linhasPreparadas.map((l) => l.celulas);
+      const linksProcesso = linhasPreparadas.map((l) => l.href);
 
       return { cabecalhos, linhas, linksProcesso, erro: null };
     } catch (e) {
@@ -6397,7 +6455,7 @@ function mapaCoresPorValor(valores) {
 function extrairItensAtivos(tabela, processosUrgentes) {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
-  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /^situa/i);
   const idxClasse = indiceColunaPorCabecalho(tabela.cabecalhos, /classe/i);
   const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
   const idxDataHora = indiceColunaPorCabecalho(tabela.cabecalhos, /data\s*\/?\s*hora/i);
@@ -6872,7 +6930,7 @@ function formatarLocalizadores(valorBruto, comMarcador) {
 async function construirPdfSuspensos(tabela, nomeUnidade, sufixoTitulo = "") {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
   const idxAutuacao = indiceColunaPorCabecalho(tabela.cabecalhos, /autua/i);
-  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /^situa/i);
   const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
   const idxDataHora = indiceColunaPorCabecalho(tabela.cabecalhos, /data\s*\/?\s*hora/i);
 
@@ -7009,7 +7067,7 @@ async function construirPdfProcessosExcessoPrazo(tabela, dias, magistrados) {
 // o menos paralisado.
 async function construirPdfProcessosParalisados(tabela, nomeUnidade, sufixoTitulo = "") {
   const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
-  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /situa/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /^situa/i);
   const idxClasse = indiceColunaPorCabecalho(tabela.cabecalhos, /classe/i);
   const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
   const idxEvento = indiceColunaPorCabecalho(tabela.cabecalhos, /evento/i);
