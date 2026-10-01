@@ -1,3 +1,4 @@
+logExt.instrumentar("content");
 // Content script: roda na pagina de detalhes do processo no eproc e
 // identifica todos os links de documento (a.infraLinkDocumento).
 
@@ -131,6 +132,7 @@ function garantirCheckboxDocumento(anchorEl, idDoc) {
   // Sem receptor (painel fechado), a Promise rejeita - descartada de
   // proposito, e' o caso normal.
   checkbox.addEventListener("change", () => {
+    logExt("Documento", idDoc, checkbox.checked ? "marcado" : "desmarcado", "na página.");
     chrome.runtime
       .sendMessage({ tipo: "SELECAO_DOCUMENTO_ALTERADA_NA_PAGINA", idDocumento: idDoc, selecionado: checkbox.checked })
       .catch(() => {});
@@ -156,9 +158,11 @@ function obterSelecaoDocumentos() {
 function definirSelecaoDocumento(idDocumento, selecionado) {
   const chk = document.querySelector(`.${CLASSE_CHECKBOX_DOCUMENTO}[data-doc-checkbox="${idDocumento}"]`);
   if (chk) chk.checked = Boolean(selecionado);
+  logExt("Seleção do documento", idDocumento, "definida pelo painel:", Boolean(selecionado));
 }
 
 function definirSelecaoTodosDocumentos(selecionado) {
+  logExt("Seleção de todos os documentos definida pelo painel:", Boolean(selecionado));
   document.querySelectorAll(`.${CLASSE_CHECKBOX_DOCUMENTO}`).forEach((chk) => {
     chk.checked = Boolean(selecionado);
   });
@@ -425,7 +429,10 @@ function substituirSiglaPorNomeUsuario() {
   const labels = document.querySelectorAll(
     "label.infraEventoUsuario[aria-label]:not([data-nome-substituido])"
   );
-  if (labels.length > 0) garantirEstiloCargoUsuario();
+  if (labels.length > 0) {
+    garantirEstiloCargoUsuario();
+    logExt("Substituindo sigla pelo nome do usuário em", labels.length, "evento(s).");
+  }
 
   for (const label of labels) {
     const ariaLabel = label.getAttribute("aria-label") || "";
@@ -489,6 +496,7 @@ function anexarMagistradoEmConclusos() {
       'table.infraTable tbody > tr[id^="trEvento"]:not([data-magistrado-verificado])'
   );
 
+  let anexados = 0;
   for (const linha of linhas) {
     linha.setAttribute("data-magistrado-verificado", "1");
 
@@ -503,7 +511,9 @@ function anexarMagistradoEmConclusos() {
     spanMagistrado.className = CLASSE_CONCLUSOS_MAGISTRADO;
     spanMagistrado.textContent = ` (${nomeMagistrado})`;
     tdDescricao.appendChild(spanMagistrado);
+    anexados++;
   }
+  if (anexados > 0) logExt("Magistrado anexado a", anexados, "evento(s) 'Conclusos'.");
 }
 
 // Botao injetado ao lado da logo do Portal jus.br no cabecalho do eproc,
@@ -576,6 +586,7 @@ function adicionarBotaoAbrirPainel() {
   botao.appendChild(document.createTextNode("Extensão eProc"));
 
   botao.addEventListener("click", (evento) => {
+    logExt("Botão 'Extensão eProc' clicado: abrindo painel lateral.");
     evento.preventDefault();
     evento.stopPropagation();
     // Se a extensao foi recarregada (chrome://extensions) depois que esta
@@ -624,11 +635,13 @@ function aplicarSubstituicaoSiglaSeAtivo() {
 
 chrome.storage.local.get({ substituirSigla: true }, (itens) => {
   configSubstituirSiglaAtivo = itens.substituirSigla;
+  logExt("Config substituirSigla:", itens.substituirSigla);
   configuracaoSiglaCarregada = true;
   aplicarSubstituicaoSiglaSeAtivo();
 });
 
 chrome.storage.onChanged.addListener((mudancas, area) => {
+  if (area === "local") logExt("Configuração alterada:", Object.keys(mudancas).join(", "));
   if (area === "local" && mudancas.substituirSigla) {
     configSubstituirSiglaAtivo = mudancas.substituirSigla.newValue;
     aplicarSubstituicaoSiglaSeAtivo();
@@ -652,6 +665,7 @@ function aplicarAnexoMagistradoSeAtivo() {
 
 chrome.storage.local.get({ anexarMagistradoConclusos: true }, (itens) => {
   configAnexarMagistradoAtivo = itens.anexarMagistradoConclusos;
+  logExt("Config anexarMagistradoConclusos:", itens.anexarMagistradoConclusos);
   configuracaoMagistradoCarregada = true;
   aplicarAnexoMagistradoSeAtivo();
 });
@@ -738,6 +752,7 @@ function montarComarcaJuizoOrgao() {
   if (document.getElementById(ID_WRAPPER_COMARCA_JUIZO)) return; // ja' montado nesta pagina
   const select = document.getElementById("selIdOrgaoJuizo");
   if (!select) return;
+  logExt("Separando Órgão/Juízo em Comarca + Juízo.");
 
   const unidades = Array.from(select.options)
     .filter((opcao) => opcao.value)
@@ -794,6 +809,7 @@ function montarComarcaJuizoOrgao() {
 }
 
 function desmontarComarcaJuizoOrgao() {
+  logExt("Desfazendo separação Comarca/Juízo.");
   const wrapper = document.getElementById(ID_WRAPPER_COMARCA_JUIZO);
   if (wrapper) wrapper.remove();
 
@@ -817,6 +833,7 @@ function aplicarSepararOrgaoJuizoSeAtivo() {
 
 chrome.storage.local.get({ separarOrgaoJuizoPorComarca: false }, (itens) => {
   configSepararOrgaoJuizoAtivo = itens.separarOrgaoJuizoPorComarca;
+  logExt("Config separarOrgaoJuizoPorComarca:", itens.separarOrgaoJuizoPorComarca);
   configSepararOrgaoJuizoCarregada = true;
   aplicarSepararOrgaoJuizoSeAtivo();
 });
@@ -1709,7 +1726,9 @@ function lerPerfilAtual() {
 
 chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   if (mensagem && mensagem.tipo === "LISTAR_DOCUMENTOS") {
-    sendResponse(listarDocumentos());
+    const docs = listarDocumentos();
+    logExt("Detecção na página: processo", docs.numeroProcesso, "|", docs.documentos.length, "documento(s),", docs.movimentacao.length, "evento(s) de movimentação.");
+    sendResponse(docs);
   }
   if (mensagem && mensagem.tipo === "OBTER_SELECAO_DOCUMENTOS") {
     sendResponse({ selecionados: obterSelecaoDocumentos() });
@@ -1730,10 +1749,15 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
   if (mensagem && mensagem.tipo === "LISTAR_REGRAS_AUTOMACAO") {
-    sendResponse(listarRegrasAutomacaoAtivas());
+    logExt("Lendo regras de automação da página...");
+    const regras = listarRegrasAutomacaoAtivas();
+    logExt("Regras de automação lidas.");
+    sendResponse(regras);
   }
   if (mensagem && mensagem.tipo === "LER_PERFIL_ATUAL") {
-    sendResponse(lerPerfilAtual());
+    const perfil = lerPerfilAtual();
+    logExt("Perfil atual lido:", logExt.resumir(perfil));
+    sendResponse(perfil);
   }
   return true;
 });

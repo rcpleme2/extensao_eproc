@@ -1,3 +1,5 @@
+logExt.instrumentar("popup");
+
 const areaStatus = document.getElementById("area-status");
 const btnDetectar = document.getElementById("btn-detectar");
 const btnBaixar = document.getElementById("btn-baixar");
@@ -1025,6 +1027,7 @@ function iniciarCronometroStatus(el) {
 function aplicarStatus(el, texto, tipo, abrirCartao = true) {
   const finalizado = tipo === "ok" || tipo === "erro";
   el.dataset.statusTexto = texto;
+  if (texto) logExt(tipo === "erro" ? "Status (erro):" : "Status:", texto);
 
   const cron = cronometros.get(el);
   if (finalizado && cron) {
@@ -1568,6 +1571,16 @@ const areaBtnCompararUnidades = document.getElementById("area-btn-comparar-unida
 const btnCompararUnidades = document.getElementById("btn-comparar-unidades");
 const areaProgressoComparacaoUnidades = document.getElementById("area-progresso-comparacao-unidades");
 const textoProgressoComparacaoUnidades = document.getElementById("texto-progresso-comparacao-unidades");
+// Relatório de Processos Conclusos com Excesso de Prazo: subseção
+// autônoma dentro do mesmo cartão Corregedoria - considera a situação
+// CONCLUSÃO de TODO O ESTADO (todas as unidades de uma vez, sem nenhuma
+// seleção de unidade), então não depende de nenhuma escolha feita na
+// subseção "Relatório para Correição" acima.
+const areaExcessoPrazo = document.getElementById("area-excesso-prazo");
+const radiosDiasExcessoPrazo = Array.from(document.querySelectorAll('input[name="radio-dias-excesso-prazo"]'));
+const btnExportarExcessoPrazo = document.getElementById("btn-exportar-excesso-prazo");
+const areaProgressoExcessoPrazo = document.getElementById("area-progresso-excesso-prazo");
+const textoProgressoExcessoPrazo = document.getElementById("texto-progresso-excesso-prazo");
 // Relatório Geral (panorama) desativado por enquanto - ver comentário em
 // popup.html no lugar do botão. Refs comentadas junto para não quebrar
 // (document.getElementById de um id que não existe mais no DOM).
@@ -1912,6 +1925,49 @@ btnCompararUnidades.addEventListener("click", async () => {
     areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
     areaProgressoComparacaoUnidades.hidden = true;
     btnCompararUnidades.disabled = false;
+  }
+});
+
+// Relatório de Processos Conclusos com Excesso de Prazo: reaproveita a(s)
+// unidade(s) já escolhida(s) no dropdown acima (mesma checagem
+// "exigirUnidadesSelecionadas" dos demais relatórios deste painel) e exige
+// que o usuário escolha exclusivamente um entre 30/60/90/120 dias no grupo
+// de radio buttons antes de exportar.
+btnExportarExcessoPrazo.addEventListener("click", async () => {
+  areaErrosCorregedoria.hidden = true;
+
+  const radioEscolhido = radiosDiasExcessoPrazo.find((radio) => radio.checked);
+  if (!radioEscolhido) {
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = 'Escolha um dos valores de "Dias na situação" (30, 60, 90 ou 120) antes de exportar.';
+    return;
+  }
+  const dias = Number(radioEscolhido.value);
+
+  btnExportarExcessoPrazo.disabled = true;
+  areaProgressoExcessoPrazo.hidden = false;
+  textoProgressoExcessoPrazo.textContent = "Iniciando...";
+  iniciarCronometroStatus(areaCorregedoriaInfo);
+  setStatusCorregedoria(`Gerando o Relatório de Excesso de Prazo (${dias}+ dias, todo o estado) em segundo plano...`);
+
+  // Mesmo padrao das demais operacoes em segundo plano: so' confirma que
+  // comecou; o resultado final chega pela mensagem
+  // RELATORIO_EXCESSO_PRAZO_FINALIZADO. Sem escolha de unidade nenhuma -
+  // considera a situação CONCLUSÃO de todo o estado, em todas as unidades.
+  try {
+    const resposta = await chrome.runtime.sendMessage({
+      tipo: "EXPORTAR_RELATORIO_EXCESSO_PRAZO",
+      dias,
+    });
+    if (!resposta || !resposta.ok) {
+      throw new Error((resposta && resposta.erro) || "Falha desconhecida ao iniciar a exportação.");
+    }
+  } catch (e) {
+    setStatusCorregedoria("Erro ao gerar o relatório de excesso de prazo.", "erro");
+    areaErrosCorregedoria.hidden = false;
+    areaErrosCorregedoria.textContent = e && e.message ? e.message : String(e);
+    areaProgressoExcessoPrazo.hidden = true;
+    btnExportarExcessoPrazo.disabled = false;
   }
 });
 
@@ -2275,6 +2331,30 @@ chrome.runtime.onMessage.addListener((mensagem) => {
       areaErrosCorregedoria.hidden = false;
       areaErrosCorregedoria.textContent =
         mensagem.erro || "Falha desconhecida ao gerar a comparação entre unidades.";
+    }
+  }
+
+  if (mensagem.tipo === "PROGRESSO_RELATORIO_EXCESSO_PRAZO") {
+    textoProgressoExcessoPrazo.textContent = mensagem.texto || "Processando...";
+  }
+
+  if (mensagem.tipo === "RELATORIO_EXCESSO_PRAZO_FINALIZADO") {
+    areaProgressoExcessoPrazo.hidden = true;
+    btnExportarExcessoPrazo.disabled = false;
+
+    if (mensagem.ok) {
+      const resultado = mensagem.resultado || {};
+      setStatusCorregedoria(
+        `Concluído! Relatório de Excesso de Prazo (todo o estado) salvo em Downloads/eproc/ (${
+          resultado.total || 0
+        } processo(s)).`,
+        "ok"
+      );
+    } else {
+      setStatusCorregedoria("Erro ao gerar o relatório de excesso de prazo.", "erro");
+      areaErrosCorregedoria.hidden = false;
+      areaErrosCorregedoria.textContent =
+        mensagem.erro || "Falha desconhecida ao gerar o relatório de excesso de prazo.";
     }
   }
 
@@ -3111,3 +3191,46 @@ document.getElementById("card-transcricao-ia").addEventListener("toggle", (e) =>
 atualizarStatusSetupIA();
 atualizarPromptsIA();
 atualizarListaCompletaIA();
+
+// ---- Log das interações do usuário no painel ----
+// Delegação única: registra cada clique em botão, mudança de campo
+// (sem imprimir o valor de campos de texto/senha, que podem conter chaves
+// de API ou prompts) e abertura/fechamento de cartões.
+function descreverElementoLog(el) {
+  return el.id || el.name || (el.textContent || "").trim().slice(0, 40) || el.tagName.toLowerCase();
+}
+
+document.addEventListener(
+  "click",
+  (ev) => {
+    const alvo = ev.target.closest && ev.target.closest("button, a, summary, input[type=checkbox], input[type=radio]");
+    if (!alvo) return;
+    logExt("Clique:", alvo.tagName.toLowerCase(), descreverElementoLog(alvo));
+  },
+  true
+);
+
+document.addEventListener(
+  "change",
+  (ev) => {
+    const el = ev.target;
+    if (!el || !el.tagName) return;
+    let valor;
+    if (el.type === "checkbox" || el.type === "radio") valor = el.checked;
+    else if (el.tagName === "SELECT") valor = el.options[el.selectedIndex] ? el.options[el.selectedIndex].text : el.value;
+    else valor = `<${(el.value || "").length} caractere(s)>`;
+    logExt("Campo alterado:", descreverElementoLog(el), "=", valor);
+  },
+  true
+);
+
+document.addEventListener(
+  "toggle",
+  (ev) => {
+    if (ev.target && ev.target.tagName === "DETAILS") {
+      const titulo = ev.target.querySelector("summary");
+      logExt("Cartão", ev.target.open ? "aberto:" : "fechado:", (titulo && titulo.textContent.trim().slice(0, 50)) || ev.target.id);
+    }
+  },
+  true
+);

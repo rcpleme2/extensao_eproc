@@ -5,6 +5,8 @@
 // esta janela) e devolve o texto final pelo mesmo mecanismo, já que
 // janelas separadas não compartilham variáveis JS entre si.
 
+logExt.instrumentar("preview");
+
 const textoPreviewJanela = document.getElementById("texto-preview-janela");
 const contadorPreviewJanela = document.getElementById("contador-preview-janela");
 const btnUsarPreviewJanela = document.getElementById("btn-usar-preview-janela");
@@ -31,6 +33,7 @@ if (chave) {
 textoPreviewJanela.addEventListener("input", atualizarContador);
 
 btnUsarPreviewJanela.addEventListener("click", () => {
+  logExt("Texto revisado confirmado:", textoPreviewJanela.value.length, "caractere(s).");
   if (!chave) {
     window.close();
     return;
@@ -44,5 +47,6 @@ btnUsarPreviewJanela.addEventListener("click", () => {
 });
 
 btnCancelarPreviewJanela.addEventListener("click", () => {
+  logExt("Revisão de texto cancelada.");
   window.close();
 });

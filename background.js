@@ -5,7 +5,8 @@
 // pdf.js) roda numa aba oculta, nao aqui (ver comentario mais abaixo,
 // perto de "Construcao do MD unico", sobre o motivo).
 
-importScripts("libs/pdf-lib.min.js");
+importScripts("log.js", "libs/pdf-lib.min.js");
+logExt.instrumentar("background");
 const { PDFDocument, StandardFonts, rgb, PDFName } = self.PDFLib;
 
 // Cria um link interno (clicavel) numa pagina de origem apontando para
@@ -364,7 +365,7 @@ function lerEstadoDivDochtml(tabId) {
 // Retorna sempre { conteudo, erro }, nunca lanca excecao, para o chamador
 // poder relatar o motivo exato de uma falha em vez de so' "nao deu certo".
 //
-// Diagnostico ("[eproc-html]" no console do service worker, em
+// Diagnostico ("[ext_eproc][html]" no console do service worker, em
 // chrome://extensions): loga a URL apos o carregamento, se a div
 // "#divdochtml" chegou a existir no DOM (independente de ter conteudo) e
 // quantas tentativas de poll foram feitas - para descobrir se o problema
@@ -378,19 +379,19 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
     } catch (e) {
       return { conteudo: null, erro: `Falha ao abrir aba oculta: ${String(e)}` };
     }
-    console.log("[eproc-html]", "Aba criada", tab.id, "para", url);
+    console.log("[ext_eproc][html]", "Aba criada", tab.id, "para", url);
 
     await aguardarCarregamentoAba(tab.id);
 
     const abaCarregada = await chrome.tabs.get(tab.id).catch(() => null);
-    console.log("[eproc-html]", "Aba", tab.id, "carregada. URL atual:", abaCarregada && abaCarregada.url);
+    console.log("[ext_eproc][html]", "Aba", tab.id, "carregada. URL atual:", abaCarregada && abaCarregada.url);
 
     let ultimoEstado = { existe: false, conteudo: "" };
     for (let tentativa = 0; tentativa < 60; tentativa += 1) {
       ultimoEstado = await lerEstadoDivDochtml(tab.id);
       if (tentativa === 0) {
         console.log(
-          "[eproc-html]",
+          "[ext_eproc][html]",
           "Primeira leitura - div existe?",
           ultimoEstado.existe,
           "| URL da página:",
@@ -406,7 +407,7 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
         // atos ordinatorios ligados ao DJEN). Usa esse texto direto, sem
         // esperar os 18s de polling por uma div que nunca vai aparecer.
         if (!ultimoEstado.existe && ultimoEstado.corpoTextoCompleto && ultimoEstado.corpoTextoCompleto.length > 30) {
-          console.log("[eproc-html]", "Página sem #divdochtml, mas com conteúdo pronto no body - usando direto.");
+          console.log("[ext_eproc][html]", "Página sem #divdochtml, mas com conteúdo pronto no body - usando direto.");
           return { conteudo: null, textoBruto: ultimoEstado.corpoTextoCompleto, erro: null };
         }
       }
@@ -416,7 +417,7 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
       // tentando ler uma aba que nao existe mais pelos proximos segundos
       // - para na hora e relata isso especificamente.
       if (ultimoEstado.abaSumiu) {
-        console.warn("[eproc-html]", "A aba fechou sozinha antes de terminar (tentativa", tentativa, ").");
+        console.warn("[ext_eproc][html]", "A aba fechou sozinha antes de terminar (tentativa", tentativa, ").");
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -424,7 +425,7 @@ async function tentarAbrirAbaEExtrairHtmlDivDochtml(url) {
 
     if (!ultimoEstado.conteudo || !ultimoEstado.conteudo.trim()) {
       console.warn(
-        "[eproc-html]",
+        "[ext_eproc][html]",
         "Div não preencheu a tempo. Existia?",
         ultimoEstado.existe,
         "| URL final:",
@@ -464,7 +465,7 @@ async function abrirAbaEExtrairHtmlDivDochtml(url) {
   if (primeira.conteudo || primeira.textoBruto) return primeira;
 
   console.warn(
-    "[eproc-html]",
+    "[ext_eproc][html]",
     "Primeira tentativa falhou, tentando novamente com uma aba nova:",
     primeira.erro
   );
@@ -527,7 +528,7 @@ async function obterConteudoHtmlReal(url, nomeDocumento) {
     };
   }
 
-  console.warn("[eproc-html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
+  console.warn("[ext_eproc][html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
   const fallback = await tentarFallbackFetchHtml(url);
   if (fallback.html) return fallback;
 
@@ -574,7 +575,7 @@ async function obterTextoHtmlReal(url) {
   let erroFinal = erro;
 
   if (!html) {
-    console.warn("[eproc-html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
+    console.warn("[ext_eproc][html]", "Aba oculta falhou (", erro, ") - tentando baixar bruto via fetch como último recurso.");
     const fallback = await tentarFallbackFetchHtml(url);
     if (fallback.html) {
       html = fallback.html;
@@ -954,8 +955,8 @@ function criarResolvedorUrlDocumento() {
 //
 // Prefixo usado em todos os logs deste modo (console do "Inspect views:
 // service worker" em chrome://extensions, e da propria aba oculta), para
-// facilitar filtrar ("[eproc-md]") quando algo falhar.
-const LOG_MD = "[eproc-md]";
+// facilitar filtrar ("[ext_eproc][md]") quando algo falhar.
+const LOG_MD = "[ext_eproc][md]";
 
 // Impede que uma unica etapa demorada (ex.: um fetch que nunca retorna)
 // trave o processo inteiro para sempre - sem isso, uma promessa que nunca
@@ -2478,7 +2479,7 @@ async function verificarTodosLotesPendentesIA() {
         houveMudanca = true;
       }
     } catch (e) {
-      console.error("[eproc-ia-lote] Falha ao verificar lote", lote.batchId, ":", e);
+      console.error("[ext_eproc][ia-lote] Falha ao verificar lote", lote.batchId, ":", e);
     }
   }
 
@@ -2492,6 +2493,7 @@ async function verificarTodosLotesPendentesIA() {
 }
 
 chrome.alarms.onAlarm.addListener((alarme) => {
+  logExt("Alarme disparado:", alarme.name);
   if (alarme.name === NOME_ALARME_LOTES_IA) verificarTodosLotesPendentesIA();
 });
 
@@ -2927,17 +2929,94 @@ function consultarUmaVezNaPagina(parametros) {
     throw new Error("Tempo esgotado esperando o resultado da consulta.");
   }
 
+  // Marca como visiveis as colunas pedidas no menu "Colunas visíveis"
+  // (div#selColunasVisiveis, aberto pelo span com data-toggle="dropdown"
+  // logo acima da tabela de resultado) - usado pelo Relatório de Excesso
+  // de Prazo da Corregedoria, ja' que "Situação", "Nº Dias Situação" e
+  // "Juízo" nao vem marcadas por padrao (so' "Situação" costuma vir).
+  // Cada item do menu e' um <a data-value="..."> com um <span> dentro
+  // mostrando o icone "done" quando a coluna ja' esta' visivel (ou um
+  // espaco em branco "&nbsp;" quando nao esta') - so' clica no item
+  // quando ele ainda NAO estiver marcado, pra' nao acabar ESCONDENDO uma
+  // coluna que ja' estava visivel. Ao final, clica fora do menu (no corpo
+  // da pagina) pra' fechar o dropdown e a tabela atualizar com as novas
+  // colunas - exatamente como um usuario faria manualmente.
+  async function habilitarColunasVisiveis(dataValues) {
+    const dropdown = document.getElementById("selColunasVisiveis");
+    if (!dropdown) {
+      throw new Error('Menu "Colunas visíveis" (#selColunasVisiveis) não encontrado nesta página.');
+    }
+    const botaoAbrir = dropdown.querySelector('[data-toggle="dropdown"]');
+    if (!botaoAbrir) {
+      throw new Error('Botão "Colunas visíveis" não encontrado nesta página.');
+    }
+
+    function itemDe(dataValue) {
+      const item = dropdown.querySelector(`a.dropdown-item[data-value="${dataValue}"]`);
+      if (!item) {
+        throw new Error(`Coluna "${dataValue}" não encontrada no menu "Colunas visíveis".`);
+      }
+      return item;
+    }
+
+    function estaMarcada(dataValue) {
+      const marcador = itemDe(dataValue).querySelector("span");
+      return Boolean(marcador && marcador.textContent.trim() === "done");
+    }
+
+    botaoAbrir.click();
+    await aguardar(300);
+
+    for (const dataValue of dataValues) {
+      if (!estaMarcada(dataValue)) {
+        itemDe(dataValue).click();
+        await aguardar(250);
+      }
+    }
+
+    // Garantia: confere de novo (com ate' 3 tentativas extras) que TODAS
+    // as colunas pedidas ficaram de fato marcadas - um clique perdido por
+    // timing deixaria essa coluna faltando silenciosamente na extração
+    // mais adiante, sem nenhum aviso.
+    for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+      const faltando = dataValues.filter((dataValue) => !estaMarcada(dataValue));
+      if (faltando.length === 0) break;
+      for (const dataValue of faltando) {
+        itemDe(dataValue).click();
+        await aguardar(250);
+      }
+    }
+    const aindaFaltando = dataValues.filter((dataValue) => !estaMarcada(dataValue));
+    if (aindaFaltando.length > 0) {
+      throw new Error(
+        `Não foi possível marcar como visível a(s) coluna(s) no menu "Colunas visíveis": ${aindaFaltando.join(", ")}.`
+      );
+    }
+
+    // Fecha o dropdown clicando fora dele - e' esse clique "fora da
+    // escolha" que faz a tabela redesenhar ja' com as colunas novas.
+    document.body.click();
+    await aguardar(300);
+  }
+
   // Le' a "relação de processos" (linhas da tabela de resultado, nao so'
   // o total) da tabela de resultado "#tblProcessoLista" - usada pelo
   // Relatório da Unidade para trazer a lista de processos ativos/
   // suspensos, alem do total. Nunca lanca excecao: sempre resolve com
   // { cabecalhos, linhas, erro }.
   async function extrairLinhasTblProcessoLista() {
-    // 12 pra' caber todas as colunas conhecidas da tabela real (checkbox,
+    // 15 pra' caber todas as colunas conhecidas da tabela real (checkbox,
     // Nº Processo, Autuação, Situação, Sigilo, Classe, Localizador, Último
-    // Evento, Data/Hora, Autor, Réu - 11 no total, com folga de 1).
-    const LIMITE_COLUNAS = 12;
-    const LIMITE_LINHAS = 500;
+    // Evento, Data/Hora, Autor, Réu - 11 no total - mais as colunas
+    // opcionais que "habilitarColunasVisiveis" pode ligar por cima dessas,
+    // como Nº Dias Situação e Juízo, com folga).
+    const LIMITE_COLUNAS = 15;
+    // 5000 (em vez de 500) porque o Relatório de Excesso de Prazo da
+    // Corregedoria consulta TODO O ESTADO de uma vez (sem filtrar por
+    // unidade), então facilmente passa de algumas centenas de processos -
+    // um limite pensado so' para consultas de uma única unidade cortaria
+    // boa parte do resultado sem nenhum aviso.
+    const LIMITE_LINHAS = 5000;
     try {
       if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
         return { cabecalhos: [], linhas: [], erro: "jQuery DataTables não disponível nesta página." };
@@ -3006,13 +3085,29 @@ function consultarUmaVezNaPagina(parametros) {
       const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
         (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
       );
-      const linhas = linhasEl.slice(0, LIMITE_LINHAS).map((tr) =>
+      const linhasSlice = linhasEl.slice(0, LIMITE_LINHAS);
+      const linhas = linhasSlice.map((tr) =>
         Array.from(tr.querySelectorAll("td")).slice(0, LIMITE_COLUNAS).map(textoCelula)
       );
 
-      return { cabecalhos, linhas, erro: null };
+      // Href (ja' resolvido para URL absoluta, via ".href" do proprio
+      // <a>) do link "Nº do Processo" de cada linha - usado pelo
+      // Relatório de Excesso de Prazo para abrir cada processo numa aba
+      // oculta e ler o magistrado responsável (ver
+      // "abrirAbaELerMagistrado"). "null" quando a coluna nao existe ou a
+      // celula nao tem link (nunca quebra a extração das demais colunas
+      // por causa disso).
+      const idxColunaProcesso = cabecalhos.findIndex((h) => /processo/i.test(h));
+      const linksProcesso = linhasSlice.map((tr) => {
+        if (idxColunaProcesso < 0) return null;
+        const td = tr.querySelectorAll("td")[idxColunaProcesso];
+        const link = td ? td.querySelector("a[href]") : null;
+        return link ? link.href : null;
+      });
+
+      return { cabecalhos, linhas, linksProcesso, erro: null };
     } catch (e) {
-      return { cabecalhos: [], linhas: [], erro: e && e.message ? e.message : String(e) };
+      return { cabecalhos: [], linhas: [], linksProcesso: [], erro: e && e.message ? e.message : String(e) };
     }
   }
 
@@ -3097,6 +3192,15 @@ function consultarUmaVezNaPagina(parametros) {
 
       await aguardar(200);
       const contagem = await clicarConsultarELer();
+
+      // Habilita colunas que nao vem marcadas por padrao no menu "Colunas
+      // visíveis" (ex.: "Nº Dias Situação" e "Juízo", usadas pelo
+      // Relatório de Excesso de Prazo) - roda DEPOIS de consultar, ja' que
+      // o menu fica ao lado da tabela de resultado (so' aparece pos-
+      // pesquisa).
+      if (parametros.colunasVisiveisNecessarias && parametros.colunasVisiveisNecessarias.length > 0) {
+        await habilitarColunasVisiveis(parametros.colunasVisiveisNecessarias);
+      }
 
       let tabela = null;
       if (parametros.extrairTabela) {
@@ -3791,7 +3895,7 @@ function clicarLinkAtuacaoJuizLeigoNaPagina() {
 // telas panoramicas ("Processos sem Movimentação N Dias (todas Varas)" e
 // "Relatório de Atuação Conciliador/Juiz Leigo"), das quais NAO temos
 // amostra HTML (diferente das demais telas desta extensao, calibradas
-// contra paginas reais). Estrategia defensiva, com log "[eproc]"
+// contra paginas reais). Estrategia defensiva, com log "[ext_eproc][relatorio]"
 // detalhado para calibrar depois com o HTML real se falhar:
 // 1. Se "diasPreencher" vier, tenta achar um campo de dias (input number
 //    ou id/name contendo "dias") e preenche.
@@ -3883,9 +3987,9 @@ function extrairTabelaGenericaNaPagina(diasPreencher) {
           nativeSetter.call(alvo, String(diasPreencher));
           alvo.dispatchEvent(new Event("input", { bubbles: true }));
           alvo.dispatchEvent(new Event("change", { bubbles: true }));
-          console.log("[eproc]", "Campo de dias preenchido:", alvo.id || alvo.name);
+          console.log("[ext_eproc][relatorio]", "Campo de dias preenchido:", alvo.id || alvo.name);
         } else {
-          console.warn("[eproc]", "Nenhum campo de dias encontrado nesta tela - seguindo sem preencher.");
+          console.warn("[ext_eproc][relatorio]", "Nenhum campo de dias encontrado nesta tela - seguindo sem preencher.");
         }
       }
 
@@ -3893,26 +3997,26 @@ function extrairTabelaGenericaNaPagina(diasPreencher) {
         (el) => /consultar/i.test(el.textContent || el.value || "")
       );
       if (botaoConsultar) {
-        console.log("[eproc]", "Clicando em Consultar...");
+        console.log("[ext_eproc][relatorio]", "Clicando em Consultar...");
         botaoConsultar.click();
         // A consulta pode ser AJAX ou recarregar a pagina; espera um
         // tempo generoso e segue - se recarregar, este script morre e o
         // chamador retenta a extracao numa nova chamada.
         await aguardar(4000);
       } else {
-        console.log("[eproc]", "Nenhum botão Consultar encontrado - a tela pode já abrir consultada.");
+        console.log("[ext_eproc][relatorio]", "Nenhum botão Consultar encontrado - a tela pode já abrir consultada.");
       }
 
       const resultado = extrairDeDataTable() || extrairDeTabelaHtml();
       if (!resultado || resultado.linhas.length === 0) {
-        console.warn("[eproc]", "Nenhuma tabela de resultado encontrada. Título da página:", document.title);
+        console.warn("[ext_eproc][relatorio]", "Nenhuma tabela de resultado encontrada. Título da página:", document.title);
         return {
           cabecalhos: [],
           linhas: [],
           erro: "Nenhuma tabela de resultado encontrada nesta tela (envie o HTML da página para calibrar a extração).",
         };
       }
-      console.log("[eproc]", "Tabela extraída:", resultado.linhas.length, "linha(s),", resultado.cabecalhos.length, "coluna(s).");
+      console.log("[ext_eproc][relatorio]", "Tabela extraída:", resultado.linhas.length, "linha(s),", resultado.cabecalhos.length, "coluna(s).");
       return { cabecalhos: resultado.cabecalhos, linhas: resultado.linhas, erro: null };
     } catch (e) {
       return { cabecalhos: [], linhas: [], erro: e && e.message ? e.message : String(e) };
@@ -3959,7 +4063,7 @@ async function abrirAbaEExtrairTabelaRelatorio(urlBase, funcClicarLink, nomeRela
       });
       resultado = result;
     } catch (e) {
-      console.warn("[eproc]", nomeRelatorio, "- primeira extração interrompida (provável recarregamento):", String(e));
+      console.warn("[ext_eproc][relatorio]", nomeRelatorio, "- primeira extração interrompida (provável recarregamento):", String(e));
     }
 
     if (!resultado || (resultado.erro && resultado.linhas.length === 0)) {
@@ -4151,6 +4255,51 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
     return result || { contagem: null, erro: "Não foi possível consultar (sem resultado)." };
   } catch (e) {
     return { contagem: null, erro: e && e.message ? e.message : String(e) };
+  } finally {
+    if (aba && aba.id) {
+      chrome.tabs.remove(aba.id).catch(() => {});
+    }
+    liberarSlotDeAbaOculta();
+  }
+}
+
+// Le', na PRÓPRIA página do processo (não na movimentação), o nome do
+// magistrado responsável - campo "Juiz(a):" no cabeçalho (span#txtMagistrado,
+// ao lado de "Órgão Julgador"), já pronto na tela sem precisar abrir
+// nenhum evento da movimentação. Autocontida, executada via
+// chrome.scripting.executeScript.
+function lerMagistradoNaPaginaDoProcesso() {
+  const span = document.getElementById("txtMagistrado");
+  return ((span && span.textContent) || "").trim();
+}
+
+// Abre uma aba oculta direto no link de um processo (href já resolvido,
+// lido da própria célula "Nº do Processo" da tabela de resultado - ver
+// "linksProcesso" em "extrairLinhasTblProcessoLista"), lê o magistrado
+// responsável e fecha a aba - usado pelo Relatório de Excesso de Prazo
+// para anexar essa informação a cada processo da lista, um de cada vez,
+// já que ela só existe na página do próprio processo (não na tabela do
+// Relatório Geral). Respeita o mesmo limite de abas simultâneas das
+// demais operações em lote desta extensão (ver "adquirirSlotDeAbaOculta"),
+// então mesmo chamada em paralelo (Promise.all) para vários processos, só
+// algumas abas ficam abertas de verdade ao mesmo tempo. Nunca lança
+// exceção: sempre resolve com uma string (vazia se não conseguir).
+async function abrirAbaELerMagistrado(hrefProcesso) {
+  if (!hrefProcesso) return "";
+  let aba;
+  try {
+    await adquirirSlotDeAbaOculta();
+    aba = await chrome.tabs.create({ url: hrefProcesso, active: false });
+    await aguardarCarregamentoAba(aba.id);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: aba.id },
+      func: lerMagistradoNaPaginaDoProcesso,
+    });
+    return result || "";
+  } catch (e) {
+    return "";
   } finally {
     if (aba && aba.id) {
       chrome.tabs.remove(aba.id).catch(() => {});
@@ -6752,6 +6901,106 @@ async function construirPdfSuspensos(tabela, nomeUnidade, sufixoTitulo = "") {
   );
 }
 
+// Relação de processos conclusos (grupo "CONCLUSÃO" inteiro - aguarda
+// despacho e aguarda sentença) com excesso de prazo, de TODO O ESTADO
+// (sem filtrar por unidade nenhuma - ver "exportarRelatorioExcessoPrazo"):
+// Nº do Processo, Situação, Dias na Situação, Juízo, Localizador e
+// Magistrado responsável. A coluna "Juízo" so' aparece na tabela do eproc
+// quando a consulta não está restrita a uma única unidade, que e'
+// exatamente o caso aqui (identifica de qual juízo/vara cada processo é,
+// ja' que a tabela mistura processos de todas as unidades do estado); a
+// coluna de dias e' rotulada "Nº Dias Situação" no eproc (nao "Dias na
+// situação", que e' so' o rotulo do CAMPO DE FILTRO #txtDiasSituacao, uma
+// tela diferente) e vem ANTES da coluna "Situação" na tabela -
+// "idxSituacao" precisa exigir que o cabecalho COMECE com "situa" (em vez
+// de so' conter, como as demais tabelas curadas), senao
+// "indiceColunaPorCabecalho" casaria com "Nº Dias Situação" primeiro (que
+// tambem contem "situa") e devolveria os dias na coluna errada. Casa cada
+// campo pelo texto do cabecalho (nao pela posicao), como as demais
+// tabelas curadas. "magistrados" e' um array PARALELO a "tabela.linhas"
+// (mesmo indice = mesmo processo), ja' que o nome do magistrado nao vem
+// na tabela do Relatório Geral - foi lido à parte, processo por processo
+// (ver "abrirAbaELerMagistrado" em "exportarRelatorioExcessoPrazo").
+async function construirPdfProcessosExcessoPrazo(tabela, dias, magistrados) {
+  const idxProcesso = indiceColunaPorCabecalho(tabela.cabecalhos, /processo/i);
+  const idxSituacao = indiceColunaPorCabecalho(tabela.cabecalhos, /^situa/i);
+  const idxDias = indiceColunaPorCabecalho(tabela.cabecalhos, /dias/i);
+  const idxJuizo = indiceColunaPorCabecalho(tabela.cabecalhos, /ju[ií]zo/i);
+  const idxLocalizador = indiceColunaPorCabecalho(tabela.cabecalhos, /localizador/i);
+
+  const valorDe = (linha, idx) => (idx >= 0 && linha[idx] != null ? linha[idx] : "");
+  const itens = tabela.linhas
+    .map((linha, i) => {
+      const dias = valorDe(linha, idxDias);
+      return {
+        processo: valorDe(linha, idxProcesso),
+        situacao: abreviarSituacao(valorDe(linha, idxSituacao)),
+        dias,
+        // So' os digitos do texto (ex.: "45" de "45"), para ordenar por
+        // tempo na situação sem depender de "dias" já vir formatado como
+        // numero puro - texto sem nenhum digito vira 0 (fica no final,
+        // nunca quebra a ordenação).
+        diasOrdenavel: Number(String(dias).replace(/\D+/g, "")) || 0,
+        juizo: valorDe(linha, idxJuizo),
+        localizador: formatarLocalizadores(valorDe(linha, idxLocalizador)),
+        magistrado: (magistrados && magistrados[i]) || "",
+      };
+    })
+    // Do processo há MAIS tempo na situação para o há MENOS tempo.
+    .sort((a, b) => b.diasOrdenavel - a.diasOrdenavel);
+
+  const larguraUtil = LARGURA_PAGINA_TEXTO - MARGEM_TEXTO * 2;
+  const colunas = [
+    { titulo: "Nº do Processo", largura: larguraUtil * 0.18, campo: "processo" },
+    { titulo: "Situação", largura: larguraUtil * 0.14, campo: "situacao" },
+    { titulo: "Dias na Situação", largura: larguraUtil * 0.1, campo: "dias" },
+    { titulo: "Juízo", largura: larguraUtil * 0.2, campo: "juizo" },
+    { titulo: "Localizador", largura: larguraUtil * 0.18, campo: "localizador" },
+    { titulo: "Magistrado", largura: larguraUtil * 0.2, campo: "magistrado" },
+  ];
+
+  const bytesLista = await construirPdfTabelaCuradaRetrato(
+    itens,
+    colunas,
+    `Processos conclusos com excesso de prazo (${dias}+ dias na situação) — todo o estado — ${itens.length} processo(s), do maior para o menor tempo na situação`
+  );
+
+  // Tabela-resumo final: quantos processos (da lista acima) cada
+  // magistrado tem em CONCLUSÃO com excesso de prazo - processos sem
+  // magistrado identificado (ex.: "abrirAbaELerMagistrado" falhou nesse
+  // processo especifico) entram agrupados a parte, em vez de sumirem da
+  // contagem. Ordenado do magistrado com mais processos para o com menos
+  // (empate resolvido por ordem alfabética).
+  const contagemPorMagistrado = new Map();
+  for (const item of itens) {
+    const nome = item.magistrado || "(magistrado não identificado)";
+    contagemPorMagistrado.set(nome, (contagemPorMagistrado.get(nome) || 0) + 1);
+  }
+  const resumoMagistrados = Array.from(contagemPorMagistrado.entries())
+    .map(([magistrado, total]) => ({ magistrado, total: String(total), totalOrdenavel: total }))
+    .sort((a, b) => b.totalOrdenavel - a.totalOrdenavel || a.magistrado.localeCompare(b.magistrado, "pt-BR"));
+
+  const colunasResumo = [
+    { titulo: "Magistrado", largura: larguraUtil * 0.75, campo: "magistrado" },
+    { titulo: "Nº de Processos", largura: larguraUtil * 0.25, campo: "total" },
+  ];
+  const bytesResumo = await construirPdfTabelaCuradaRetrato(
+    resumoMagistrados,
+    colunasResumo,
+    `Processos por magistrado — ${resumoMagistrados.length} magistrado(s)`
+  );
+
+  // Junta as duas tabelas num unico PDF: lista detalhada primeiro,
+  // resumo por magistrado ao final.
+  const pdfFinal = await PDFDocument.create();
+  for (const bytes of [bytesLista, bytesResumo]) {
+    const pdfParcial = await PDFDocument.load(bytes);
+    const paginas = await pdfFinal.copyPages(pdfParcial, pdfParcial.getPageIndices());
+    paginas.forEach((pagina) => pdfFinal.addPage(pagina));
+  }
+  return pdfFinal.save();
+}
+
 // Relação de processos paralisados (a partir de "DIAS_MINIMO_PARALISADOS"
 // dias sem movimentação, numa única tabela - sem separar por faixa como o
 // demonstrativo de 30/90/120 dias): Nº do Processo, Situação, Classe,
@@ -8158,6 +8407,77 @@ async function exportarComparacaoUnidades(unidades, aoProgredir) {
   };
 }
 
+// Orquestra o Relatório de Processos Conclusos com Excesso de Prazo do
+// cartão Corregedoria: relatório autônomo e independente do Relatório para
+// Correição - não pede/usa nenhuma unidade. Seleciona o grupo "CONCLUSÃO"
+// inteiro no filtro Situação (todas as variantes - aguarda despacho e
+// aguarda sentença, sem precisar escolher uma de cada vez), preenche
+// "Dias na situação" com o limiar escolhido pelo usuário (30/60/90/120) e
+// deixa o filtro Órgão/Juízo em branco de propósito, para a consulta
+// considerar TODO O ESTADO (todas as unidades de uma vez) em vez de
+// restringir a uma unidade - gera um único PDF com a relação resultante
+// (Nº do Processo, Situação, Dias na Situação, Juízo e Localizador).
+async function exportarRelatorioExcessoPrazo(dias, aoProgredir) {
+  const notificar = (texto) => {
+    if (aoProgredir) aoProgredir(texto);
+  };
+
+  if (![30, 60, 90, 120].includes(Number(dias))) {
+    throw new Error('Escolha um dos valores de "Dias na situação": 30, 60, 90 ou 120.');
+  }
+
+  const [abaAtual] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!abaAtual || !abaAtual.url) {
+    throw new Error("Nenhuma aba ativa encontrada. Abra uma página do eproc primeiro.");
+  }
+  definirTribunalPelaUrl(abaAtual.url);
+
+  notificar(`Consultando, em todo o estado, processos conclusos há mais de ${dias} dias...`);
+  const r = await abrirAbaEConsultarUmaVez(abaAtual.url, {
+    grupoSituacao: "C",
+    urgente: false,
+    diasSituacao: dias,
+    extrairTabela: true,
+    // "Situação" costuma vir marcada por padrao, mas "Nº Dias Situação" e
+    // "Juízo" nao - sem essas duas colunas visiveis na tabela do eproc,
+    // essa informação simplesmente nao aparece pra' extrair (ver
+    // "habilitarColunasVisiveis" em "consultarUmaVezNaPagina").
+    colunasVisiveisNecessarias: ["DesStatusProcesso", "DiasProcessoSituacao", "SigOrgaoJuizo"],
+  });
+  if (r.erro) throw new Error(r.erro);
+  if (!r.tabela || r.tabela.erro) {
+    throw new Error((r.tabela && r.tabela.erro) || "Não foi possível ler a tabela de resultado.");
+  }
+
+  // Abre, um a um (com o mesmo limite de abas simultâneas das demais
+  // operações em lote - ver "adquirirSlotDeAbaOculta"), a página de CADA
+  // processo da lista e lê o magistrado responsável (campo "Juiz(a):") -
+  // essa informação não vem na tabela do Relatório Geral, so' na página
+  // do próprio processo. "linksProcesso" (paralelo a "r.tabela.linhas")
+  // vem da própria célula "Nº do Processo" da tabela de resultado.
+  const total = r.tabela.linhas.length;
+  const linksProcesso = r.tabela.linksProcesso || [];
+  let concluidos = 0;
+  const magistrados = await Promise.all(
+    linksProcesso.map((href) =>
+      abrirAbaELerMagistrado(href).then((nomeMagistrado) => {
+        concluidos += 1;
+        if (concluidos % 5 === 0 || concluidos === total) {
+          notificar(`Consultando magistrado responsável: ${concluidos}/${total} processo(s)...`);
+        }
+        return nomeMagistrado;
+      })
+    )
+  );
+
+  notificar(`Gerando PDF (${total} processo(s))...`);
+  const bytes = await construirPdfProcessosExcessoPrazo(r.tabela, dias, magistrados);
+  const nomeArquivo = `eproc/relatorio_excesso_prazo_estado_${dias}dias_${new Date().toISOString().slice(0, 10)}.pdf`;
+  await baixarUm(nomeArquivo, construirDataUrlBinario("application/pdf", bytes));
+
+  return { total };
+}
+
 // Reaproveita INTEIRAMENTE "exportarRelatorioGerencialUnidade" (mesmas
 // consultas, mesmas seções, mesmo PDF final) para o cartão experimental
 // "Gestão da Unidade (alternativo)": em vez de escolher uma unidade num
@@ -8617,30 +8937,19 @@ const PDF_LOCALIZADORES_ALTURA_LINHA = PDF_LOCALIZADORES_TAMANHO_FONTE * 1.35;
 const PDF_ALTURA_CABECALHO_INSTITUCIONAL = 40;
 const PDF_ALTURA_RODAPE = 22;
 
-// A extensao roda em mais de um tribunal (TJPR e, a partir daqui, TRF4 -
-// ver host_permissions/content_scripts no manifest.json), e o cabecalho
-// institucional dos PDFs precisa nomear o tribunal CERTO em vez de
-// cravar "TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ" pra todo mundo (seria
-// simplesmente errado nos relatórios gerados a partir do eproc do TRF4).
-// "tribunalAtualPdf" e' preenchido uma vez por operacao de exportacao,
-// logo apos descobrir a aba/URL do eproc em uso (ver
-// "definirTribunalPelaUrl" mais abaixo, chamada em cada
-// "exportarXxx"/"listarXxx" que gera PDF) - nao da' pra descobrir isso
-// direto de dentro de "desenharCabecalhoInstitucional" porque a essa
-// altura so' se tem os dados ja' extraidos, nao a URL de origem.
+// A extensao roda so' no eproc do TJPR (ver host_permissions/
+// content_scripts no manifest.json) - o cabecalho institucional dos PDFs
+// sempre nomeia o TJPR. "tribunalAtualPdf" e "definirTribunalPelaUrl"
+// continuam existindo (em vez de cravar a string direto em cada PDF) so'
+// para nao precisar tocar em cada "exportarXxx"/"listarXxx" que ja' chama
+// "definirTribunalPelaUrl" antes de gerar o PDF.
 const TRIBUNAIS_CONHECIDOS = {
   tjpr: { nomeCompleto: "TRIBUNAL DE JUSTIÇA DO ESTADO DO PARANÁ" },
-  trf4: { nomeCompleto: "TRIBUNAL REGIONAL FEDERAL DA 4ª REGIÃO" },
 };
 let tribunalAtualPdf = TRIBUNAIS_CONHECIDOS.tjpr;
 
-function definirTribunalPelaUrl(url) {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    tribunalAtualPdf = host.endsWith("trf4.jus.br") ? TRIBUNAIS_CONHECIDOS.trf4 : TRIBUNAIS_CONHECIDOS.tjpr;
-  } catch (e) {
-    tribunalAtualPdf = TRIBUNAIS_CONHECIDOS.tjpr;
-  }
+function definirTribunalPelaUrl() {
+  tribunalAtualPdf = TRIBUNAIS_CONHECIDOS.tjpr;
 }
 
 // Desenha o cabecalho institucional (barra + tribunal + eProc + linha) no
@@ -11609,6 +11918,33 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
     return true;
   }
 
+  if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_EXCESSO_PRAZO") {
+    // Mesmo padrao das demais operacoes em segundo plano. Relatório
+    // autônomo (sem unidade nenhuma - considera todo o estado de uma vez),
+    // entao "resultado" que chega em RELATORIO_EXCESSO_PRAZO_FINALIZADO e'
+    // sempre um único objeto - ver exportarRelatorioExcessoPrazo.
+    exportarRelatorioExcessoPrazo(mensagem.dias, (texto) => {
+      chrome.runtime.sendMessage({ tipo: "PROGRESSO_RELATORIO_EXCESSO_PRAZO", texto }).catch(() => {});
+    })
+      .then((resultado) => {
+        chrome.runtime
+          .sendMessage({ tipo: "RELATORIO_EXCESSO_PRAZO_FINALIZADO", ok: true, resultado })
+          .catch(() => {});
+        retornarAbaParaInicioEproc();
+      })
+      .catch((e) => {
+        chrome.runtime
+          .sendMessage({
+            tipo: "RELATORIO_EXCESSO_PRAZO_FINALIZADO",
+            ok: false,
+            erro: e && e.message ? e.message : String(e),
+          })
+          .catch(() => {});
+      });
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (mensagem && mensagem.tipo === "EXPORTAR_RELATORIO_UNIDADE_ATUAL") {
     // Mesmo padrao das demais operacoes em segundo plano.
     exportarRelatorioUnidadeAtual(
@@ -11660,4 +11996,10 @@ chrome.runtime.onMessage.addListener((mensagem, sender, sendResponse) => {
   }
 
   return false;
+});
+
+chrome.runtime.onInstalled.addListener((d) => logExt("Extensão instalada/atualizada:", d.reason, chrome.runtime.getManifest().version));
+chrome.downloads.onChanged.addListener((d) => {
+  if (d.state && d.state.current) logExt("Download", d.id, "→", d.state.current);
+  if (d.error) logExt.warn("Download", d.id, "erro:", d.error.current);
 });
