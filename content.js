@@ -687,7 +687,7 @@ chrome.storage.onChanged.addListener((mudancas, area) => {
 // resto permite duas listas curtas em vez de uma unica com centenas de
 // opcoes) - aqui replicada em cima do campo NATIVO "Órgão/Juízo"
 // (`#selIdOrgaoJuizo`) da propria tela do Relatório Geral do eproc.
-// Recurso OPCIONAL (desligado por padrao, ver Configurações do painel),
+// Recurso OPCIONAL (ligado por padrao, mas pode ser desligado, ver Configurações do painel),
 // ja' que altera a interface da propria pagina do eproc em vez de so'
 // ler dados dela.
 const ID_WRAPPER_COMARCA_JUIZO = "eproc-exportador-comarca-juizo";
@@ -851,7 +851,7 @@ function aplicarSepararOrgaoJuizoSeAtivo() {
   }
 }
 
-chrome.storage.local.get({ separarOrgaoJuizoPorComarca: false }, (itens) => {
+chrome.storage.local.get({ separarOrgaoJuizoPorComarca: true }, (itens) => {
   configSepararOrgaoJuizoAtivo = itens.separarOrgaoJuizoPorComarca;
   logExt("Config separarOrgaoJuizoPorComarca:", itens.separarOrgaoJuizoPorComarca);
   configSepararOrgaoJuizoCarregada = true;

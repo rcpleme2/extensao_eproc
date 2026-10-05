@@ -650,7 +650,7 @@ const MODELOS_IA_PAINEL = {
 
 const CONFIG_PADRAO = {
   substituirSigla: true,
-  separarOrgaoJuizoPorComarca: false,
+  separarOrgaoJuizoPorComarca: true,
   anexarMagistradoConclusos: true,
   provedorIA: "claude",
   chaveClaude: "",
