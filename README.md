@@ -286,7 +286,7 @@ um modal com:
 
 - **Ajustes na página do processo**: ligar/desligar a troca de sigla por
   nome na movimentação, o nome do magistrado nos eventos "Conclusos" e a
-  separação de Comarca/Juízo no filtro do Relatório Geral.
+  separação de Comarca/Juízo no filtro do Relatório Geral e no filtro "ÓRGÃO" da tela Automatizar Tramitação Processual (perfil Corregedoria).
 - **Chaves de API** — para usar "Analisar com IA" e "Transcrever
   Depoimentos", cadastre aqui sua chave de cada provedor que quiser usar
   (Claude/Anthropic, Gemini/Google e/ou ChatGPT/OpenAI) e escolha o

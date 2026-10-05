@@ -692,6 +692,21 @@ chrome.storage.onChanged.addListener((mudancas, area) => {
 // ler dados dela.
 const ID_WRAPPER_COMARCA_JUIZO = "eproc-exportador-comarca-juizo";
 
+// Campos nativos onde a separacao Comarca/Juízo e' aplicada:
+// "Órgão/Juízo" do Relatório Geral (`#selIdOrgaoJuizo`) e "ÓRGÃO" da tela
+// "Automatizar Tramitação Processual" (`#selOrgao`, so' existe para o
+// perfil CORREGEDORIA). Nessa segunda tela as opcoes vem como
+// "<Juízo/Vara> de <Comarca> - <SIGLA> (<qtd regras>)".
+const IDS_SELECT_ORGAO_JUIZO = ["selIdOrgaoJuizo", "selOrgao"];
+
+// Remove o sufixo " - SIGLA (qtd)" do texto da opcao (so' presente em
+// "#selOrgao"), devolvendo o nome do órgão e o sufixo para reanexar.
+function separarSufixoSiglaOrgao(texto) {
+  const m = texto.match(/^(.*?)\s+-\s+[A-Z0-9]+\s*(\(\d+\))?\s*$/);
+  if (!m) return { nome: texto, qtd: "" };
+  return { nome: m[1].trim(), qtd: m[2] || "" };
+}
+
 // Algumas comarcas do Paraná tem "de" no PRÓPRIO nome (ex.: "Cândido de
 // Abreu") - separar pelo ÚLTIMO " de " cortaria errado nesses casos (ex.:
 // "... do Juízo Único de Cândido de Abreu" viraria comarca "Abreu" em vez
@@ -727,8 +742,7 @@ function separarComarcaDoJuizoOrgao(nomeCompleto) {
 // da propria pagina escuta esse evento e atualiza o widget visual junto
 // (mesmo mecanismo que "selecionarOrgaoJuizo" usa em background.js para
 // automatizar essa mesma troca numa aba oculta).
-function selecionarOrgaoJuizoNaPaginaAtual(valorOrgaoJuizo) {
-  const select = document.getElementById("selIdOrgaoJuizo");
+function selecionarOrgaoJuizoNaPaginaAtual(select, valorOrgaoJuizo) {
   if (!select) return;
   let encontrou = false;
   for (const opcao of select.options) {
@@ -745,24 +759,28 @@ function selecionarOrgaoJuizoNaPaginaAtual(valorOrgaoJuizo) {
 // best-effort: cai para o proprio elemento pai quando a classe não é
 // encontrada, em vez de falhar.
 function wrapperOriginalOrgaoJuizo(select) {
-  return select.closest(".bootstrap-select") || select.parentElement;
+  return select.closest(".bootstrap-select") || (select.id === "selOrgao" ? select : select.parentElement);
 }
 
-function montarComarcaJuizoOrgao() {
-  if (document.getElementById(ID_WRAPPER_COMARCA_JUIZO)) return; // ja' montado nesta pagina
-  const select = document.getElementById("selIdOrgaoJuizo");
-  if (!select) return;
+function montarComarcaJuizoOrgao(select) {
+  const idWrapper = `${ID_WRAPPER_COMARCA_JUIZO}-${select.id}`;
+  if (document.getElementById(idWrapper)) return; // ja' montado neste campo
   logExt("Separando Órgão/Juízo em Comarca + Juízo.");
 
   const unidades = Array.from(select.options)
     .filter((opcao) => opcao.value)
-    .map((opcao) => ({ valor: opcao.value, ...separarComarcaDoJuizoOrgao((opcao.textContent || "").trim()) }));
+    .map((opcao) => {
+      const { nome, qtd } = separarSufixoSiglaOrgao((opcao.textContent || "").trim());
+      const partes = separarComarcaDoJuizoOrgao(nome);
+      return { valor: opcao.value, comarca: partes.comarca, juizo: qtd ? `${partes.juizo} ${qtd}` : partes.juizo };
+    });
   if (unidades.length === 0) return;
 
   const comarcas = [...new Set(unidades.map((u) => u.comarca))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 
   const wrapper = document.createElement("div");
-  wrapper.id = ID_WRAPPER_COMARCA_JUIZO;
+  wrapper.id = idWrapper;
+  wrapper.dataset.eprocExportadorComarcaJuizo = "1";
   wrapper.style.cssText = "display:flex;flex-direction:column;gap:4px;margin-top:6px;max-width:420px;";
 
   const selectComarca = document.createElement("select");
@@ -796,7 +814,7 @@ function montarComarcaJuizoOrgao() {
   });
 
   selectJuizo.addEventListener("change", () => {
-    selecionarOrgaoJuizoNaPaginaAtual(selectJuizo.value);
+    selecionarOrgaoJuizoNaPaginaAtual(select, selectJuizo.value);
   });
 
   wrapper.appendChild(selectComarca);
@@ -808,13 +826,11 @@ function montarComarcaJuizoOrgao() {
   wrapperOriginal.style.display = "none";
 }
 
-function desmontarComarcaJuizoOrgao() {
+function desmontarComarcaJuizoOrgao(select) {
   logExt("Desfazendo separação Comarca/Juízo.");
-  const wrapper = document.getElementById(ID_WRAPPER_COMARCA_JUIZO);
+  const wrapper = document.getElementById(`${ID_WRAPPER_COMARCA_JUIZO}-${select.id}`);
   if (wrapper) wrapper.remove();
 
-  const select = document.getElementById("selIdOrgaoJuizo");
-  if (!select) return;
   const wrapperOriginal = wrapperOriginalOrgaoJuizo(select);
   if (wrapperOriginal && wrapperOriginal.dataset.eprocExportadorEscondido) {
     wrapperOriginal.style.display = "";
@@ -827,8 +843,12 @@ let configSepararOrgaoJuizoCarregada = false;
 
 function aplicarSepararOrgaoJuizoSeAtivo() {
   if (!configSepararOrgaoJuizoCarregada) return;
-  if (configSepararOrgaoJuizoAtivo) montarComarcaJuizoOrgao();
-  else desmontarComarcaJuizoOrgao();
+  for (const id of IDS_SELECT_ORGAO_JUIZO) {
+    const select = document.getElementById(id);
+    if (!select) continue;
+    if (configSepararOrgaoJuizoAtivo) montarComarcaJuizoOrgao(select);
+    else desmontarComarcaJuizoOrgao(select);
+  }
 }
 
 chrome.storage.local.get({ separarOrgaoJuizoPorComarca: false }, (itens) => {
