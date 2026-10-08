@@ -2874,6 +2874,10 @@ function consultarUmaVezNaPagina(parametros) {
     diag.push(linha);
     try {
       console.log("[ext_eproc][pagina]", linha);
+      // Espelho no DOM (atributo do <html>): o service worker le' isso a
+      // cada poucos segundos (mundo isolado), entao o ULTIMO passo
+      // aparece no log mesmo se a pagina travar e o resultado nunca voltar.
+      document.documentElement.setAttribute("data-ext-eproc-diag", JSON.stringify({ n: diag.length, l: diag.slice(-40) }));
     } catch (e) {}
   }
 
@@ -3353,17 +3357,9 @@ function consultarUmaVezNaPagina(parametros) {
         responsivo: Boolean(dt.responsive),
       });
 
-      // Mostra todas as linhas de uma vez (sem paginacao do DataTables)
-      // antes de ler - senao so' pegariamos a pagina atual visivel.
-      try {
-        const promessaMostrarTudo = aguardarRedesenho();
-        dt.page.len(-1).draw(false);
-        const redesenhou = await promessaMostrarTudo;
-        passo(`page.len(-1) → redesenhou=${redesenhou}`);
-      } catch (e) {
-        passo(`page.len(-1) falhou (${e && e.message}); seguindo com a paginação.`);
-      }
-
+      // NAO usa page.len(-1): desenhar de uma vez milhares de linhas no
+      // DataTables Responsive congelava a aba. Le' sempre em paginas de 100
+      // (valor do menu de tamanho), uma por vez, mais abaixo.
       // Le' direto das celulas <td> ja' RENDERIZADAS (na mesma ordem
       // visual dos cabecalhos), em vez de "dt.rows().data()": essa API
       // devolve o objeto de dados BRUTO de cada linha, cujas chaves nem
@@ -3459,18 +3455,18 @@ function consultarUmaVezNaPagina(parametros) {
       };
       coletarPagina();
 
-      const infoAposExpandir = dt.page.info();
       const esperado = Math.min(
         LIMITE_LINHAS,
-        Math.max(infoAposExpandir.recordsDisplay || 0, typeof contagemEsperada === "number" ? contagemEsperada : 0)
+        Math.max(dt.page.info().recordsDisplay || 0, typeof contagemEsperada === "number" ? contagemEsperada : 0)
       );
-      passo(`linhas lidas após expandir: ${acumulado.size} (esperado ${esperado}; páginas=${infoAposExpandir.pages}, tamanhoPagina=${infoAposExpandir.length})`);
+      passo(`linhas na página inicial: ${acumulado.size} (esperado ${esperado})`);
 
       if (acumulado.size < esperado) {
-        passo(`tabela incompleta (${acumulado.size} de ${esperado}); percorrendo as páginas de 100 em 100`);
+        passo(`percorrendo as páginas de 100 em 100 (esperado ${esperado})`);
         const promessaPagina100 = aguardarRedesenho();
         dt.page.len(100).draw(false);
         await promessaPagina100;
+        await aguardar(100);
         const totalPaginas = dt.page.info().pages;
         for (let pagina = 0; pagina < totalPaginas && acumulado.size < LIMITE_LINHAS; pagina += 1) {
           if (pagina > 0) {
@@ -3478,6 +3474,7 @@ function consultarUmaVezNaPagina(parametros) {
             dt.page(pagina).draw("page");
             if (!(await promessa)) passo(`página ${pagina + 1}: sem evento de redesenho no tempo limite`);
           }
+          await aguardar(50);
           coletarPagina();
           passo(`página ${pagina + 1}/${totalPaginas}: acumulado=${acumulado.size}`);
         }
@@ -4742,10 +4739,32 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     const alvo = frameId ? { tabId: aba.id, frameIds: [frameId] } : { tabId: aba.id };
+    // Monitor: a cada 2s le' o espelho do diagnostico na pagina e imprime os
+    // passos novos; se a pagina travar, o ultimo passo fica no log.
+    let vistos = 0;
+    const monitor = setInterval(async () => {
+      try {
+        const [{ result: bruto } = {}] = await chrome.scripting.executeScript({
+          target: alvo,
+          func: () => document.documentElement.getAttribute("data-ext-eproc-diag"),
+        });
+        if (bruto) {
+          const { n, l } = JSON.parse(bruto);
+          const primeiroIdx = n - l.length;
+          l.forEach((linha, i) => {
+            if (primeiroIdx + i >= vistos) logExt(`[aba ${aba.id}][ao vivo] ${linha}`);
+          });
+          vistos = n;
+        }
+      } catch (e) {
+        /* aba ocupada/travada: tenta de novo no proximo ciclo */
+      }
+    }, 2000);
     const [{ result } = {}] = await etapaAba(
       `injetando script: consultar e extrair (frame ${frameId || 0})`,
       aba.id,
       () =>
+        comTimeout(
         chrome.scripting.executeScript({
           target: alvo,
           world: "MAIN",
@@ -4753,8 +4772,11 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
           // Se o formulario ja' se mostrou indisponivel apos ~36s, as
           // esperas internas ficam curtas: so' servem para registrar o erro.
           args: [pronto ? parametros : { ...parametros, _esperaCurta: true }],
-        })
-    );
+        }),
+          240000,
+          "Tempo esgotado (240s) na consulta: a página não respondeu. Veja os passos '[ao vivo]' acima."
+        )
+    ).finally(() => clearInterval(monitor));
 
     if (result) {
       registrarDiagnosticoDaPagina(aba.id, result.diag);
