@@ -316,6 +316,17 @@ Tudo é salvo automaticamente assim que você marca ou desmarca uma opção
 
 ---
 
+## Diagnóstico: relatório não traz os dados
+
+Se uma consulta do Relatório Geral (ex.: processos ativos) voltar vazia ou incompleta depois de uma atualização do eproc, abra `chrome://extensions` → **Extensão Auxiliar eProc** → **Inspecionar service worker** → aba **Console** e refaça a consulta. Tudo aparece com o prefixo `[ext_eproc]`:
+
+- `[aba N] ▶ / ✔ / ✖ <etapa>`: abertura da aba, injeção do script que clica em "Relatório Geral", espera da navegação, espera do formulário (todos os frames) e injeção da consulta. Uma etapa que falha mostra `✖ ... → Nome: mensagem` e a pilha.
+- `[aba N][pagina] ...`: o que a função injetada fez dentro da página (a aba oculta é fechada logo depois, então o log "de dentro" é reenviado ao console do service worker): campos encontrados, botão Consultar, badge de total, `DataTables antes de expandir {...}`, páginas lidas e quantidade de linhas.
+- Em caso de erro, `estado da página no erro: [url=... frames=... jQuery=... DataTables=... | selStatusProcesso=sim/NÃO, ...]` diz quais elementos-chave existem.
+- `Relação incompleta: X de Y processo(s)` no relatório indica que a tabela devolveu menos linhas do que o total.
+
+Mensagens entre painel e service worker (`Mensagem enviada →` / `Mensagem recebida ←`) também são registradas por `log.js`.
+
 ## Dúvidas frequentes
 
 **A extensão altera algo no eproc?** Não. Ela só lê o que já está na

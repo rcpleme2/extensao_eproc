@@ -288,19 +288,215 @@ function construirDataUrlBinario(mimetype, bytes) {
   return `data:${mimetype};base64,${bytesParaBase64(bytes)}`;
 }
 
-function aguardarCarregamentoAba(tabId) {
+// Executa uma etapa de uma aba oculta registrando no console do service
+// worker (chrome://extensions > "Inspecionar service worker") o inicio, o
+// fim e o ERRO EXATO (nome, mensagem e pilha) de cada etapa - antes uma
+// falha em qualquer ponto virava so' "nao encontrou os dados". Repassa a
+// excecao original: quem chama decide se trata ou propaga.
+async function etapaAba(rotulo, tabId, fn) {
+  const t0 = Date.now();
+  const prefixo = `[aba ${tabId == null ? "-" : tabId}]`;
+  logExt(`${prefixo} ▶ ${rotulo}`);
+  try {
+    const resultado = await fn();
+    logExt(`${prefixo} ✔ ${rotulo} (${Date.now() - t0}ms)`);
+    return resultado;
+  } catch (e) {
+    const nome = (e && e.name) || "Error";
+    const msg = (e && e.message) || String(e);
+    logExt.error(`${prefixo} ✖ ${rotulo} (${Date.now() - t0}ms) → ${nome}: ${msg}`, (e && e.stack) || "");
+    throw e;
+  }
+}
+
+// Repassa para o console do service worker as linhas de diagnostico que a
+// funcao injetada na pagina (ver "consultarUmaVezNaPagina") acumulou - o
+// console da aba oculta nao e' visivel para o usuario (a aba e' fechada
+// logo em seguida), entao o log "de dentro" da pagina viaja no resultado.
+function registrarDiagnosticoDaPagina(tabId, diag) {
+  if (!Array.isArray(diag)) return;
+  for (const linha of diag) logExt(`[aba ${tabId}][pagina] ${linha}`);
+}
+
+// Espera (ate' "timeoutMs") a aba estar na tela do Relatório Geral JA'
+// carregada. Diferente de "aguardarCarregamentoAba" (que aceita
+// "status === complete" de QUALQUER pagina), confere tambem a URL: logo
+// depois de clicar no link do menu a aba ainda aparece como "complete"
+// (da pagina ANTIGA) por alguns instantes, ate' a navegacao comecar - o
+// que fazia o codigo seguir adiante na pagina errada ("Campo 'Situação'
+// não encontrado"). Nunca lanca: devolve true/false.
+function aguardarAbaNoRelatorioGeral(tabId, timeoutMs = 40000) {
+  return new Promise((resolve) => {
+    let encerrado = false;
+    const t0 = Date.now();
+    let ultimo = "";
+    function concluir(ok) {
+      if (encerrado) return;
+      encerrado = true;
+      clearInterval(intervalo);
+      clearTimeout(limite);
+      chrome.tabs.onUpdated.removeListener(aoAtualizar);
+      if (!ok) logExt.warn(`[aba ${tabId}] navegação ao Relatório Geral não confirmada após ${timeoutMs}ms; último estado:`, ultimo);
+      resolve(ok);
+    }
+    function avaliar(tab) {
+      if (!tab) return;
+      ultimo = `status=${tab.status} url=${logExt.semQuery(tab.url || "")}${/acao=relatorio_geral_listar/.test(tab.url || "") ? " (ação ok)" : " (ação ≠ relatorio_geral_listar)"}`;
+      if (tab.status === "complete" && /acao=relatorio_geral_listar/.test(tab.url || "")) concluir(true);
+    }
+    function aoAtualizar(idAtualizado, _info, tab) {
+      if (idAtualizado === tabId) avaliar(tab);
+    }
+    chrome.tabs.onUpdated.addListener(aoAtualizar);
+    const intervalo = setInterval(() => {
+      chrome.tabs.get(tabId, (tab) => {
+        if (chrome.runtime.lastError) {
+          ultimo = `aba indisponível: ${chrome.runtime.lastError.message}`;
+          return;
+        }
+        avaliar(tab);
+      });
+    }, 300);
+    const limite = setTimeout(() => concluir(false), timeoutMs);
+    void t0;
+  });
+}
+
+// Roda DENTRO da pagina (world MAIN, para enxergar jQuery/DataTables) e
+// espera - com MutationObserver + timeout, em vez de leitura imediata -
+// o formulario do Relatório Geral ficar utilizavel: elementos-chave no
+// DOM, a pagina NOVA (o marcador deixado por "clicarLinkRelatorioGeralNaPagina"
+// na pagina antiga sumiu) e a tabela #tblProcessoLista ja' inicializada
+// pelo DataTables. Em sub-frames o limite e' curto: so' serve para
+// descobrir QUAL frame contem o formulario. Nunca lanca.
+function aguardarFormularioRelatorioNaPagina(timeoutTopoMs) {
+  const ehTopo = window === window.top;
+  const limite = ehTopo ? timeoutTopoMs : 8000;
+  const REQUISITOS = [
+    ["#selStatusProcesso", "select Situação"],
+    ["#tblProcessoLista", "tabela de resultado"],
+    ['button.btnConsultar', "botão Consultar"],
+  ];
+
+  function estado() {
+    const faltando = REQUISITOS.filter(([sel]) => !document.querySelector(sel)).map(([, nome]) => nome);
+    const antiga = document.documentElement.hasAttribute("data-ext-eproc-antes-nav");
+    const dtPronto = Boolean(
+      window.jQuery && window.jQuery.fn && window.jQuery.fn.DataTable && window.jQuery.fn.DataTable.isDataTable("#tblProcessoLista")
+    );
+    const bsPronto = Boolean(document.querySelector("#selStatusProcesso") && document.querySelector("#selStatusProcesso").closest(".bootstrap-select"));
+    return { faltando, antiga, dtPronto, bsPronto, pronto: faltando.length === 0 && !antiga && document.readyState !== "loading" && dtPronto };
+  }
+
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    let fim = false;
+    let observador;
+    let intervalo;
+    let timer;
+    function terminar() {
+      if (fim) return;
+      fim = true;
+      if (observador) observador.disconnect();
+      clearInterval(intervalo);
+      clearTimeout(timer);
+      const e = estado();
+      resolve({
+        pronto: e.pronto,
+        faltando: e.faltando,
+        paginaAntiga: e.antiga,
+        dataTablePronto: e.dtPronto,
+        bootstrapSelectPronto: e.bsPronto,
+        ehTopo,
+        url: location.href.split("?")[0],
+        readyState: document.readyState,
+        ms: Date.now() - t0,
+      });
+    }
+    function verificar() {
+      if (estado().pronto) terminar();
+    }
+    try {
+      observador = new MutationObserver(verificar);
+      observador.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+    } catch (e) {
+      /* o intervalo abaixo cobre */
+    }
+    // O DataTables termina de inicializar sem necessariamente mexer no DOM
+    // de um jeito que o observer perceba - o intervalo cobre esse caso.
+    intervalo = setInterval(verificar, 250);
+    timer = setTimeout(terminar, limite);
+    verificar();
+  });
+}
+
+// Depois de clicar no link "Relatório Geral": espera a navegacao concluir
+// (URL + status), depois o formulario ficar pronto DENTRO da pagina,
+// procurando em TODOS os frames (a tela pode ser servida dentro de um
+// iframe). Devolve { frameId, pronto, detalhes } - "frameId" 0 e' a
+// pagina principal. Nunca lanca (loga e devolve pronto:false), para os
+// erros especificos aparecerem nas etapas seguintes, com a mensagem
+// original do eproc.
+async function aguardarRelatorioGeralPronto(tabId, rotulo = "Relatório Geral") {
+  try {
+    await etapaAba(`${rotulo}: aguardando navegação`, tabId, () => aguardarAbaNoRelatorioGeral(tabId));
+  } catch (e) {
+    /* etapaAba ja' registrou */
+  }
+  try {
+    // Duas fases: 6s (suficiente quando o formulario ja' esta' no topo OU
+    // dentro de um iframe, que e' achado cedo) e, so' se nenhum frame ficou
+    // pronto, mais 30s - evita esperar o limite cheio no frame de topo
+    // quando a tela real vive num iframe.
+    let resultados;
+    for (const limiteMs of [6000, 30000]) {
+      resultados = await etapaAba(`${rotulo}: aguardando formulário no DOM (todos os frames, até ${limiteMs / 1000}s)`, tabId, () =>
+        chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          world: "MAIN",
+          func: aguardarFormularioRelatorioNaPagina,
+          args: [limiteMs],
+        })
+      );
+      if ((resultados || []).some((r) => r && r.result && r.result.pronto)) break;
+    }
+    const lista = (resultados || []).filter((r) => r && r.result);
+    for (const r of lista) {
+      const d = r.result;
+      logExt(
+        `[aba ${tabId}] frame ${r.frameId}${d.ehTopo ? " (topo)" : ""}: pronto=${d.pronto} faltando=[${d.faltando.join(", ")}] dataTable=${d.dataTablePronto} bootstrapSelect=${d.bootstrapSelectPronto} paginaAntiga=${d.paginaAntiga} readyState=${d.readyState} ${d.ms}ms ${d.url}`
+      );
+    }
+    if (lista.length > 1) logExt.warn(`[aba ${tabId}] a aba tem ${lista.length} frames acessíveis (iframe presente).`);
+    const escolhido = lista.find((r) => r.result.pronto) || lista.find((r) => r.result.ehTopo) || lista[0];
+    if (!escolhido) return { frameId: 0, pronto: false, detalhes: null };
+    if (!escolhido.result.pronto) {
+      logExt.warn(`[aba ${tabId}] formulário NÃO ficou pronto no tempo limite — seguindo mesmo assim para registrar o erro exato.`);
+    }
+    return { frameId: escolhido.frameId || 0, pronto: escolhido.result.pronto, detalhes: escolhido.result };
+  } catch (e) {
+    return { frameId: 0, pronto: false, detalhes: null };
+  }
+}
+
+function aguardarCarregamentoAba(tabId, timeoutMs = 60000) {
   return new Promise((resolve) => {
     let resolvido = false;
-    function concluir() {
+    function concluir(porTimeout) {
       if (resolvido) return;
       resolvido = true;
+      clearTimeout(limite);
       chrome.tabs.onUpdated.removeListener(listener);
+      if (porTimeout) logExt.warn(`[aba ${tabId}] carregamento não concluiu em ${timeoutMs}ms — seguindo adiante.`);
       resolve();
     }
     function listener(idAtualizado, changeInfo) {
-      if (idAtualizado === tabId && changeInfo.status === "complete") concluir();
+      if (idAtualizado === tabId && changeInfo.status === "complete") concluir(false);
     }
     chrome.tabs.onUpdated.addListener(listener);
+    // Rede de seguranca: antes, uma aba que nunca chegasse a "complete"
+    // deixava a promessa pendurada para sempre (relatorio "travado").
+    const limite = setTimeout(() => concluir(true), timeoutMs);
 
     // Corrida rara, mas possivel: se a aba ja tiver terminado de carregar
     // ANTES desse listener ser registrado (ex.: pagina muito rapida/em
@@ -2667,6 +2863,89 @@ function consultarUmaVezNaPagina(parametros) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  // Diagnostico: cada passo e' impresso no console DA PAGINA e acumulado em
+  // "diag", devolvido no resultado - o service worker reimprime essas linhas
+  // no console dele (a aba oculta e' fechada logo depois, entao o console
+  // dela nunca chega a ser visto).
+  const diag = [];
+  const t0Consulta = Date.now();
+  function passo(mensagem, ...extras) {
+    const linha = `+${Date.now() - t0Consulta}ms ${mensagem}${extras.length ? " " + extras.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" ") : ""}`;
+    diag.push(linha);
+    try {
+      console.log("[ext_eproc][pagina]", linha);
+    } catch (e) {}
+  }
+
+  // Executa uma etapa registrando inicio/fim e o erro EXATO; relanca com o
+  // nome da etapa no texto, para a mensagem final dizer ONDE falhou.
+  async function etapa(nome, fn) {
+    passo(`▶ ${nome}`);
+    try {
+      const r = await fn();
+      passo(`✔ ${nome}`);
+      return r;
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      passo(`✖ ${nome} → ${(e && e.name) || "Error"}: ${msg}`);
+      const erro = new Error(`[${nome}] ${msg}`);
+      erro.etapa = nome;
+      throw erro;
+    }
+  }
+
+  // Espera (MutationObserver + timeout, em vez de leitura imediata) um
+  // elemento aparecer no DOM e, opcionalmente, satisfazer "condicao".
+  function esperarElemento(seletor, rotulo, timeoutMs = parametros._esperaCurta ? 3000 : 20000, condicao) {
+    return new Promise((resolve, reject) => {
+      const achar = () => {
+        const el = document.querySelector(seletor);
+        return el && (!condicao || condicao(el)) ? el : null;
+      };
+      const ja = achar();
+      if (ja) return resolve(ja);
+      let obs;
+      const fim = (el, erro) => {
+        if (obs) obs.disconnect();
+        clearInterval(iv);
+        clearTimeout(t);
+        if (erro) reject(erro);
+        else resolve(el);
+      };
+      try {
+        obs = new MutationObserver(() => {
+          const el = achar();
+          if (el) fim(el);
+        });
+        obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      } catch (e) {}
+      const iv = setInterval(() => {
+        const el = achar();
+        if (el) fim(el);
+      }, 250);
+      const t = setTimeout(
+        () => fim(null, new Error(`${rotulo} (${seletor}) não apareceu em ${timeoutMs}ms. ${resumoDaPagina()}`)),
+        timeoutMs
+      );
+    });
+  }
+
+  // Foto do estado da pagina para as mensagens de erro: URL, frames, quais
+  // elementos-chave existem e se jQuery/DataTables carregaram - responde
+  // "a tela mudou, estou na pagina errada, ou so' demorou?".
+  function resumoDaPagina() {
+    try {
+      const ids = ["selStatusProcesso", "selIdOrgaoJuizo", "selRitoProcesso", "selCompetencia", "frmProcessoLista", "tblProcessoLista", "tblProcessoLista_info-badge"];
+      const presentes = ids.map((id) => `${id}=${document.getElementById(id) ? "sim" : "NÃO"}`).join(", ");
+      const dt = Boolean(window.jQuery && window.jQuery.fn && window.jQuery.fn.DataTable);
+      const dtInit = dt && window.jQuery.fn.DataTable.isDataTable("#tblProcessoLista");
+      const titulo = (document.title || "").replace(/\s+/g, " ").trim().slice(0, 80);
+      return `[url=${location.pathname}${location.search ? "?…" : ""} título="${titulo}" readyState=${document.readyState} frames=${window.frames.length} jQuery=${Boolean(window.jQuery)} DataTables=${dt} tabelaInicializada=${dtInit} | ${presentes}]`;
+    } catch (e) {
+      return "[sem resumo da página]";
+    }
+  }
+
   function extrairContagem(texto) {
     const m = (texto || "").match(/\((\d+)\)/);
     return m ? Number(m[1]) : null;
@@ -2899,18 +3178,26 @@ function consultarUmaVezNaPagina(parametros) {
   }
 
   async function clicarConsultarELer() {
-    const botaoConsultar = document.querySelector('button.btnConsultar[form="frmProcessoLista"]');
+    // Ha' mais de um "button.btnConsultar" na tela (um deles fora da area
+    // visivel); prefere o visivel ligado ao formulario do resultado.
+    await esperarElemento('button.btnConsultar[form="frmProcessoLista"], button.btnConsultar', 'Botão "Consultar"');
+    const candidatos = Array.from(document.querySelectorAll('button.btnConsultar[form="frmProcessoLista"]'));
+    const todos = candidatos.length ? candidatos : Array.from(document.querySelectorAll("button.btnConsultar"));
+    const botaoConsultar = todos.find((b) => b.offsetParent !== null && !b.disabled) || todos[0];
     if (!botaoConsultar) throw new Error('Botão "Consultar" não encontrado nesta página.');
+    passo(`botões Consultar: ${todos.length} (usando o ${todos.indexOf(botaoConsultar) + 1}º, visível=${botaoConsultar.offsetParent !== null})`);
 
     const badgeAntes = document.getElementById("tblProcessoLista_info-badge");
     const textoAntes = badgeAntes ? badgeAntes.textContent : null;
 
     botaoConsultar.click();
+    passo(`clicou em Consultar (badge antes=${JSON.stringify(textoAntes)})`);
 
     // A consulta e' via AJAX (sem recarregar a pagina); espera o texto do
     // badge mudar (ou, apos um tempo minimo sem estar mais "Processando",
-    // aceita o valor atual mesmo que igual ao anterior).
-    for (let tentativa = 0; tentativa < 40; tentativa += 1) {
+    // aceita o valor atual mesmo que igual ao anterior). 240 x 250ms = 60s:
+    // consultas grandes (server-side) podem demorar bem mais que 10s.
+    for (let tentativa = 0; tentativa < 240; tentativa += 1) {
       await aguardar(250);
       const badge = document.getElementById("tblProcessoLista_info-badge");
       const textoAtual = badge ? badge.textContent : null;
@@ -2918,15 +3205,21 @@ function consultarUmaVezNaPagina(parametros) {
       const estaProcessando =
         elementoProcessando && getComputedStyle(elementoProcessando).display !== "none";
 
+      if (tentativa % 20 === 0) {
+        passo(`aguardando resultado… tentativa ${tentativa} badge=${JSON.stringify(textoAtual)} processando=${Boolean(estaProcessando)}`);
+      }
+
       if (badge && !estaProcessando && textoAtual !== textoAntes) {
+        passo(`resultado: badge=${JSON.stringify(textoAtual)}`);
         return extrairContagem(textoAtual);
       }
       if (badge && !estaProcessando && tentativa > 8) {
+        passo(`resultado (badge inalterado): badge=${JSON.stringify(textoAtual)}`);
         return extrairContagem(textoAtual);
       }
     }
 
-    throw new Error("Tempo esgotado esperando o resultado da consulta.");
+    throw new Error(`Tempo esgotado esperando o resultado da consulta. ${resumoDaPagina()}`);
   }
 
   // Marca como visiveis as colunas pedidas no menu "Colunas visíveis"
@@ -3003,8 +3296,19 @@ function consultarUmaVezNaPagina(parametros) {
   // o total) da tabela de resultado "#tblProcessoLista" - usada pelo
   // Relatório da Unidade para trazer a lista de processos ativos/
   // suspensos, alem do total. Nunca lanca excecao: sempre resolve com
-  // { cabecalhos, linhas, erro }.
-  async function extrairLinhasTblProcessoLista() {
+  // { cabecalhos, linhas, linksProcesso, erro, aviso }.
+  //
+  // Mudancas para a versao atual do eproc (verificadas no HTML real da tela):
+  // - a tabela usa DataTables RESPONSIVE (classes "collapsed"/"dtr-none"):
+  //   colunas que nao cabem (Autor/Réu) ficam com display:none e os dados
+  //   delas aparecem tambem numa linha extra "tr.child" - essa linha NAO e'
+  //   um processo e e' ignorada; se uma coluna escondida vier sem <td> na
+  //   linha, o valor e' recuperado dessa linha "child";
+  // - o resultado e' paginado no servidor (menu 10/25/50/100, sem "Todos"),
+  //   entao "page.len(-1)" pode devolver so' a primeira pagina: depois dele
+  //   a quantidade lida e' comparada com o total e, se faltar, as demais
+  //   paginas sao percorridas de 100 em 100.
+  async function extrairLinhasTblProcessoLista(contagemEsperada) {
     // 15 pra' caber todas as colunas conhecidas da tabela real (checkbox,
     // Nº Processo, Autuação, Situação, Sigilo, Classe, Localizador, Último
     // Evento, Data/Hora, Autor, Réu - 11 no total - mais as colunas
@@ -3017,32 +3321,48 @@ function consultarUmaVezNaPagina(parametros) {
     // um limite pensado so' para consultas de uma única unidade cortaria
     // boa parte do resultado sem nenhum aviso.
     const LIMITE_LINHAS = 5000;
+    const vazio = (erro) => ({ cabecalhos: [], linhas: [], linksProcesso: [], erro, aviso: null });
     try {
-      if (typeof jQuery === "undefined" || !jQuery.fn || !jQuery.fn.DataTable) {
-        return { cabecalhos: [], linhas: [], erro: "jQuery DataTables não disponível nesta página." };
+      passo("extraindo tabela #tblProcessoLista…");
+      await esperarElemento("#tblProcessoLista", "Tabela de resultado");
+
+      // Espera o DataTables inicializar (jQuery + plugin + tabela), em vez
+      // de falhar na primeira leitura.
+      const dtPronto = () =>
+        typeof jQuery !== "undefined" && jQuery.fn && jQuery.fn.DataTable && jQuery.fn.DataTable.isDataTable("#tblProcessoLista");
+      for (let i = 0; i < 60 && !dtPronto(); i += 1) await aguardar(250);
+      if (!dtPronto()) {
+        return vazio(`jQuery DataTables não disponível/inicializado nesta página. ${resumoDaPagina()}`);
       }
       const tabelaEl = jQuery("#tblProcessoLista");
-      if (tabelaEl.length === 0 || !jQuery.fn.DataTable.isDataTable("#tblProcessoLista")) {
-        return { cabecalhos: [], linhas: [], erro: 'Tabela "#tblProcessoLista" não encontrada ou ainda não inicializada.' };
-      }
       const dt = tabelaEl.DataTable();
 
-      const aguardarRedesenho = () =>
+      const aguardarRedesenho = (ms = 20000) =>
         Promise.race([
           new Promise((resolve) => tabelaEl.one("draw.dt", () => resolve(true))),
-          aguardar(8000).then(() => false),
+          aguardar(ms).then(() => false),
         ]);
+
+      const infoInicial = dt.page.info();
+      passo("DataTables antes de expandir:", {
+        tamanhoPagina: infoInicial.length,
+        paginas: infoInicial.pages,
+        total: infoInicial.recordsTotal,
+        filtrado: infoInicial.recordsDisplay,
+        servidor: infoInicial.serverSide,
+        responsivo: Boolean(dt.responsive),
+      });
 
       // Mostra todas as linhas de uma vez (sem paginacao do DataTables)
       // antes de ler - senao so' pegariamos a pagina atual visivel.
-      const promessaMostrarTudo = aguardarRedesenho();
-      dt.page.len(-1).draw(false);
-      await promessaMostrarTudo;
-
-      const tabelaDom = document.getElementById("tblProcessoLista");
-      const cabecalhos = Array.from(tabelaDom.querySelectorAll("thead th"))
-        .map((th) => (th.textContent || "").replace(/\s+/g, " ").trim())
-        .slice(0, LIMITE_COLUNAS);
+      try {
+        const promessaMostrarTudo = aguardarRedesenho();
+        dt.page.len(-1).draw(false);
+        const redesenhou = await promessaMostrarTudo;
+        passo(`page.len(-1) → redesenhou=${redesenhou}`);
+      } catch (e) {
+        passo(`page.len(-1) falhou (${e && e.message}); seguindo com a paginação.`);
+      }
 
       // Le' direto das celulas <td> ja' RENDERIZADAS (na mesma ordem
       // visual dos cabecalhos), em vez de "dt.rows().data()": essa API
@@ -3073,79 +3393,178 @@ function consultarUmaVezNaPagina(parametros) {
         return (td.textContent || "").replace(/\s+/g, " ").trim();
       }
 
-      // Quando a consulta nao encontra nenhum processo, o DataTables
-      // desenha uma unica linha "vazia" (classe "dataTables_empty", 1
-      // <td> so' com colspan cobrindo todas as colunas e o texto "Nenhum
-      // registro encontrado") em vez de simplesmente nao ter <tr> nenhum
-      // no <tbody> - um filtro de "tem pelo menos 1 <td>" deixava essa
-      // linha passar como se fosse um processo de verdade (mesmo bug ja'
-      // corrigido em "extrairLinhasRemessasJuizesLeigosNaPagina"). Exigir
-      // o mesmo numero de <td> que de colunas no cabecalho descarta essa
-      // linha "vazia".
-      const linhasEl = Array.from(tabelaDom.querySelectorAll("tbody tr")).filter(
-        (tr) => tr.querySelectorAll("td").length >= cabecalhos.length && !tr.querySelector("td.dataTables_empty")
-      );
-      const linhasSlice = linhasEl.slice(0, LIMITE_LINHAS);
-      const linhas = linhasSlice.map((tr) =>
-        Array.from(tr.querySelectorAll("td")).slice(0, LIMITE_COLUNAS).map(textoCelula)
-      );
+      function cabecalhosAtuais() {
+        const tabelaDom = document.getElementById("tblProcessoLista");
+        return Array.from(tabelaDom.querySelectorAll("thead th"))
+          .map((th) => (th.textContent || "").replace(/\s+/g, " ").trim())
+          .slice(0, LIMITE_COLUNAS);
+      }
 
-      // Href (ja' resolvido para URL absoluta, via ".href" do proprio
-      // <a>) do link "Nº do Processo" de cada linha - usado pelo
-      // Relatório de Excesso de Prazo para abrir cada processo numa aba
-      // oculta e ler o magistrado responsável (ver
-      // "abrirAbaELerMagistrado"). "null" quando a coluna nao existe ou a
-      // celula nao tem link (nunca quebra a extração das demais colunas
-      // por causa disso).
-      const idxColunaProcesso = cabecalhos.findIndex((h) => /processo/i.test(h));
-      const linksProcesso = linhasSlice.map((tr) => {
-        if (idxColunaProcesso < 0) return null;
-        const td = tr.querySelectorAll("td")[idxColunaProcesso];
-        const link = td ? td.querySelector("a[href]") : null;
-        return link ? link.href : null;
-      });
+      // Le' as linhas de processo da pagina ATUAL do DataTables. Ignora a
+      // linha "vazia" do DataTables (classe "dataTables_empty": 1 <td> so'
+      // com colspan e o texto "Nenhum registro encontrado" - um filtro de
+      // "tem pelo menos 1 <td>" deixava essa linha passar como se fosse
+      // um processo de verdade) e as linhas "tr.child" do Responsive.
+      function lerLinhasDaPaginaAtual(cabecalhos) {
+        const tabelaDom = document.getElementById("tblProcessoLista");
+        const idxColunaProcesso = cabecalhos.findIndex((h) => /processo/i.test(h));
+        const itens = [];
+        for (const tr of tabelaDom.querySelectorAll("tbody tr")) {
+          if (tr.classList.contains("child") || tr.querySelector("td.dataTables_empty")) continue;
+          const tds = Array.from(tr.querySelectorAll(":scope > td"));
+          let celulas;
+          if (tds.length >= cabecalhos.length) {
+            celulas = tds.slice(0, LIMITE_COLUNAS).map(textoCelula);
+          } else {
+            // Responsive que REMOVE (em vez de esconder) as colunas que nao
+            // cabem: completa com os dados da linha "child" seguinte.
+            const filho = tr.nextElementSibling;
+            if (!filho || !filho.classList.contains("child")) continue;
+            const escondidas = new Map();
+            filho.querySelectorAll("li[data-dt-column]").forEach((li) => {
+              const dado = li.querySelector(".dtr-data");
+              escondidas.set(Number(li.getAttribute("data-dt-column")), dado ? textoCelula(dado) : "");
+            });
+            const visiveis = [];
+            for (let c = 0; c < cabecalhos.length; c += 1) if (!escondidas.has(c)) visiveis.push(c);
+            celulas = new Array(cabecalhos.length).fill("");
+            escondidas.forEach((valor, c) => {
+              if (c < celulas.length) celulas[c] = valor;
+            });
+            tds.forEach((td, k) => {
+              if (visiveis[k] != null) celulas[visiveis[k]] = textoCelula(td);
+            });
+          }
+          // Href (ja' resolvido para URL absoluta, via ".href" do proprio
+          // <a>) do link "Nº do Processo" de cada linha - usado pelo
+          // Relatório de Excesso de Prazo para abrir cada processo numa aba
+          // oculta e ler o magistrado responsável (ver
+          // "abrirAbaELerMagistrado"). "null" quando a coluna nao existe ou a
+          // celula nao tem link.
+          const tdProcesso = idxColunaProcesso >= 0 ? tds[idxColunaProcesso] : null;
+          const link = tdProcesso ? tdProcesso.querySelector("a[href]") : null;
+          const chave = tr.id || celulas[idxColunaProcesso] || celulas.join("|");
+          itens.push({ chave, celulas, link: link ? link.href : null });
+        }
+        return itens;
+      }
 
-      return { cabecalhos, linhas, linksProcesso, erro: null };
+      const acumulado = new Map();
+      let cabecalhos = cabecalhosAtuais();
+      const coletarPagina = () => {
+        cabecalhos = cabecalhosAtuais();
+        for (const item of lerLinhasDaPaginaAtual(cabecalhos)) {
+          if (!acumulado.has(item.chave)) acumulado.set(item.chave, item);
+        }
+      };
+      coletarPagina();
+
+      const infoAposExpandir = dt.page.info();
+      const esperado = Math.min(
+        LIMITE_LINHAS,
+        Math.max(infoAposExpandir.recordsDisplay || 0, typeof contagemEsperada === "number" ? contagemEsperada : 0)
+      );
+      passo(`linhas lidas após expandir: ${acumulado.size} (esperado ${esperado}; páginas=${infoAposExpandir.pages}, tamanhoPagina=${infoAposExpandir.length})`);
+
+      if (acumulado.size < esperado) {
+        passo(`tabela incompleta (${acumulado.size} de ${esperado}); percorrendo as páginas de 100 em 100`);
+        const promessaPagina100 = aguardarRedesenho();
+        dt.page.len(100).draw(false);
+        await promessaPagina100;
+        const totalPaginas = dt.page.info().pages;
+        for (let pagina = 0; pagina < totalPaginas && acumulado.size < LIMITE_LINHAS; pagina += 1) {
+          if (pagina > 0) {
+            const promessa = aguardarRedesenho(30000);
+            dt.page(pagina).draw("page");
+            if (!(await promessa)) passo(`página ${pagina + 1}: sem evento de redesenho no tempo limite`);
+          }
+          coletarPagina();
+          passo(`página ${pagina + 1}/${totalPaginas}: acumulado=${acumulado.size}`);
+        }
+      }
+
+      const itens = Array.from(acumulado.values()).slice(0, LIMITE_LINHAS);
+      const linhas = itens.map((i) => i.celulas);
+      const linksProcesso = itens.map((i) => i.link);
+
+      let erro = null;
+      let aviso = null;
+      if (linhas.length === 0 && esperado > 0) {
+        const tabelaDom = document.getElementById("tblProcessoLista");
+        const trs = tabelaDom.querySelectorAll("tbody tr");
+        const primeira = trs[0] ? trs[0].querySelectorAll(":scope > td").length : 0;
+        erro = `A consulta indicou ${esperado} processo(s), mas nenhuma linha foi lida da tabela (tbody tr=${trs.length}, <td> na 1ª linha=${primeira}, <th>=${cabecalhos.length}). ${resumoDaPagina()}`;
+      } else if (linhas.length < esperado) {
+        aviso = `Relação incompleta: ${linhas.length} de ${esperado} processo(s) lidos da tabela.`;
+      }
+      passo(`tabela extraída: ${linhas.length} linha(s), ${cabecalhos.length} coluna(s)${aviso ? " — " + aviso : ""}${erro ? " — ERRO: " + erro : ""}`);
+      return { cabecalhos, linhas, linksProcesso, erro, aviso };
     } catch (e) {
-      return { cabecalhos: [], linhas: [], linksProcesso: [], erro: e && e.message ? e.message : String(e) };
+      const msg = e && e.message ? e.message : String(e);
+      passo(`✖ extração da tabela → ${(e && e.name) || "Error"}: ${msg}`);
+      return vazio(msg);
     }
   }
 
   return (async () => {
+    passo(`iniciando consulta em ${location.pathname} (frame ${window === window.top ? "topo" : "interno"}) ${resumoDaPagina()}`);
     try {
+      // Espera os campos que ESTA consulta realmente usa - nada de leitura
+      // imediata: a tela monta os widgets (bootstrap-select, Tagify,
+      // DataTables) depois do "load".
+      await etapa("aguardar campos da tela", async () => {
+        const exigidos = [["#frmProcessoLista", "Formulário de consulta"], ["#tblProcessoLista", "Tabela de resultado"]];
+        if (parametros.valorOrgaoJuizo) exigidos.push(["#selIdOrgaoJuizo", 'Campo "Órgão/Juízo"']);
+        if (parametros.valorSituacao || parametros.grupoSituacao || parametros.gruposSituacaoExcluir) {
+          exigidos.push(["#selStatusProcesso", 'Campo "Situação"']);
+        }
+        if (parametros.valorRito) exigidos.push(["#selRitoProcesso", 'Campo "Rito Processual"']);
+        if (parametros.valoresCompetencia) exigidos.push(["#selCompetencia", 'Campo "Competência"']);
+        if (parametros.diasSituacao != null) exigidos.push(["#txtDiasSituacao", 'Campo "Dias na situação"']);
+        if (parametros.diasSemMovimentacao != null) exigidos.push(["#txtDiasSemMovimentacao", 'Campo "Dias sem movimentação"']);
+        if (parametros.dataAutuacaoFim) exigidos.push(["#txtDataAutuacaoFim", 'Campo "Autuação (fim)"']);
+        for (const [seletor, rotulo] of exigidos) await esperarElemento(seletor, rotulo);
+      });
+
       // Se um Órgão/Juízo especifico foi pedido (Relatório Gerencial da
       // Unidade), seleciona ele ANTES de tudo - a troca de unidade pode
       // recarregar/reajustar outros campos da tela.
       if (parametros.valorOrgaoJuizo) {
-        selecionarOrgaoJuizo(parametros.valorOrgaoJuizo);
-        await aguardar(300);
+        await etapa("selecionar Órgão/Juízo", async () => {
+          selecionarOrgaoJuizo(parametros.valorOrgaoJuizo);
+          await aguardar(300);
+        });
       }
 
       // O filtro "Dias sem movimentação" (demonstrativo de processos
       // parados) e' independente da "Situação": nesse caso
       // "parametros.valorSituacao" vem nulo e o select nao e' tocado.
       if (parametros.valorSituacao) {
-        selecionarSituacao(parametros.valorSituacao);
+        await etapa("selecionar Situação", async () => selecionarSituacao(parametros.valorSituacao));
       }
 
       // Grupo inteiro de situacoes (ex.: "S" = todos os SUSPENSÃO, "M" =
       // todos os MOVIMENTO) - mutuamente exclusivo com "valorSituacao".
       if (parametros.grupoSituacao) {
-        selecionarGrupoSituacao(parametros.grupoSituacao);
+        await etapa("selecionar grupo de Situação", async () => selecionarGrupoSituacao(parametros.grupoSituacao));
       }
 
       // Todos os grupos macro EXCETO os informados (ex.: ["B", "S"] para
       // excluir BAIXADO e SUSPENSÃO) - usado na "Relação de processos
       // ativos", mutuamente exclusivo com "valorSituacao"/"grupoSituacao".
       if (parametros.gruposSituacaoExcluir) {
-        selecionarTodosGruposExceto(parametros.gruposSituacaoExcluir);
+        await etapa("selecionar Situação (todos exceto " + parametros.gruposSituacaoExcluir.join(",") + ")", async () => {
+          selecionarTodosGruposExceto(parametros.gruposSituacaoExcluir);
+          const sel = document.getElementById("selStatusProcesso");
+          passo(`opções de Situação marcadas: ${Array.from(sel.options).filter((o) => o.selected).length} de ${sel.options.length}`);
+        });
       }
 
       // Rito Processual especifico (ex.: contagem de processos ativos em
       // cada rito, um por consulta) - independente da Situação, pode ser
       // combinado com "gruposSituacaoExcluir" acima.
       if (parametros.valorRito) {
-        selecionarRito(parametros.valorRito);
+        await etapa("selecionar Rito", async () => selecionarRito(parametros.valorRito));
       }
 
       // Um ou mais valores do filtro "Competência" (agrupados por
@@ -3153,25 +3572,27 @@ function consultarUmaVezNaPagina(parametros) {
       // Situação/Rito, pode ser combinado com qualquer um dos filtros
       // acima.
       if (parametros.valoresCompetencia) {
-        selecionarCompetencias(parametros.valoresCompetencia);
+        await etapa("selecionar Competência", async () => selecionarCompetencias(parametros.valoresCompetencia));
       }
 
       if (parametros.diasSituacao != null) {
-        definirCampoTexto("txtDiasSituacao", "Dias na situação", parametros.diasSituacao);
+        await etapa("preencher Dias na situação", async () => definirCampoTexto("txtDiasSituacao", "Dias na situação", parametros.diasSituacao));
       }
 
       if (parametros.diasSemMovimentacao != null) {
-        definirCampoTexto("txtDiasSemMovimentacao", "Dias sem movimentação", parametros.diasSemMovimentacao);
+        await etapa("preencher Dias sem movimentação", async () =>
+          definirCampoTexto("txtDiasSemMovimentacao", "Dias sem movimentação", parametros.diasSemMovimentacao)
+        );
       }
 
       // Limite superior da data de autuação (formato dd/mm/aaaa) - usado
       // para contar o acervo antigo ("autuados ha' mais de N anos").
       if (parametros.dataAutuacaoFim) {
-        definirCampoTexto("txtDataAutuacaoFim", "Autuação (fim)", parametros.dataAutuacaoFim);
+        await etapa("preencher Autuação (fim)", async () => definirCampoTexto("txtDataAutuacaoFim", "Autuação (fim)", parametros.dataAutuacaoFim));
       }
 
       if (parametros.urgente) {
-        await marcarPeticaoUrgente();
+        await etapa("marcar Petição Urgente", () => marcarPeticaoUrgente());
       }
 
       // Usado pelo Relatório Gerencial da Unidade (Corregedoria): filtra
@@ -3182,16 +3603,18 @@ function consultarUmaVezNaPagina(parametros) {
       // "Listar todos" (id="selLocalizadorPrincipal-listAll") antes,
       // senao nenhum texto digitado encontra opção nenhuma no dropdown.
       if (parametros.valorLocalizador) {
-        const botaoListarTodos = document.getElementById("selLocalizadorPrincipal-listAll");
-        if (botaoListarTodos) {
-          botaoListarTodos.click();
-          await aguardar(300);
-        }
-        await selecionarTagify("Localizador", parametros.valorLocalizador, parametros.valorLocalizador);
+        await etapa("selecionar Localizador", async () => {
+          const botaoListarTodos = document.getElementById("selLocalizadorPrincipal-listAll");
+          if (botaoListarTodos) {
+            botaoListarTodos.click();
+            await aguardar(300);
+          }
+          await selecionarTagify("Localizador", parametros.valorLocalizador, parametros.valorLocalizador);
+        });
       }
 
       await aguardar(200);
-      const contagem = await clicarConsultarELer();
+      const contagem = await etapa("clicar em Consultar e ler o total", () => clicarConsultarELer());
 
       // Habilita colunas que nao vem marcadas por padrao no menu "Colunas
       // visíveis" (ex.: "Nº Dias Situação" e "Juízo", usadas pelo
@@ -3199,17 +3622,20 @@ function consultarUmaVezNaPagina(parametros) {
       // o menu fica ao lado da tabela de resultado (so' aparece pos-
       // pesquisa).
       if (parametros.colunasVisiveisNecessarias && parametros.colunasVisiveisNecessarias.length > 0) {
-        await habilitarColunasVisiveis(parametros.colunasVisiveisNecessarias);
+        await etapa("habilitar colunas visíveis", () => habilitarColunasVisiveis(parametros.colunasVisiveisNecessarias));
       }
 
       let tabela = null;
       if (parametros.extrairTabela) {
-        tabela = await extrairLinhasTblProcessoLista();
+        tabela = await extrairLinhasTblProcessoLista(contagem);
       }
 
-      return { contagem, tabela, erro: null };
+      return { contagem, tabela, erro: null, diag };
     } catch (e) {
-      return { contagem: null, tabela: null, erro: e && e.message ? e.message : String(e) };
+      const msg = e && e.message ? e.message : String(e);
+      passo(`✖ consulta abortada → ${msg}`);
+      passo(`estado da página no erro: ${resumoDaPagina()}`);
+      return { contagem: null, tabela: null, erro: msg, diag };
     }
   })();
 }
@@ -3218,10 +3644,68 @@ function consultarUmaVezNaPagina(parametros) {
 // com o menu lateral colapsado (o collapse e' so' visual via CSS) -
 // entao nao e' preciso simular o clique no item "Relatórios" do menu
 // antes. Autocontida, executada via chrome.scripting.executeScript.
-function clicarLinkRelatorioGeralNaPagina() {
-  const link = document.querySelector('a[href*="acao=relatorio_geral_listar"]');
-  if (!link) return false;
-  link.click();
+//
+// Assincrona: o menu lateral pode ser montado depois do "load" da pagina,
+// entao em vez de uma unica leitura imediata espera o link aparecer
+// (MutationObserver, ate' 15s). Procura primeiro pelo href real e, se o
+// eproc mudar o formato, pelo rotulo do menu ("Relatório Geral"). Antes de
+// clicar deixa um marcador no <html> da pagina ANTIGA: quem espera a
+// navegacao (ver "aguardarFormularioRelatorioNaPagina") so' considera
+// pronta uma pagina SEM esse marcador, o que evita agir na tela velha
+// quando o clique e' dado ja' dentro do proprio Relatório Geral.
+async function clicarLinkRelatorioGeralNaPagina() {
+  const TIMEOUT_MS = 15000;
+  const normalizar = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+
+  function procurar() {
+    // 1) href real do menu (descarta ancoras "#", usadas por itens de grupo).
+    const porHref = Array.from(document.querySelectorAll('a[href*="acao=relatorio_geral_listar"]')).find((a) => {
+      const href = a.getAttribute("href") || "";
+      return !href.includes("#") && !a.classList.contains("item-acessibilidade");
+    });
+    if (porHref) return { link: porHref, como: "href" };
+    // 2) rotulo acessivel/texto do item de menu.
+    const porRotulo = Array.from(document.querySelectorAll("#main-menu a, .sidebar-nav a, nav a")).find((a) => {
+      const rotulo = normalizar(a.getAttribute("aria-label") || (a.querySelector(".menu-item-text") || a).textContent);
+      return rotulo === "relatorio geral" && /acao=relatorio_geral/.test(a.getAttribute("href") || "");
+    });
+    if (porRotulo) return { link: porRotulo, como: "rótulo" };
+    return null;
+  }
+
+  const achado = await new Promise((resolve) => {
+    let pronto = procurar();
+    if (pronto) return resolve(pronto);
+    let obs;
+    const fim = (valor) => {
+      if (obs) obs.disconnect();
+      clearInterval(iv);
+      clearTimeout(t);
+      resolve(valor);
+    };
+    try {
+      obs = new MutationObserver(() => {
+        const r = procurar();
+        if (r) fim(r);
+      });
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+    } catch (e) {
+      /* o intervalo cobre */
+    }
+    const iv = setInterval(() => {
+      const r = procurar();
+      if (r) fim(r);
+    }, 300);
+    const t = setTimeout(() => fim(null), TIMEOUT_MS);
+  });
+
+  if (!achado) {
+    console.warn("[ext_eproc][pagina] link do Relatório Geral não encontrado em", location.href.split("?")[0], "| frames:", window.frames.length);
+    return false;
+  }
+  console.log("[ext_eproc][pagina] link do Relatório Geral encontrado por", achado.como);
+  document.documentElement.setAttribute("data-ext-eproc-antes-nav", "1");
+  achado.link.click();
   return true;
 }
 
@@ -3445,7 +3929,7 @@ async function abrirAbaEListarLocalizadoresRelatorioGeral(urlBase, valorOrgaoJui
       };
     }
 
-    await aguardarCarregamentoAba(aba.id);
+    await aguardarRelatorioGeralPronto(aba.id, "Relatório Geral");
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     // "valorOrgaoJuizo" nulo (perfil MAGISTRADO/GESTÃO DA UNIDADE, já
@@ -3546,7 +4030,7 @@ async function abrirAbaEListarSituacoesDoGrupo(urlBase, valorOrgaoJuizo, grupo) 
       };
     }
 
-    await aguardarCarregamentoAba(aba.id);
+    await aguardarRelatorioGeralPronto(aba.id, "Relatório Geral");
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Mesma regra das demais consultas: "valorOrgaoJuizo" nulo (perfil já
@@ -3761,7 +4245,7 @@ async function abrirAbaEConsultarSituacoesEspecificas(urlBase, valorOrgaoJuizo, 
       };
     }
 
-    await aguardarCarregamentoAba(aba.id);
+    await aguardarRelatorioGeralPronto(aba.id, "Relatório Geral");
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Mesma regra das demais consultas: "valorOrgaoJuizo" nulo pula a
@@ -4221,18 +4705,28 @@ async function exportarRelatorioPanoramico(aoProgredir) {
 // aba em vez de reaproveitar uma so'.
 async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
   let aba;
+  const resumoParametros = JSON.stringify(logExt.resumir(parametros || {}));
+  logExt(`Consulta no Relatório Geral — parâmetros: ${resumoParametros}`);
   try {
-    await adquirirSlotDeAbaOculta();
-    aba = await chrome.tabs.create({ url: urlBase, active: false });
-    await aguardarCarregamentoAba(aba.id);
+    await etapaAba("aguardando vaga de aba oculta", null, () => adquirirSlotDeAbaOculta());
+
+    aba = await etapaAba(`abrindo aba oculta (${logExt.semQuery(urlBase)})`, null, () =>
+      chrome.tabs.create({ url: urlBase, active: false })
+    );
+    await etapaAba("aguardando carregamento da aba inicial", aba.id, () => aguardarCarregamentoAba(aba.id));
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const [{ result: linkEncontrado } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      func: clicarLinkRelatorioGeralNaPagina,
-    });
+    // O clique no link do menu ja' espera o link aparecer (menu montado
+    // depois do "load") - ver "clicarLinkRelatorioGeralNaPagina".
+    const [{ result: linkEncontrado } = {}] = await etapaAba("injetando script: clicar em 'Relatório Geral'", aba.id, () =>
+      chrome.scripting.executeScript({
+        target: { tabId: aba.id },
+        func: clicarLinkRelatorioGeralNaPagina,
+      })
+    );
 
     if (!linkEncontrado) {
+      logExt.error(`[aba ${aba.id}] link "Relatório Geral" não encontrado — a aba aberta não é uma página do eproc com menu lateral?`);
       return {
         contagem: null,
         erro:
@@ -4240,18 +4734,39 @@ async function abrirAbaEConsultarUmaVez(urlBase, parametros) {
       };
     }
 
-    await aguardarCarregamentoAba(aba.id);
+    // Espera navegacao + formulario pronto (MutationObserver na pagina,
+    // com timeout), em todos os frames - ver "aguardarRelatorioGeralPronto".
+    const { frameId, pronto } = await aguardarRelatorioGeralPronto(aba.id, "Consulta");
     // Pequena espera extra para os scripts da pagina (bootstrap-select,
     // tagify etc.) terminarem de inicializar apos o carregamento.
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const [{ result } = {}] = await chrome.scripting.executeScript({
-      target: { tabId: aba.id },
-      world: "MAIN",
-      func: consultarUmaVezNaPagina,
-      args: [parametros],
-    });
+    const alvo = frameId ? { tabId: aba.id, frameIds: [frameId] } : { tabId: aba.id };
+    const [{ result } = {}] = await etapaAba(
+      `injetando script: consultar e extrair (frame ${frameId || 0})`,
+      aba.id,
+      () =>
+        chrome.scripting.executeScript({
+          target: alvo,
+          world: "MAIN",
+          func: consultarUmaVezNaPagina,
+          // Se o formulario ja' se mostrou indisponivel apos ~36s, as
+          // esperas internas ficam curtas: so' servem para registrar o erro.
+          args: [pronto ? parametros : { ...parametros, _esperaCurta: true }],
+        })
+    );
 
+    if (result) {
+      registrarDiagnosticoDaPagina(aba.id, result.diag);
+      delete result.diag;
+      if (result.erro) logExt.error(`[aba ${aba.id}] consulta terminou com erro: ${result.erro}`);
+      else
+        logExt(
+          `[aba ${aba.id}] consulta ok — contagem=${result.contagem}${
+            result.tabela ? `, linhas=${(result.tabela.linhas || []).length}, colunas=${(result.tabela.cabecalhos || []).length}` : ""
+          }`
+        );
+    }
     return result || { contagem: null, erro: "Não foi possível consultar (sem resultado)." };
   } catch (e) {
     return { contagem: null, erro: e && e.message ? e.message : String(e) };
@@ -4347,7 +4862,7 @@ async function abrirAbaEListarRitosDisponiveis(urlBase, valorOrgaoJuizo) {
       };
     }
 
-    await aguardarCarregamentoAba(aba.id);
+    await aguardarRelatorioGeralPronto(aba.id, "Relatório Geral");
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     if (valorOrgaoJuizo) {
@@ -4418,7 +4933,7 @@ async function abrirAbaEListarCompetenciasDisponiveis(urlBase, valorOrgaoJuizo) 
       };
     }
 
-    await aguardarCarregamentoAba(aba.id);
+    await aguardarRelatorioGeralPronto(aba.id, "Relatório Geral");
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     if (valorOrgaoJuizo) {
@@ -4556,7 +5071,7 @@ async function listarUnidadesRelatorioGeral(aoProgredir) {
     );
   }
 
-  await aguardarCarregamentoAba(aba.id);
+  await aguardarRelatorioGeralPronto(aba.id, "Unidades");
   // Pequena espera extra para os scripts da pagina (bootstrap-select
   // etc.) terminarem de inicializar apos o carregamento.
   await new Promise((resolve) => setTimeout(resolve, 500));
@@ -7220,6 +7735,7 @@ async function exportarRelatorioGerencialUnidade(
     processosAtivos.tabela = r.tabela;
     if (r.erro) processosAtivos.erros.push(r.erro);
     if (r.tabela && r.tabela.erro) processosAtivos.erros.push(r.tabela.erro);
+    if (r.tabela && r.tabela.aviso) processosAtivos.erros.push(r.tabela.aviso);
   }
 
   // Números dos processos conclusos para despacho/sentença com "Petição
@@ -7545,6 +8061,7 @@ async function exportarRelatorioGerencialUnidade(
     processosParalisados.tabela = r.tabela;
     if (r.erro) processosParalisados.erros.push(r.erro);
     if (r.tabela && r.tabela.erro) processosParalisados.erros.push(r.tabela.erro);
+    if (r.tabela && r.tabela.aviso) processosParalisados.erros.push(r.tabela.aviso);
   }
 
   // Processos paralisados POR COMPETÊNCIA (total + tabela por
